@@ -29,8 +29,10 @@ from xml.etree import ElementTree as ET
 from .ledger import (
     connect as ledger_connect,
     exists as ledger_exists,
+    mark_surface_parsed,
     upsert_entity,
     upsert_host,
+    upsert_surface,
 )
 
 log = logging.getLogger(__name__)
@@ -189,18 +191,27 @@ def parse_surface_file(path: Path, config) -> int:
         return 0
 
     refs = extract_outlinks(surface_class, body)
-    if not refs:
-        return 0
 
     if not ledger_exists(config.project_path):
         return len(refs)
 
     surface_url = _filename_to_url(path.name)
+    # Try to recover the host from the URL we reconstructed — falls back to
+    # the first outlink's host if the reverse-derive didn't produce one.
+    surface_host = ""
+    if "://" in surface_url:
+        try:
+            surface_host = (urlparse(surface_url).hostname or "").lower().rstrip(".")
+        except ValueError:
+            surface_host = ""
+    if not surface_host and refs:
+        surface_host = refs[0][1]
+
     try:
         with ledger_connect(config.project_path) as conn:
-            # Make sure every host we saw is known; the CDX-dump stage will
-            # pick them up on the next pipeline invocation (Protocol III
-            # auto-enumeration, full version in Phase 3b3).
+            # Protocol III baseline: every host we saw in an outlink becomes
+            # a tracked host. Full auto-recursion (auto-enqueue CDX dump for
+            # never-before-seen hosts) lands in Phase 3b3.
             new_hosts = {host for _, host, _ in refs}
             for h in new_hosts:
                 upsert_host(conn, h)
@@ -210,6 +221,18 @@ def parse_surface_file(path: Path, config) -> int:
                     canonical_url=canonical,
                     first_seen_in=surface_url,
                 )
+            # Stamp the surface as parsed with the real outlink count —
+            # replaces the outlink_count=0 placeholder Phase A.1 used to set.
+            if surface_host:
+                # Upsert so surfaces that weren't pre-registered by Phase A.1
+                # (e.g. import_cache-supplied files) still land.
+                upsert_surface(conn, surface_url, surface_host, surface_class)
+            status = "ok" if refs else "empty"
+            mark_surface_parsed(
+                conn, surface_url,
+                outlink_count=len(refs),
+                parse_status=status,
+            )
     except Exception as e:  # noqa: BLE001
         log.debug("surface ledger-write failed for %s: %s", path.name, e)
     return len(refs)

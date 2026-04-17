@@ -138,9 +138,13 @@ def _import_fetch_results(conn, jsonl_path: Path) -> None:
                 tier = rec.get("tier", "")
                 surface_class = _SURFACE_CLASS_BY_TIER.get(tier)
                 if surface_class and host:
+                    # Register the surface as fetched. Parsing (+ the real
+                    # outlink_count) happens later in Phase B via
+                    # surface_parser.parse_surface_file. Leaving parsed_at
+                    # NULL here means a fetch that never makes it to parse
+                    # correctly shows up as unexpanded_surfaces in audit.
                     ledger_mod.upsert_surface(conn, url, host, surface_class)
                     ledger_mod.mark_surface_fetched(conn, url)
-                    ledger_mod.mark_surface_parsed(conn, url, outlink_count=0)
                 elif tier == "html":
                     # Product page — resolve the entity.
                     m = _SLUG_RE.search(url)
