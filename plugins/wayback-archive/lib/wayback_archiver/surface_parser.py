@@ -12,13 +12,24 @@ Used by run_stage.py's run_fetch Phase B: when
 instead of to metadata extraction — preventing the feed-becomes-product
 bug.
 
-Minimal by design: each parser targets the one pattern its surface class
-produces reliably (atom `<link href>`, sitemap `<loc>`, HTML `<a href>`
-matching `/products/<slug>`). Anything else falls through as zero
-outlinks — safer than faking data.
+Surface classes and their parsers:
+  atom / oembed  → XML <link href> + regex fallback, outlinks only
+  sitemap        → <loc> tags, outlinks only
+  collection     → <a href> with /products/<slug>, outlinks only
+  home           → same as collection
+  json_api       → Shopify /products.json structured parse; yields
+                   outlinks AND writes image URLs into
+                   <links_dir>/<slug>.txt for the download stage
+
+Protocol III: new hosts discovered in outlinks (not already in the
+ledger's hosts table) are logged at WARNING and appended to
+<project>/.new_hosts.txt — a sidecar the user (or the `resume`
+subcommand) can consume to enqueue CDX dumps for them on the next
+pipeline invocation.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -136,6 +147,49 @@ def _iter_html_product_refs(body: bytes) -> Iterable[str]:
             yield href
 
 
+def parse_products_json(body: bytes, host_hint: str = "") -> tuple[list[tuple[str, str, str]], dict[str, list[str]]]:
+    """Parse a Shopify /products.json body.
+
+    Returns (refs, images_by_slug) where:
+      refs          = [(canonical_url, host, slug), ...]
+      images_by_slug = {slug: [image_url, ...]}
+
+    The host is taken from each product's canonical if present, else falls
+    back to `host_hint` (derived by the caller from the surface URL).
+    """
+    refs: list[tuple[str, str, str]] = []
+    images: dict[str, list[str]] = {}
+    try:
+        data = json.loads(body.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+        return refs, images
+
+    products = data.get("products", []) if isinstance(data, dict) else []
+    if not isinstance(products, list):
+        return refs, images
+
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+        slug = str(p.get("handle") or "").lower().strip("/")
+        if not slug:
+            continue
+        host = host_hint or ""
+        canonical = f"https://{host}/products/{slug}" if host else f"/products/{slug}"
+        refs.append((canonical, host, slug))
+        img_urls: list[str] = []
+        for img in p.get("images", []) or []:
+            if isinstance(img, dict):
+                src = img.get("src") or ""
+                if src:
+                    img_urls.append(src)
+            elif isinstance(img, str):
+                img_urls.append(img)
+        if img_urls:
+            images[slug] = img_urls
+    return refs, images
+
+
 # ── Top-level parser ────────────────────────────────────────────────────────
 
 def extract_outlinks(surface_class: str, body: bytes) -> list[tuple[str, str, str]]:
@@ -177,9 +231,14 @@ def parse_surface_file(path: Path, config) -> int:
     """Read a surface body from disk, extract outlinks, upsert each as a
     ledger entity whose first_seen_in points back at the surface.
 
+    For products.json surfaces, also writes image URLs to the per-slug
+    links files so the download stage can fetch them directly — this
+    is the Shopify "holy grail" path where one API call yields a full
+    catalog's image manifest.
+
     Returns the number of new-or-confirmed entity references written.
-    Silent on ledger-write failure; safe to call without a ledger present
-    (returns 0).
+    Silent on ledger-write failure; safe to call without a ledger
+    present (returns the ref count anyway).
     """
     surface_class = classify_filename(path.name)
     if surface_class == "unknown":
@@ -190,42 +249,69 @@ def parse_surface_file(path: Path, config) -> int:
     except OSError:
         return 0
 
-    refs = extract_outlinks(surface_class, body)
-
-    if not ledger_exists(config.project_path):
-        return len(refs)
-
     surface_url = _filename_to_url(path.name)
-    # Try to recover the host from the URL we reconstructed — falls back to
-    # the first outlink's host if the reverse-derive didn't produce one.
     surface_host = ""
     if "://" in surface_url:
         try:
             surface_host = (urlparse(surface_url).hostname or "").lower().rstrip(".")
         except ValueError:
             surface_host = ""
+
+    # Dispatch per surface class. products.json is the structured case
+    # (yields outlinks + per-product image URLs); everything else is
+    # URL-only.
+    images_by_slug: dict[str, list[str]] = {}
+    if surface_class == "json_api":
+        refs, images_by_slug = parse_products_json(body, host_hint=surface_host)
+    else:
+        refs = extract_outlinks(surface_class, body)
+
     if not surface_host and refs:
         surface_host = refs[0][1]
 
+    # Side effect: write image URLs to per-slug links files. The download
+    # stage consumes these. This is the real Shopify /products.json win —
+    # a single 200 KB JSON can yield thousands of product-image URLs.
+    if images_by_slug:
+        try:
+            config.ensure_project_dirs()
+            for slug, urls in images_by_slug.items():
+                links_file = config.links_dir / f"{slug}.txt"
+                existing: set[str] = set()
+                if links_file.exists():
+                    existing = {l.strip() for l in links_file.read_text().splitlines() if l.strip()}
+                merged = sorted(existing | set(urls))
+                links_file.write_text("\n".join(merged) + "\n")
+        except OSError as e:
+            log.debug("failed to write links files for %s: %s", path.name, e)
+
+    if not ledger_exists(config.project_path):
+        return len(refs)
+
     try:
         with ledger_connect(config.project_path) as conn:
-            # Protocol III baseline: every host we saw in an outlink becomes
-            # a tracked host. Full auto-recursion (auto-enqueue CDX dump for
-            # never-before-seen hosts) lands in Phase 3b3.
-            new_hosts = {host for _, host, _ in refs}
-            for h in new_hosts:
+            # Protocol III detection: diff outlink hosts against the ledger's
+            # existing hosts set to identify genuinely new ones. These get
+            # upserted (cdx_dumped_at NULL, audit visible) AND logged loudly
+            # + written to a sidecar so the next pipeline invocation picks
+            # them up.
+            existing_hosts = {
+                r[0] for r in conn.execute("SELECT host FROM hosts").fetchall()
+            }
+            observed_hosts = {host for _, host, _ in refs if host}
+            truly_new = observed_hosts - existing_hosts
+
+            for h in observed_hosts:
                 upsert_host(conn, h)
             for canonical, host, slug in refs:
+                if not host:
+                    continue
                 upsert_entity(
                     conn, slug, host,
                     canonical_url=canonical,
                     first_seen_in=surface_url,
                 )
-            # Stamp the surface as parsed with the real outlink count —
-            # replaces the outlink_count=0 placeholder Phase A.1 used to set.
             if surface_host:
-                # Upsert so surfaces that weren't pre-registered by Phase A.1
-                # (e.g. import_cache-supplied files) still land.
                 upsert_surface(conn, surface_url, surface_host, surface_class)
             status = "ok" if refs else "empty"
             mark_surface_parsed(
@@ -233,6 +319,23 @@ def parse_surface_file(path: Path, config) -> int:
                 outlink_count=len(refs),
                 parse_status=status,
             )
+
+        if truly_new:
+            log.warning(
+                "Protocol III: surface %s references %d new host(s): %s",
+                path.name, len(truly_new), sorted(truly_new)[:5],
+            )
+            try:
+                sidecar = config.project_path / ".new_hosts.txt"
+                seen_before: set[str] = set()
+                if sidecar.exists():
+                    seen_before = {l.strip() for l in sidecar.read_text().splitlines() if l.strip()}
+                with sidecar.open("a", encoding="utf-8") as f:
+                    for h in sorted(truly_new):
+                        if h not in seen_before:
+                            f.write(f"{h}\t{surface_url}\n")
+            except OSError:
+                pass
     except Exception as e:  # noqa: BLE001
         log.debug("surface ledger-write failed for %s: %s", path.name, e)
     return len(refs)
@@ -255,5 +358,6 @@ def _filename_to_url(filename: str) -> str:
 __all__ = [
     "classify_filename",
     "extract_outlinks",
+    "parse_products_json",
     "parse_surface_file",
 ]
