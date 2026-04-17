@@ -27,6 +27,7 @@ import re
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import aiohttp
@@ -38,6 +39,11 @@ sys.path.insert(0, str(REPO_ROOT / "lib"))
 from wayback_archiver.site_config import load_config
 from wayback_archiver.checkpoint import StageCheckpoint
 from wayback_archiver.resilience import CircuitBreaker, StageTimer
+from wayback_archiver.http_client import AIOHTTP_HEADERS, USER_AGENT
+from wayback_archiver import ledger as ledger_mod
+from wayback_archiver.env import load_env
+
+load_env()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +54,125 @@ log = logging.getLogger(__name__)
 
 # ── Repo root (for importing fetch_archive / filter_cdx / shopify_downloader) ─
 sys.path.insert(0, str(REPO_ROOT))
+
+
+def _ledger_write(project_dir, fn):
+    """Run a ledger write callable, swallowing any exception.
+
+    The ledger is supplemental to on-disk state — the pipeline must keep
+    running if the ledger is missing, corrupt, or locked. Failures log at
+    DEBUG so they don't pollute the main stream.
+    """
+    try:
+        if not ledger_mod.exists(project_dir):
+            return
+        with ledger_mod.connect(project_dir) as conn:
+            fn(conn)
+    except Exception as e:  # noqa: BLE001
+        log.debug("ledger write failed (ignored): %s", e)
+
+
+def _classify_fetch_failure(error: str) -> tuple[str, int]:
+    """Map a FetchResult.error string to a (failure_class, status_code) pair.
+
+    Best-effort. Unknown / catch-all failures default to ("network", 0).
+    """
+    e = (error or "").lower()
+    if "429" in e or "rate" in e or "throttle" in e:
+        return ("throttle", 429)
+    if "404" in e or "not found" in e:
+        return ("http_404", 404)
+    if "503" in e or "502" in e or "500" in e or "5xx" in e:
+        return ("http_5xx", 500)
+    if "timeout" in e or "timed out" in e or "dns" in e or "connection" in e:
+        return ("network", 0)
+    if "parse" in e or "invalid" in e or "corrupt" in e:
+        return ("parse", 0)
+    return ("network", 0)
+
+
+_SURFACE_CLASS_BY_TIER = {
+    "structured": "json_api",   # .atom / .json / .oembed — outlink-bearing
+    "collection": "collection",
+    "homepage":   "home",
+    # "html" (product pages) are entities, not surfaces — don't track here.
+}
+
+
+def _import_fetch_results(conn, jsonl_path: Path) -> None:
+    """Parse fetch_results.jsonl into ledger.fetch_attempts + mark entities resolved.
+
+    One `record_fetch` row per URL. For product-tier URLs that succeeded,
+    mark_entity_resolved based on the slug parsed from the original_url.
+    For non-product tiers (structured/collection/homepage), upsert and mark
+    the URL as a parsed discovery surface — the current pipeline extracts
+    from these immediately after fetch, so fetched==parsed in practice.
+    Precise outlink_count tracking is deferred to Phase 3b2.
+    """
+    import json as _json
+    from urllib.parse import urlparse as _urlparse
+    _SLUG_RE = re.compile(r"/products?/([^/?#]+)")
+
+    with jsonl_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+
+            url = rec.get("original_url") or ""
+            if not url:
+                continue
+
+            try:
+                host = (_urlparse(url).hostname or "").lower().rstrip(".")
+            except ValueError:
+                host = ""
+
+            if rec.get("success"):
+                ledger_mod.record_fetch(conn, url, 200, "ok")
+
+                tier = rec.get("tier", "")
+                surface_class = _SURFACE_CLASS_BY_TIER.get(tier)
+                if surface_class and host:
+                    ledger_mod.upsert_surface(conn, url, host, surface_class)
+                    ledger_mod.mark_surface_fetched(conn, url)
+                    ledger_mod.mark_surface_parsed(conn, url, outlink_count=0)
+                elif tier == "html":
+                    # Product page — resolve the entity.
+                    m = _SLUG_RE.search(url)
+                    if m and host:
+                        ledger_mod.mark_entity_resolved(conn, m.group(1), host)
+            else:
+                failure_class, status_code = _classify_fetch_failure(rec.get("error", ""))
+                ledger_mod.record_fetch(conn, url, status_code, failure_class)
+
+
+def _import_entities_from_products(conn, products: dict, source: str, fallback_domains: list[str]) -> None:
+    """Upsert (slug, host, canonical_url, first_seen_in) rows for every product."""
+    from urllib.parse import urlparse as _urlparse
+    fallback = (fallback_domains[0] if fallback_domains else "unknown").lower()
+    rows: list[tuple[str, str, str | None, str | None]] = []
+    hosts_seen: set[str] = set()
+    for slug, entry in products.items():
+        canonical = entry.get("original_url") or entry.get("wayback_url") or None
+        host = fallback
+        if entry.get("original_url"):
+            try:
+                parsed_host = _urlparse(entry["original_url"]).hostname
+                if parsed_host:
+                    host = parsed_host.lower().rstrip(".")
+            except ValueError:
+                pass
+        hosts_seen.add(host)
+        rows.append((slug, host, canonical, source))
+    if rows:
+        ledger_mod.upsert_entities(conn, rows)
+    if hosts_seen:
+        ledger_mod.upsert_hosts(conn, hosts_seen)
 
 
 def run_cdx_dump(config, dry_run=False, **_kw):
@@ -108,6 +233,15 @@ def run_cdx_dump(config, dry_run=False, **_kw):
             log.error("CDX dump failed for %s (exit code %d)", domain, result.returncode)
         else:
             log.info("CDX dump complete for %s", domain)
+            # Protocol III: mark this host as enumerated so the audit's
+            # unenumerated_hosts count shrinks immediately.
+            _ledger_write(
+                config.project_path,
+                lambda c, d=domain: (
+                    ledger_mod.upsert_hosts(c, [d]),
+                    ledger_mod.mark_host_dumped(c, d),
+                ),
+            )
 
         # Register the new CDX file in the config's cdx_files if not already there
         cdx_str = str(cdx_path)
@@ -123,13 +257,19 @@ def run_index(config, dry_run=False, **_kw):
     products = {}
     for cdx_path in config.cdx_paths:
         log.info("Parsing CDX: %s", cdx_path)
-        products = parse_cdx(
+        file_products = parse_cdx(
             cdx_path,
             config.url_rules,
             config.era_rules,
             config.compiled_junk,
             config.type_priority,
         )
+        priority_map = {t: i for i, t in enumerate(config.type_priority)}
+        for slug, entry in file_products.items():
+            existing = products.get(slug)
+            if existing is None or priority_map.get(entry["url_type"], 99) < priority_map.get(existing["url_type"], 99):
+                products[slug] = entry
+        log.info("  + %d products from this file (running total: %d)", len(file_products), len(products))
 
     # Stats
     by_type = {}
@@ -153,6 +293,13 @@ def run_index(config, dry_run=False, **_kw):
 
     config.index_file.write_text(json.dumps(products, indent=2, sort_keys=False))
     log.info("Written to %s", config.index_file)
+
+    # Ledger sync: upsert every indexed slug as an entity so the audit can
+    # report exact unresolved_slugs counts. Silent on ledger-write failure.
+    _ledger_write(
+        config.project_path,
+        lambda c, prods=products, src=str(config.index_file): _import_entities_from_products(c, prods, src, config.domains),
+    )
 
     # ── Pass 2: CommonCrawl discovery ──────────────────────────────────
     log.info("")
@@ -208,7 +355,7 @@ async def _cc_discovery(config) -> dict:
     total_queries = 0
     total_hits = 0
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=AIOHTTP_HEADERS) as session:
         for domain in config.domains:
             log.info("  CC discovery: %s", domain)
 
@@ -478,6 +625,16 @@ def run_fetch(config, dry_run=False, proxy_type="isp", workers=5, max_retries=3,
     ))
     fetch_elapsed = time.time() - t0
 
+    # ── Phase A.1: Ledger sync from fetch_results.jsonl ────────────────
+    # fetch_archive.py emits one JSON line per URL. Import those into
+    # fetch_attempts + resolve entities whose slug shows a successful fetch.
+    results_path = output_dir.parent / "fetch_results.jsonl"
+    if results_path.exists():
+        _ledger_write(
+            config.project_path,
+            lambda c, p=results_path: _import_fetch_results(c, p),
+        )
+
     # ── Phase A.5: Fallback archives for failed URLs ───────────────────
     fallback_archives = _kw.get("fallback_archives")
     if fallback_archives:
@@ -662,7 +819,7 @@ async def _run_fallback_archives(
              ", ".join(fallback_archives), len(failed_targets))
 
     fetched = 0
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=AIOHTTP_HEADERS) as session:
         for i, target in enumerate(failed_targets, 1):
             content = await fallback_fetch(
                 session, target.original_url,
@@ -1008,8 +1165,8 @@ def run_download(config, dry_run=False, **_kw):
         return
 
     config.products_dir.mkdir(exist_ok=True)
-    session = requests.Session()
-    session.headers["User-Agent"] = "wayback-image-fetch/1.0 (archival research)"
+    from wayback_archiver.http_client import make_requests_session
+    session = make_requests_session()
 
     total_dl, total_fail = 0, 0
     try:
@@ -1153,14 +1310,164 @@ STAGE_ORDER = [
     "match", "download", "normalize", "build",
 ]
 
+# Map audit.json residual buckets → the stage that shrinks them. Ordered so
+# that when multiple buckets are tied, we prefer the earliest-in-pipeline fix
+# (cdx_dump before fetch before download) per Protocol II (discovery before
+# extraction before asset download).
+BUCKET_TO_STAGE: list[tuple[str, str, dict]] = [
+    ("unenumerated_hosts", "cdx_dump", {}),
+    ("unresolved_slugs",   "fetch",    {}),
+    ("retry_queue_depth",  "fetch",    {"proxy_type": "dc",
+                                         "fallback_archives": ["archive_today", "memento"]}),
+    ("index_missing",      "download", {}),
+    # unexpanded_surfaces → Phase 3b (parser-level ledger writes); for now
+    # we surface the bucket but have no dedicated stage to shrink it.
+]
+
+
+def _emit_progress(progress_path: Path, stage: str, event: str, **extra) -> None:
+    """Append one JSON line describing a stage transition.
+
+    Best-effort: progress streaming must never break the pipeline. Silently
+    swallow any filesystem error.
+    """
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "stage": stage,
+        "event": event,
+    }
+    if extra:
+        record.update(extra)
+    try:
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        with progress_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record) + "\n")
+    except OSError:
+        pass
+
+
+def _run_with_progress(stage_name, stage_fn, config, progress_path, **kwargs):
+    """Invoke a stage, bracketing it with progress events.
+
+    Catches BaseException (including SystemExit) so the end-event still lands
+    when a stage calls sys.exit on fatal input. The exception is re-raised.
+    """
+    _emit_progress(progress_path, stage_name, "start")
+    t0 = time.time()
+    try:
+        stage_fn(config, **kwargs)
+    except BaseException as e:
+        kind = "exit" if isinstance(e, SystemExit) else "error"
+        _emit_progress(progress_path, stage_name, "end",
+                       wall_sec=round(time.time() - t0, 1),
+                       status=kind,
+                       error=f"{type(e).__name__}: {e}")
+        raise
+    _emit_progress(progress_path, stage_name, "end",
+                   wall_sec=round(time.time() - t0, 1),
+                   status="ok")
+
+
+def _run_audit(config_path: Path, progress_path: Path) -> int:
+    """Invoke audit.py as a subprocess; return its exit code. Emits progress events."""
+    _emit_progress(progress_path, "audit", "start")
+    t0 = time.time()
+    audit_script = Path(__file__).resolve().parent / "audit.py"
+    result = subprocess.run(
+        [sys.executable, str(audit_script), "--config", str(config_path)],
+    )
+    _emit_progress(progress_path, "audit", "end",
+                   wall_sec=round(time.time() - t0, 1),
+                   status="pass" if result.returncode == 0 else "residual",
+                   exit_code=result.returncode)
+    return result.returncode
+
+
+def _pick_resume_stage(config, bucket_override: str | None = None) -> tuple[str, dict, dict]:
+    """Inspect audit.json and pick the stage that would shrink the largest bucket.
+
+    Returns (stage_name, extra_kwargs, audit_summary). Raises SystemExit if the
+    audit file is missing or all buckets are zero.
+    """
+    audit_path = config.project_path / "audit.json"
+    if not audit_path.exists():
+        log.error("No audit.json at %s — run the pipeline under --auto first.", audit_path)
+        sys.exit(2)
+    try:
+        audit = json.loads(audit_path.read_text())
+    except (json.JSONDecodeError, OSError) as e:
+        log.error("Cannot read audit.json: %s", e)
+        sys.exit(2)
+
+    integers = audit.get("integers", {})
+
+    if bucket_override:
+        if bucket_override not in dict((b, (s, k)) for b, s, k in BUCKET_TO_STAGE):
+            log.error("Unknown --bucket %s. Valid: %s", bucket_override,
+                      [b for b, _, _ in BUCKET_TO_STAGE])
+            sys.exit(2)
+        if integers.get(bucket_override, 0) == 0:
+            log.warning("Bucket %s is already 0 — nothing to resume.", bucket_override)
+            sys.exit(0)
+        bucket = bucket_override
+    else:
+        # Pick the largest non-zero bucket in the preference order above.
+        # Ties broken by BUCKET_TO_STAGE declaration order.
+        best_bucket = None
+        best_value = 0
+        for b, _, _ in BUCKET_TO_STAGE:
+            v = integers.get(b, 0)
+            if v > best_value:
+                best_value = v
+                best_bucket = b
+        if best_bucket is None:
+            log.info("All resumable buckets are zero. Nothing to do.")
+            sys.exit(0)
+        bucket = best_bucket
+
+    stage_name, extra_kwargs = next(
+        ((s, k) for b, s, k in BUCKET_TO_STAGE if b == bucket)
+    )
+    return stage_name, extra_kwargs, {
+        "bucket": bucket, "bucket_value": integers.get(bucket, 0),
+        "integers": integers, "audit_path": str(audit_path),
+    }
+
+
+def _run_preflight(config_path: Path, progress_path: Path) -> int:
+    """Invoke preflight.py as a subprocess. Returns exit code (0/1)."""
+    _emit_progress(progress_path, "preflight", "start")
+    t0 = time.time()
+    preflight_script = Path(__file__).resolve().parent / "preflight.py"
+    result = subprocess.run(
+        [sys.executable, str(preflight_script), "--config", str(config_path)],
+    )
+    _emit_progress(progress_path, "preflight", "end",
+                   wall_sec=round(time.time() - t0, 1),
+                   status="ok" if result.returncode == 0 else "blocking_error",
+                   exit_code=result.returncode)
+    return result.returncode
+
 
 def main():
     parser = argparse.ArgumentParser(description="Wayback Archive Pipeline")
-    parser.add_argument("stage", choices=STAGE_ORDER + ["all"])
+    parser.add_argument("stage", choices=STAGE_ORDER + ["all", "resume"],
+                        help="Stage to run. `all` runs the full pipeline; "
+                             "`resume` reads audit.json and runs the stage that "
+                             "shrinks the largest residual bucket.")
+    parser.add_argument("--bucket", default=None,
+                        choices=[b for b, _, _ in BUCKET_TO_STAGE],
+                        help="Override `resume`'s bucket selection.")
     parser.add_argument("--config", required=True, help="Path to site config YAML")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--yes", "-y", action="store_true",
                         help="Skip confirmation prompts (for --all mode)")
+    parser.add_argument("--auto", action="store_true",
+                        help="Turn-key mode: implies --yes, streams compact progress "
+                             "to projects/<name>/.progress.jsonl, runs preflight "
+                             "before stage 0, runs audit at end.")
+    parser.add_argument("--skip-preflight", action="store_true",
+                        help="Skip the pre-flight check under --auto (for CI).")
     # fetch-specific options
     parser.add_argument("--proxy", choices=["isp", "dc"], default="isp",
                         help="Proxy type for fetch stage (default: isp)")
@@ -1176,7 +1483,12 @@ def main():
                              "(e.g., --fallback-archives archive_today memento)")
     args = parser.parse_args()
 
+    # --auto implies --yes (no interactive prompts) and enables progress streaming.
+    if args.auto:
+        args.yes = True
+
     config = load_config(Path(args.config))
+    progress_path = config.project_path / ".progress.jsonl"
 
     # Also check config for alternative_archives setting
     fallback_archives = args.fallback_archives
@@ -1206,6 +1518,19 @@ def main():
         fallback_archives=fallback_archives,
     )
 
+    # `resume` reads audit.json and picks the stage that shrinks the largest
+    # residual bucket. The selected stage overrides `kwargs` with bucket-
+    # specific flags (e.g. retry_queue_depth → fetch --proxy dc --fallback).
+    if args.stage == "resume":
+        stage_name, extra_kwargs, summary = _pick_resume_stage(config, args.bucket)
+        log.info("=" * 60)
+        log.info("RESUME | bucket=%s (value=%d) → stage=%s",
+                 summary["bucket"], summary["bucket_value"], stage_name)
+        log.info("  audit: %s", summary["audit_path"])
+        log.info("=" * 60)
+        args.stage = stage_name
+        kwargs.update(extra_kwargs)
+
     if args.stage == "all":
         log.info("=" * 60)
         log.info("FULL PIPELINE | Site: %s | Dry-run: %s", config.display_name, args.dry_run)
@@ -1215,32 +1540,72 @@ def main():
         # Confirmation gates for expensive stages
         confirm_before = {"cdx_dump", "fetch", "download"}
 
-        for stage_name in STAGE_ORDER:
-            if stage_name in confirm_before and not args.dry_run and not args.yes:
-                try:
-                    answer = input(f"\nAbout to run '{stage_name}'. Continue? [Y/n] ")
-                except EOFError:
-                    answer = "y"
-                if answer.strip().lower() in ("n", "no"):
-                    log.info("Skipping %s (user declined)", stage_name)
-                    continue
+        if args.auto:
+            _emit_progress(progress_path, "pipeline", "start",
+                           stages=STAGE_ORDER, site=config.display_name)
 
-            log.info("")
-            log.info("=" * 60)
-            log.info("Stage: %s", stage_name)
-            log.info("=" * 60)
-            stages[stage_name](config, **kwargs)
+            # Pre-flight gate (Protocol IV at the entrance). Blocking errors
+            # halt the pipeline before the first CDX dump; warnings log and
+            # continue. --skip-preflight opts out (for CI / known-good envs).
+            if not args.skip_preflight and not args.dry_run:
+                pre_exit = _run_preflight(Path(args.config), progress_path)
+                if pre_exit != 0:
+                    log.error("Pre-flight check failed (see projects/%s/preflight.json).",
+                              config.name)
+                    _emit_progress(progress_path, "pipeline", "end",
+                                   status="preflight_blocked", preflight_exit=pre_exit)
+                    sys.exit(pre_exit)
+
+        pipeline_status = "aborted"  # set to "complete" only if we reach the end
+        try:
+            for stage_name in STAGE_ORDER:
+                if stage_name in confirm_before and not args.dry_run and not args.yes:
+                    try:
+                        answer = input(f"\nAbout to run '{stage_name}'. Continue? [Y/n] ")
+                    except EOFError:
+                        answer = "y"
+                    if answer.strip().lower() in ("n", "no"):
+                        log.info("Skipping %s (user declined)", stage_name)
+                        if args.auto:
+                            _emit_progress(progress_path, stage_name, "skipped", reason="user_declined")
+                        continue
+
+                log.info("")
+                log.info("=" * 60)
+                log.info("Stage: %s", stage_name)
+                log.info("=" * 60)
+                if args.auto:
+                    _run_with_progress(stage_name, stages[stage_name], config, progress_path, **kwargs)
+                else:
+                    stages[stage_name](config, **kwargs)
+
+            pipeline_status = "complete"
+        finally:
+            if args.auto and pipeline_status != "complete":
+                _emit_progress(progress_path, "pipeline", "end", status=pipeline_status)
 
         log.info("")
         log.info("=" * 60)
         log.info("PIPELINE COMPLETE")
         log.info("=" * 60)
+
+        if args.auto and not args.dry_run:
+            # Protocol IV: audit before declaring the pass complete.
+            _emit_progress(progress_path, "pipeline", "audit")
+            audit_exit = _run_audit(Path(args.config), progress_path)
+            _emit_progress(progress_path, "pipeline", "end",
+                           status="pass" if audit_exit == 0 else "residual",
+                           audit_exit=audit_exit)
+            sys.exit(audit_exit)
     else:
         log.info("=" * 60)
         log.info("Stage: %s | Site: %s | Dry-run: %s", args.stage, config.display_name, args.dry_run)
         log.info("=" * 60)
 
-        stages[args.stage](config, **kwargs)
+        if args.auto:
+            _run_with_progress(args.stage, stages[args.stage], config, progress_path, **kwargs)
+        else:
+            stages[args.stage](config, **kwargs)
 
 
 if __name__ == "__main__":

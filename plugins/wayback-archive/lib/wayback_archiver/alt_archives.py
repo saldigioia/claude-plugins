@@ -13,6 +13,8 @@ from typing import Optional
 
 import aiohttp
 
+from .http_client import AIOHTTP_HEADERS, parse_retry_after
+
 log = logging.getLogger(__name__)
 
 
@@ -34,11 +36,15 @@ async def archive_today_lookup(
         async with session.get(
             api_url,
             timeout=aiohttp.ClientTimeout(total=timeout),
-            headers={"User-Agent": "wayback-archiver/1.0 (archival research)"},
+            headers=AIOHTTP_HEADERS,
         ) as resp:
             log.debug("  archive.today %s: HTTP %d", url[:60], resp.status)
 
             if resp.status != 200:
+                if resp.status == 429:
+                    retry_after = parse_retry_after(resp.headers.get("Retry-After"))
+                    if retry_after:
+                        log.warning("  429 rate-limited; Retry-After=%.0fs", retry_after)
                 return []
 
             text = await resp.text()
@@ -109,11 +115,15 @@ async def memento_lookup(
         async with session.get(
             api_url,
             timeout=aiohttp.ClientTimeout(total=timeout),
-            headers={"User-Agent": "wayback-archiver/1.0 (archival research)"},
+            headers=AIOHTTP_HEADERS,
         ) as resp:
             log.debug("  memento %s: HTTP %d", url[:60], resp.status)
 
             if resp.status != 200:
+                if resp.status == 429:
+                    retry_after = parse_retry_after(resp.headers.get("Retry-After"))
+                    if retry_after:
+                        log.warning("  429 rate-limited; Retry-After=%.0fs", retry_after)
                 return []
 
             text = await resp.text()
@@ -189,7 +199,7 @@ async def fetch_from_archive_today(
         async with session.get(
             archive_url,
             timeout=aiohttp.ClientTimeout(total=timeout),
-            headers={"User-Agent": "wayback-archiver/1.0 (archival research)"},
+            headers=AIOHTTP_HEADERS,
         ) as resp:
             if resp.status != 200:
                 return None
@@ -251,7 +261,7 @@ async def fallback_fetch(
                     async with session.get(
                         snap["archive_url"],
                         timeout=aiohttp.ClientTimeout(total=30),
-                        headers={"User-Agent": "wayback-archiver/1.0 (archival research)"},
+                        headers=AIOHTTP_HEADERS,
                     ) as resp:
                         if resp.status == 200:
                             content = await resp.read()

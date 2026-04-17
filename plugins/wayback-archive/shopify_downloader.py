@@ -51,15 +51,20 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+# Shared HTTP hygiene — importable whether this module is run directly or
+# imported from run_stage.py.
+_HERE = Path(__file__).resolve().parent
+if str(_HERE / "lib") not in sys.path:
+    sys.path.insert(0, str(_HERE / "lib"))
+from wayback_archiver.http_client import BROWSER_UA
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/123.0 Safari/537.36"
-)
+# Shopify live-CDN probes go to store domains which fingerprint clients
+# aggressively; keep a browser-shaped UA with our agent suffix appended.
+USER_AGENT = BROWSER_UA
 CONNECT_TIMEOUT = 15
 READ_TIMEOUT = 120
 PAGE_LIMIT = 250          # Shopify /products.json max per page

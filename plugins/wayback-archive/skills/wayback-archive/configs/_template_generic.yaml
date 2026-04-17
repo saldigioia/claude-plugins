@@ -1,0 +1,64 @@
+# Auto-generated from _template_generic.yaml by scripts/bootstrap.py
+# Platform: UNKNOWN — manual review recommended
+# Target: {DISPLAY_NAME}
+#
+# This config was generated because platform auto-detection returned low
+# confidence. Review cdn_patterns before running `download`, and confirm
+# url_rules reflect how this site exposes product pages.
+
+name: {NAME}
+display_name: "{DISPLAY_NAME}"
+credit_line: "{DISPLAY_NAME}"
+
+domains:
+{DOMAINS}
+
+project_dir: .
+
+cdx_dump_max_age_days: 7
+cdx_dump_proxy_mode: auto
+
+url_rules:
+  - path_prefix: "/products/"
+    url_type: slug
+    require_status: "200"
+    require_ctype: "text/html"
+
+  - path_prefix: "/product/"
+    url_type: slug
+    require_status: "200"
+    require_ctype: "text/html"
+
+  - path_prefix: "/shop/"
+    url_type: slug
+    require_status: "200"
+    require_ctype: "text/html"
+
+junk_patterns:
+  - '%22|%3[CcEe]|%7[Bb]|%5[Bb]'
+  - '\.js$'
+
+era_rules:
+  - condition: "default"
+    era: unknown
+
+type_priority:
+  - api
+  - slug
+
+# No CDN patterns — add them after inspecting captured HTML for image hosts.
+cdn_patterns: []
+
+shopify_cdn:
+  enabled: false
+
+alternative_archives:
+  enabled: true
+  sources:
+    - archive_today
+    - memento
+
+download_cascade:
+  - direct_fetch
+  - wayback_cdx_best
+  - exhaustive

@@ -1,0 +1,102 @@
+# Auto-generated from _template_shopify.yaml by scripts/bootstrap.py
+# Platform: Shopify
+# Target: {DISPLAY_NAME}
+
+name: {NAME}
+display_name: "{DISPLAY_NAME}"
+credit_line: "{DISPLAY_NAME}"
+
+domains:
+{DOMAINS}
+
+project_dir: .
+
+cdx_dump_max_age_days: 7
+cdx_dump_proxy_mode: auto
+
+url_rules:
+  - path_prefix: "/products/"
+    url_type: slug
+    require_status: "200"
+    require_ctype:
+      - "text/html"
+      - "application/json"
+
+  - path_prefix: "/products.json"
+    url_type: api
+    require_status: "200"
+    require_ctype: "application/json"
+
+  - path_suffix: ".atom"
+    url_type: atom
+    require_status: "200"
+    require_ctype:
+      - "application/atom+xml"
+      - "text/xml"
+      - "application/xml"
+
+  - path_suffix: ".oembed"
+    url_type: oembed
+    require_status: "200"
+    require_ctype:
+      - "application/json+oembed"
+      - "application/json"
+
+  - path_contains: "/collections/*/products/"
+    url_type: collection
+    require_status: "200"
+    require_ctype: "text/html"
+
+junk_patterns:
+  - '%22|%3[CcEe]|%7[Bb]|%5[Bb]|%0A'
+  - 'undefined|:productId|\[insert'
+  - 'wpm@|sandbox/modern'
+  - '\.js$'
+
+era_rules:
+  - condition: "url_type == 'api'"
+    era: shopify_api
+  - condition: "timestamp_year <= 2017"
+    era: early_shopify
+  - condition: "default"
+    era: late_shopify
+
+type_priority:
+  - api
+  - atom
+  - oembed
+  - slug
+  - collection
+
+cdn_patterns:
+  - name: shopify
+    regex: 'https?://cdn\.shopify\.com/s/files/[^\s"''\\]+/products/[^\s"''\\]+'
+    size_strip: '_(?:\d+|\{width\})x(?:@\dx)?(?=\.\w+)'
+    named_size_strip: '_(?:grande|medium|small|large|compact|master|pico|icon|thumb)(?=\.\w+)'
+
+  - name: shopify_files
+    regex: 'https?://(?:{APEX_REGEX})/cdn/shop/(?:files|products)/[^\s"''\\]+\.(?:png|jpg|jpeg|webp|gif|avif)'
+    size_strip: '_(?:\d+|\{width\})x(?:@\dx)?(?=\.\w+)'
+    named_size_strip: '_(?:grande|medium|small|large|compact|master|pico|icon|thumb)(?=\.\w+)'
+
+shopify_cdn:
+  enabled: true
+  full_size: true
+  max_wayback_json: 200
+
+catalog_api_patterns:
+  - "/products.json"
+  - "/products.json?limit=1000"
+
+alternative_archives:
+  enabled: true
+  sources:
+    - archive_today
+    - memento
+
+download_cascade:
+  - live_cdn
+  - direct_fetch
+  - wayback_cdx_best
+  - exhaustive
+  - asset_rescue

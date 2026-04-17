@@ -1,140 +1,131 @@
 ---
 name: wayback-archive
-description: Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology.
-argument-hint: "[--config CONFIG_FILE]"
+description: Recover a complete product catalog (data + images) from a defunct e-commerce site by URL. Use when the user gives a URL, domain, or comma-separated host list for a dead store and wants the full catalog recovered automatically. Also triggers on mentions of Wayback Machine catalog recovery, CommonCrawl WARC extraction, Shopify CDN archaeology, or rebuilding a product database from a dead website.
+argument-hint: "<url-or-domain> [--dry-run]"
 allowed-tools:
   - Bash(python3 *)
   - Bash(cd *)
+  - Bash(tail *)
   - Read
   - Write
   - Grep
   - Glob
+  - WebFetch
 ---
 
-# Wayback Archive Pipeline
+# Turn-key Wayback Archive
 
-Self-contained pipeline for recovering product databases from defunct e-commerce sites.
-Supports Shopify, Swell Commerce, Fourthwall, and custom platforms via config-driven
-CDN patterns. Each stage has checkpoint/resume support.
+Recover the product catalog for: **$ARGUMENTS**
 
-```
-Phase 1: DISCOVERY       -> Find what existed (CDX dump, CommonCrawl, CDN archaeology)
-Phase 2: EXTRACTION      -> Get product data (fetch pages, extract metadata)
-Phase 3: ASSET DOWNLOAD  -> Get images/media (live CDN first, Wayback fallback)
+## Plan (auto-generated — do not rerun bootstrap)
+
+```!
+python3 "${CLAUDE_SKILL_DIR}/../../scripts/bootstrap.py" --input "$ARGUMENTS"
 ```
 
-## Three Rules
+The bootstrap script above has already:
 
-1. **Always query BOTH Wayback AND CommonCrawl.** They have independent coverage.
-   CommonCrawl yields 76% success for HTML; Wayback HTML yields 2.4%.
+1. Normalized the input into an apex domain and seed host list.
+2. Queried Wayback CDX for `*.{apex}` to enumerate captured subdomains (sample ≤ 5000).
+3. Probed the live site (and Wayback most-recent fallback) for platform signatures — Shopify, Swell, Fourthwall, Adidas.
+4. Detected any `.myshopify.com` alias embedded in the HTML.
+5. Rendered the matching platform template into `projects/<name>/config.yaml` and saved the plan to `projects/<name>/plan.json`.
 
-2. **For HTML, prefer CommonCrawl WARCs.** Wayback serves HTML through a JS replay
-   framework. CommonCrawl WARCs contain the raw HTTP response with no wrapper.
+## Your task
 
-3. **Filter the CDX dump first.** Raw dumps are 90%+ junk. `filter_cdx.py` reduces
-   them by ~94% with zero product data loss.
+Read the JSON plan above. Then do the following, in order:
 
-For detailed extraction strategy and method hierarchy, see [references/extraction-strategy.md](references/extraction-strategy.md).
+### 1. Sanity check
 
-## Quick Start
+- If `dry_run == true`, stop here — the user asked for a preview. Show them a three-line summary (`platform`, `host_count`, `config_path`) and ask what to adjust.
+- If `platform == "unknown"` OR `confidence < 0.6` OR `host_count == 1`, **do not run the pipeline yet.** Surface the `notes` array to the user, ask them to either (a) confirm the generic config, (b) add missing hosts, or (c) specify the correct platform. Re-run `bootstrap.py` with the updated input if they add hosts.
+- If `myshopify_domain` is non-null, confirm in your summary that it was added to the domains list.
+
+### 2. One confirmation
+
+Show the user a compact summary:
+
+> Target: `<apex>` · Platform: `<platform>` (conf <confidence>) · Hosts: `<host_count>` · Config: `<config_path>`
+> About to run: `cdx_dump → index → filter → fetch → cdn_discover → match → download → normalize → build`.
+> Proceed? [Y/n]
+
+Wait for confirmation. If `--dry-run` was passed in `$ARGUMENTS`, skip the prompt.
+
+### 3. Execute the pipeline
 
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Copy and customize a config
-cp skills/wayback-archive/configs/example.yaml configs/mysite.yaml
-
-# 3. Run the full pipeline (with confirmation gates)
-python3 scripts/run_stage.py all --config configs/mysite.yaml
-
-# Or dry-run first
-python3 scripts/run_stage.py all --config configs/mysite.yaml --dry-run
+python3 scripts/run_stage.py all --config <config_path> --auto
 ```
 
-## Pipeline Stages
+`--auto` implies `--yes`, streams compact progress events to `projects/<name>/.progress.jsonl` (one JSON line per stage start/end), and runs the audit gate at the end. The command's exit code is `0` iff the audit passes (all five integers zero) and `1` if residuals remain.
 
-Nine stages, executed in order. Run individually or use `all`:
+Run from the repo root. Do not flood the chat with the raw log stream. If the run is long (CDX dumps can take tens of minutes), launch it with `run_in_background: true` and poll the progress file:
 
 ```bash
-python3 scripts/run_stage.py <stage> --config configs/site.yaml [--dry-run]
+tail -n 50 projects/<name>/.progress.jsonl
 ```
 
-| Stage | Purpose | Key Tool |
-|-------|---------|----------|
-| `cdx_dump` | Dump every Wayback snapshot URL for each domain | `tools/wayback_cdx` |
-| `index` | Parse CDX + CommonCrawl discovery -> product index | `lib/wayback_archiver/cdx.py` |
-| `filter` | 6-layer CDX filter (94% junk reduction) | `filter_cdx.py` |
-| `fetch` | Queue-based cascade: direct -> CommonCrawl WARC -> proxy | `fetch_archive.py` |
-| `cdn_discover` | Shopify CDN archaeology (finds delisted product images) | `shopify_downloader.py` |
-| `match` | Fuzzy slug-to-SKU matching + dedup | `lib/wayback_archiver/match.py` |
-| `download` | Image cascade: live CDN -> Wayback CDX best -> exhaustive | `lib/wayback_archiver/download.py` |
-| `normalize` | Rename images, generate metadata.txt per product | `lib/wayback_archiver/normalize.py` |
-| `build` | Compile final catalog JSON + stats | `lib/wayback_archiver/util.py` |
+Report only stage transitions and anomalies (status != "ok", circuit-breaker trips, >30s wall time on a non-fetch stage) in one-line updates to the user — no narrative.
 
-### Stage options
+### 4. Read the audit (Protocol IV — gated by exit code)
+
+`--auto` has already written `projects/<name>/audit.json` and exited with `0` (pass) or `1` (residual). Do not re-run the audit yourself unless the file is missing; if it is, run:
 
 ```bash
-# Fetch with datacenter proxies and 3 workers
-python3 scripts/run_stage.py fetch --config configs/site.yaml --proxy dc --workers 3
-
-# Try alternative archives for failed URLs
-python3 scripts/run_stage.py fetch --config configs/site.yaml --fallback-archives archive_today memento
-
-# Full pipeline, skip confirmation prompts
-python3 scripts/run_stage.py all --config configs/site.yaml --yes
+python3 scripts/audit.py --config <config_path>
 ```
 
-## New Site Setup
+Open `audit.json` and read the `integers` object. **The exit code is authoritative — never report "done" on a non-zero exit.** If residual, use `exemplars` to enumerate what's missing and either:
 
-1. Copy `skills/wayback-archive/configs/example.yaml` and customize domains
-2. Bundled `tools/wayback_cdx` handles CDX dumps automatically
-3. For Shopify: set `shopify_cdn.enabled: true` in config
-4. Set proxy credentials: `OXYLABS_ISP_USER` / `OXYLABS_ISP_PASS` env vars
-5. Dry-run first: `python3 scripts/run_stage.py all --config configs/mysite.yaml --dry-run`
+1. **Re-run the stage(s) that would reduce the largest bucket.** E.g., `unenumerated_hosts > 0` → re-run `cdx_dump` for the missing hosts; `retry_queue_depth > 0` → re-run `fetch` with `--proxy dc` or `--fallback-archives archive_today memento`; `index_missing > 0` → re-run `download` and check `links/<slug>.txt` for each empty exemplar.
+2. **Annotate terminals.** For residuals that cannot be recovered (404 no-captures, anti-bot walls), record a `terminal_reason` and explain to the user what couldn't be recovered and why. (The ledger refactor — IMPROVEMENT_PLAN phase C3 — will persist these annotations; for now, surface them in your report.)
 
-For config field reference, see [references/site-config-schema.md](references/site-config-schema.md).
+Repeat steps 3–4 until the audit exits zero, or every residual has a terminal_reason.
 
-## Standalone Scripts
+### 5. Report
 
-Each script works independently without `run_stage.py`:
+Three lines, nothing more:
 
-```bash
-# CDX dump
-cd tools/ && python -m wayback_cdx --domain mystore.com --output raw_cdx.txt --resume
+- Products × images recovered (`N products, M images` — read from `audit.json` `raw_counts`)
+- Audit status (`pass` or `N residual items: <breakdown from integers>`)
+- Path to catalog (`projects/<name>/<name>_catalog.json`)
 
-# Filter
-python filter_cdx.py raw_cdx.txt > links.txt
+---
 
-# Fetch
-python fetch_archive.py links.txt --resume [--proxy isp|dc] [--workers 5]
+## Standing protocols (inviolate — from docs/IMPROVEMENT_PLAN.md)
 
-# Shopify CDN discovery
-python shopify_downloader.py --store mystore.com --wayback-only --manifest-only
-```
+I.   **Entity-first.** Count products, not files. A saved feed, sitemap, or collection HTML with no downstream expansion is not progress.
+II.  **Discovery is recursive.** Feeds / sitemaps / collections / JSON endpoints are *discovery surfaces*, never terminal artifacts. Every parse must emit outlinks before the surface is marked processed.
+III. **New host → immediate enumeration.** Any previously unseen hostname observed in any capture triggers a CDX dump and product-URL enumeration. Do not wait for a human prompt. If you see a new host in extracted HTML, re-run `bootstrap.py` with the expanded host list or append it to the config and re-run `cdx_dump`.
+IV.  **No "done" without audit.** Compute and report the five audit integers (unresolved slugs, unexpanded surfaces, index-missing entries, unenumerated hosts, retry-queue depth) before declaring completion. Any non-zero count blocks the claim unless paired with a `terminal_reason`.
+V.   **Validate before counting.** Extracted strings are *candidates*, not slugs. Normalize → classify → reject non-product URLs (image assets, CDN paths) → dedupe → report *candidates seen* and *validated-and-new* separately.
 
-For detailed script documentation, see [references/tool-reference.md](references/tool-reference.md).
+## Source-hierarchy priority
 
-## Principles
+Drain highest-value surfaces first: `json_api > sitemap > feed > collection > home > search > product`. `products.json?limit=1000` is the holy grail — never let HTML shells starve it.
 
-1. Two-source discovery: always query BOTH Wayback AND CommonCrawl
-2. Discovery before extraction: complete Phase 1 exhaustively before Phase 2
-3. CommonCrawl WARCs for HTML: raw HTTP responses beat JS replay (76% vs 2.4%)
-4. JSON APIs first: `products.json` is the holy grail
-5. Triage by era: classify handles by platform before choosing extraction method
-6. Test live CDN before Wayback: Shopify CDNs persist years after store closure
-7. Paginate past caps: CDX defaults to 500 results — always check
-8. Dedup before gap-chasing: ~40% of "missing" products are noise
-9. Checkpoint/resume: every stage saves progress
-10. Validate after download: check magic bytes to catch error pages
+## Fallback playbook
 
-## Reference Documentation
+- **Residuals after audit.** The preferred path is the `resume` subcommand — it reads `projects/<name>/audit.json`, picks the largest non-zero bucket, and runs only the stage that would shrink it:
+  ```bash
+  python3 scripts/run_stage.py resume --config <cfg> --auto
+  ```
+  Bucket → stage mapping: `unenumerated_hosts` → `cdx_dump`, `unresolved_slugs` → `fetch`, `retry_queue_depth` → `fetch --proxy dc --fallback-archives archive_today memento`, `index_missing` → `download`. Override auto-pick with `--bucket <name>`.
+- **Preflight blocked the run.** Read `projects/<name>/preflight.json`. Missing Oxylabs creds: copy `tools/.env.example` → `tools/.env` and fill in (auto-sourced, no `export` needed). Missing deps: `pip install -r requirements.txt`. Low disk: free space or change `project_dir`. Archive.org unreachable: retry or check VPN/DNS.
+- **Platform misdetected.** Inspect `projects/<name>/config.yaml`, pick a different template from `skills/wayback-archive/configs/_template_*.yaml`, swap the `cdn_patterns` / `url_rules` blocks, re-run `resume` or the specific stages from `filter` onward.
+- **CDX tool hangs.** Checkpoint files live at `tools/.<domain>_wayback.ckpt.json`. Resume: `cd tools && python -m wayback_cdx --domain <d> --output ../projects/<name>/<d>_wayback.txt --resume`.
+- **Low fetch success (<20%).** Let `resume` pick it up via the `retry_queue_depth` bucket, or run `fetch` directly with `--proxy dc --fallback-archives archive_today memento`.
+- **Anti-bot / CAPTCHA blocks.** Fall back to HAR-based recovery — see `references/playwright-wayback.md`.
 
-- [references/extraction-strategy.md](references/extraction-strategy.md) — Extraction hierarchy, method selection, CommonCrawl WARC patterns
-- [references/pipeline-stages.md](references/pipeline-stages.md) — Detailed per-stage documentation with inputs/outputs
-- [references/tool-reference.md](references/tool-reference.md) — Script docs, URL modifiers, tool selection matrix
-- [references/platform-support.md](references/platform-support.md) — Shopify, Swell, Fourthwall, Adidas platform notes
-- [references/site-config-schema.md](references/site-config-schema.md) — YAML config field reference
-- [references/data-contracts.md](references/data-contracts.md) — JSON schemas for stage inputs/outputs
-- [references/playwright-wayback.md](references/playwright-wayback.md) — Last-resort Playwright extraction pattern
-- [references/lessons-learned.md](references/lessons-learned.md) — Anti-patterns and best practices
+## Reference docs (load only when needed — not preemptively)
+
+- [references/manual.md](references/manual.md) — original reference manual: three-rules, triage matrix, full pipeline description.
+- [references/extraction-strategy.md](references/extraction-strategy.md) — method hierarchy, CommonCrawl WARC patterns, era-based triage.
+- [references/pipeline-stages.md](references/pipeline-stages.md) — per-stage inputs/outputs and verification gates.
+- [references/tool-reference.md](references/tool-reference.md) — standalone script invocation.
+- [references/platform-support.md](references/platform-support.md) — Shopify / Swell / Fourthwall / Adidas detection and quirks.
+- [references/site-config-schema.md](references/site-config-schema.md) — YAML field reference.
+- [references/data-contracts.md](references/data-contracts.md) — JSON schemas for stage inputs/outputs.
+- [references/playwright-wayback.md](references/playwright-wayback.md) — HAR / Playwright last-resort extraction.
+- [references/lessons-learned.md](references/lessons-learned.md) — anti-patterns and best practices.
+- [../../docs/IMPROVEMENT_PLAN.md](../../docs/IMPROVEMENT_PLAN.md) — full ledger/protocols refactor plan (Movements A → B → C).

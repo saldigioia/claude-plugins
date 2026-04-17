@@ -62,7 +62,14 @@ class AppConfig:
     backoff_max: float = 60.0
     jitter_max: float = 1.0
     checkpoint_file: str = ""
-    user_agent: str = "wayback-cdx-dump/2.0"
+    # Default UA identifies this as part of the wayback-archive plugin, per
+    # the Internet Archive's guidance that AI-agent traffic must be
+    # attributable. Keep this string in sync with
+    # lib/wayback_archiver/http_client.py USER_AGENT_SUFFIX.
+    user_agent: str = (
+        "wayback-cdx-dump/2.0 wayback-archive "
+        "(Claude Code AI agent; +https://github.com/saldigioia/wayback-archive-plugin)"
+    )
 
     # Breaker config
     breaker_threshold: int = 3
@@ -107,7 +114,11 @@ class AppConfig:
             backoff_max=float(os.getenv("CDX_BACKOFF_MAX", "60.0")),
             jitter_max=float(os.getenv("CDX_JITTER_MAX", "1.0")),
             checkpoint_file=os.getenv("CDX_CHECKPOINT_FILE", ""),
-            user_agent=os.getenv("CDX_USER_AGENT", "wayback-cdx-dump/2.0"),
+            user_agent=os.getenv(
+                "CDX_USER_AGENT",
+                "wayback-cdx-dump/2.0 wayback-archive "
+                "(Claude Code AI agent; +https://github.com/saldigioia/wayback-archive-plugin)",
+            ),
             breaker_threshold=int(os.getenv("CDX_BREAKER_THRESHOLD", "3")),
             breaker_cooldown=float(os.getenv("CDX_BREAKER_COOLDOWN", "30")),
             escalation_error_rate=float(os.getenv("CDX_ESC_ERROR_RATE", "0.30")),

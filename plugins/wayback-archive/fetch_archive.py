@@ -50,6 +50,18 @@ from urllib.parse import quote
 
 import aiohttp
 
+# Make the shared HTTP hygiene module importable whether fetch_archive.py is
+# run as a script (cwd=repo root) or imported from run_stage.py.
+_HERE = Path(__file__).resolve().parent
+if str(_HERE / "lib") not in sys.path:
+    sys.path.insert(0, str(_HERE / "lib"))
+from wayback_archiver.http_client import (
+    BROWSER_UA, USER_AGENT, AIOHTTP_HEADERS, parse_retry_after,
+)
+from wayback_archiver.env import load_env
+
+load_env()
+
 # ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -288,9 +300,10 @@ async def fetch_cc_warc(
 # ── Wayback Fetch (direct first, proxy fallback) ─────────────────────────
 
 _WB_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/120.0.0.0 Safari/537.36",
+    # Wayback's replay framework degrades for non-browser clients, so we keep
+    # the Mozilla string as base and append our AI-agent suffix (the pattern
+    # the Internet Archive's own `ia` skill endorses).
+    "User-Agent": BROWSER_UA,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
@@ -319,8 +332,10 @@ async def fetch_wayback_direct(
                     headers=_WB_HEADERS,
                 ) as resp:
                     if resp.status == 429:
-                        wait = 5.0 * (2 ** attempt)
-                        log.warning("  429 rate-limited (direct), waiting %.1fs", wait)
+                        retry_after = parse_retry_after(resp.headers.get("Retry-After"))
+                        wait = retry_after if retry_after is not None else 5.0 * (2 ** attempt)
+                        src = "Retry-After" if retry_after is not None else "backoff"
+                        log.warning("  429 rate-limited (direct, %s), waiting %.1fs", src, wait)
                         await asyncio.sleep(wait)
                         continue
                     if resp.status == 503:
@@ -369,8 +384,10 @@ async def fetch_wayback_proxied(
                     headers=_WB_HEADERS,
                 ) as resp:
                     if resp.status == 429:
-                        wait = 2.0 * (2 ** attempt)
-                        log.warning("  429 rate-limited (proxy), waiting %.1fs (attempt %d)", wait, attempt + 1)
+                        retry_after = parse_retry_after(resp.headers.get("Retry-After"))
+                        wait = retry_after if retry_after is not None else 2.0 * (2 ** attempt)
+                        src = "Retry-After" if retry_after is not None else "backoff"
+                        log.warning("  429 rate-limited (proxy, %s), waiting %.1fs (attempt %d)", src, wait, attempt + 1)
                         await asyncio.sleep(wait)
                         continue
 
@@ -543,6 +560,7 @@ async def run(
         """Pull targets from queue, fetch, log progress."""
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(limit_per_host=6),
+            headers=AIOHTTP_HEADERS,  # bot UA; per-request BROWSER_UA override via _WB_HEADERS
         ) as session:
             while True:
                 target = await queue.get()
@@ -583,6 +601,27 @@ async def run(
 
     for wt in worker_tasks:
         wt.cancel()
+
+    # ── Per-URL results JSONL ─────────────────────────────────────────
+    # Sibling to fetch_stats.json. Lets run_stage.py populate the ledger
+    # with one row per URL fetch without touching the async internals here.
+    results_path = output_dir.parent / "fetch_results.jsonl"
+    try:
+        with results_path.open("w", encoding="utf-8") as f:
+            for r in results:
+                f.write(json.dumps({
+                    "original_url": r.target.original_url,
+                    "wayback_url": r.target.wayback_url,
+                    "timestamp": r.target.timestamp,
+                    "tier": r.target.tier,
+                    "success": r.success,
+                    "method": r.method,
+                    "size": r.size,
+                    "error": r.error or "",
+                }) + "\n")
+        log.info("Per-URL results written to %s", results_path)
+    except OSError as e:
+        log.warning("Could not write fetch_results.jsonl: %s", e)
 
     # ── Summary ───────────────────────────────────────────────────────
     succeeded = [r for r in results if r.success]

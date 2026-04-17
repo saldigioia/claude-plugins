@@ -1,0 +1,56 @@
+# Auto-generated from _template_fourthwall.yaml by scripts/bootstrap.py
+# Platform: Fourthwall
+# Target: {DISPLAY_NAME}
+
+name: {NAME}
+display_name: "{DISPLAY_NAME}"
+credit_line: "{DISPLAY_NAME}"
+
+domains:
+{DOMAINS}
+
+project_dir: .
+
+cdx_dump_max_age_days: 7
+cdx_dump_proxy_mode: auto
+
+url_rules:
+  - path_prefix: "/products/"
+    url_type: slug
+    require_status: "200"
+    require_ctype: "text/html"
+
+  - path_prefix: "/api/"
+    url_type: api
+    require_status: "200"
+    require_ctype: "application/json"
+
+junk_patterns:
+  - '%22|%3[CcEe]|%7[Bb]|%5[Bb]'
+  - '\.js$'
+
+era_rules:
+  - condition: "default"
+    era: fourthwall
+
+type_priority:
+  - api
+  - slug
+
+cdn_patterns:
+  - name: fourthwall
+    regex: 'https?://imgproxy\.fourthwall\.com/[^\s"''\\]+'
+
+shopify_cdn:
+  enabled: false
+
+alternative_archives:
+  enabled: true
+  sources:
+    - archive_today
+    - memento
+
+download_cascade:
+  - direct_fetch
+  - wayback_cdx_best
+  - exhaustive
