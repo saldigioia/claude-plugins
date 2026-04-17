@@ -1,0 +1,117 @@
+/* === Global Tokens & Reset === */
+/* This file provides critical CSS to inline in <head> */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  /* Modular scale (ratio 1.5) */
+  --ratio: 1.5;
+  --s-5: 0.132rem;
+  --s-4: 0.198rem;
+  --s-3: 0.296rem;
+  --s-2: 0.444rem;
+  --s-1: 0.667rem;
+  --s0: 1rem;
+  --s1: 1.5rem;
+  --s2: 2.25rem;
+  --s3: 3.375rem;
+  --s4: 5.063rem;
+  --s5: 7.594rem;
+
+  /* Measure */
+  --measure: 65ch;
+
+  /* Brand tokens */
+  --br-color-surface: light-dark(#fafafa, #1a1a1a);
+  --br-color-surface-raised: light-dark(#ffffff, #242424);
+  --br-color-text: light-dark(#1a1a1a, #e5e5e5);
+  --br-color-text-muted: light-dark(#666666, #999999);
+  --br-color-accent: light-dark(#2563eb, #60a5fa);
+  --br-color-interactive: light-dark(#2563eb, #60a5fa);
+  --br-color-focus: light-dark(#2563eb, #60a5fa);
+  --br-color-border: light-dark(#e5e5e5, #333333);
+  --br-font-body: system-ui, -apple-system, sans-serif;
+  --br-font-heading: system-ui, -apple-system, sans-serif;
+
+  /* Border */
+  --border-thin: 1px;
+
+  /* Transitions */
+  --transition-fast: 0.1s;
+  --transition-normal: 0.2s;
+
+  /* z-index scale */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-skip: 60;
+
+  /* Color scheme */
+  color-scheme: light dark;
+
+  /* Base styles */
+  font-family: var(--br-font-body);
+  color: var(--br-color-text);
+  background-color: var(--br-color-surface);
+  line-height: var(--ratio);
+}
+
+body {
+  margin: 0;
+  min-block-size: 100vh;
+}
+
+/* Element styles (ELP_007) */
+h1, h2, h3, h4 {
+  font-family: var(--br-font-heading);
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+a {
+  color: var(--br-color-interactive);
+}
+
+a:focus-visible {
+  outline: 3px solid var(--br-color-focus);
+  outline-offset: 2px;
+}
+
+img {
+  max-inline-size: 100%;
+  block-size: auto;
+  display: block;
+}
+
+/* Skip link (accessibility) */
+.skip-link {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 0;
+  padding: var(--s-1) var(--s0);
+  background: var(--br-color-surface);
+  z-index: var(--z-skip);
+  clip-path: inset(50%);
+}
+
+.skip-link:focus {
+  clip-path: none;
+}
+
+/* Motion safety (ELP_028) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

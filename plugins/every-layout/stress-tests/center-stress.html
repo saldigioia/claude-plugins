@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Center Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Center Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Default Center</h2>
+    <p>Content should be centered with max-width of --measure (60ch).</p>
+    <div class="center">
+      <div class="demo-box">Centered content with default measure and gutters.</div>
+    </div>
+    <p class="pass">✓ Pass if content is centered with gutters on the sides</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Custom Measure</h2>
+    <p>Narrow measure should constrain content more tightly.</p>
+    <div class="center" style="--measure: 30ch">
+      <div class="demo-box">This content has a narrow 30ch measure, constraining line length significantly.</div>
+    </div>
+    <p class="pass">✓ Pass if content is narrower than Test 1</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Very Wide Measure</h2>
+    <p>Large measure should allow content to spread wider.</p>
+    <div class="center" style="--measure: 120ch">
+      <div class="demo-box">This content has a very wide 120ch measure.</div>
+    </div>
+    <p class="pass">✓ Pass if content spans wider than default</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Intrinsic Centering</h2>
+    <p>data-intrinsic should center children by their content width.</p>
+    <div class="center" data-intrinsic>
+      <div class="demo-box" style="max-inline-size: 200px">Narrow box</div>
+      <div class="demo-box" style="max-inline-size: 300px">Wider box</div>
+    </div>
+    <p class="pass">✓ Pass if both boxes are horizontally centered at their own widths</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Text Centering</h2>
+    <p>data-text should center-align text content.</p>
+    <div class="center" data-text style="--measure: 40ch">
+      <div class="demo-box">
+        <h3>Centered Heading</h3>
+        <p>This paragraph text should be center-aligned within the measure.</p>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if text is center-aligned</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Content-Box Sizing</h2>
+    <p>Gutters should not reduce the content area below --measure.</p>
+    <div class="center" style="--measure: 40ch; --gutter: var(--s3); background: #f0f0f0">
+      <div class="demo-box">Content area should be exactly 40ch wide. Large gutters add space outside.</div>
+    </div>
+    <p class="pass">✓ Pass if content area is 40ch AND gutters are visible outside it</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Nested Centers</h2>
+    <p>Nested Centers with different measures.</p>
+    <div class="center" style="--measure: 70ch; background: #f0f0f0; padding-block: 1rem">
+      <div class="center" style="--measure: 40ch; background: #e0e0e0; padding-block: 1rem">
+        <div class="center" style="--measure: 20ch; background: #d0d0d0; padding-block: 1rem">
+          <p>Innermost (20ch)</p>
+        </div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if three progressively narrower centered blocks are visible</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Empty Center</h2>
+    <p>Center with no children should not cause errors.</p>
+    <div class="center" style="border: 1px dashed #ccc; min-height: 50px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty Center renders without errors</p>
+  </section>
+
+</body>
+</html>

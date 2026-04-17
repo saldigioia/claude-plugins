@@ -1,0 +1,19 @@
+{
+  "name": "every-layout",
+  "version": "4.2.0",
+  "description": "Axiom-enforced CSS layout primitives, Astro 5 site architecture, archival data patterns, and design system tokens. 13 composable primitives, 32 numbered principles, 6 axioms enforced by CI-grade strict-check and JS-budget gates. Zero-JS-by-default, media-query-free, modular-scale spacing.",
+  "author": {
+    "name": "Rare Data Club"
+  },
+  "homepage": "https://github.com/saldigioia/every-layout-plugin",
+  "repository": "https://github.com/saldigioia/every-layout-plugin",
+  "license": "MIT",
+  "keywords": [
+    "css", "layout", "design-system", "every-layout", "primitives",
+    "responsive", "accessibility", "astro", "content-collections",
+    "archival", "sqlite", "drizzle", "database",
+    "intrinsic-layout", "logical-properties", "modular-scale", "design-tokens",
+    "zero-js", "css-audit", "pre-commit", "ci-gate", "axiom-enforcement",
+    "framework-ports", "react", "vue", "svelte", "tailwind"
+  ]
+}

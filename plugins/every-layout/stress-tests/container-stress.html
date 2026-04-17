@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Container Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+
+    /* Container query test styles */
+    .cq-card {
+      padding: var(--s0);
+      background: #f0f0f0;
+      border: 1px solid #ccc;
+    }
+    .cq-card .layout { display: block; }
+    .cq-card .detail { display: none; }
+    @container (min-width: 25rem) {
+      .cq-card .layout { display: grid; grid-template-columns: 1fr 2fr; gap: var(--s1); }
+      .cq-card .detail { display: block; }
+    }
+
+    .cq-named { padding: var(--s0); background: #e8f4e8; border: 1px solid #aaa; }
+    @container sidebar (min-width: 15rem) {
+      .cq-named { background: #d0f0d0; }
+      .cq-named::after { content: " (wide)"; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Container Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Basic Container Query</h2>
+    <p>Child should respond to container width, not viewport.</p>
+    <div class="container" style="max-inline-size: 40rem">
+      <div class="cq-card">
+        <div class="layout">
+          <div class="demo-box">Image area</div>
+          <div>
+            <h3>Card Title</h3>
+            <p class="detail">This detail only shows in wide containers.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if card uses two-column layout and shows detail text</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Container Query (Narrow)</h2>
+    <p>Same component in a narrow container should stack.</p>
+    <div class="container" style="max-inline-size: 20rem">
+      <div class="cq-card">
+        <div class="layout">
+          <div class="demo-box">Image area</div>
+          <div>
+            <h3>Card Title</h3>
+            <p class="detail">This detail only shows in wide containers.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if card uses stacked layout and hides detail text</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Named Container</h2>
+    <p>Named container should respond to @container queries using its name.</p>
+    <div class="container" data-name style="--name: sidebar; max-inline-size: 25rem">
+      <div class="cq-named">Sidebar content</div>
+    </div>
+    <p class="pass">✓ Pass if background is green and "(wide)" text appears</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Named Container (Narrow)</h2>
+    <p>Named container below threshold should not match.</p>
+    <div class="container" data-name style="--name: sidebar; max-inline-size: 12rem">
+      <div class="cq-named">Sidebar content</div>
+    </div>
+    <p class="pass">✓ Pass if background is lighter green and no "(wide)" text</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Nested Containers</h2>
+    <p>Nested containers should create independent query contexts.</p>
+    <div class="container" style="max-inline-size: 40rem; background: #f0f0f0; padding: 1rem">
+      <p>Outer container (40rem)</p>
+      <div class="container" style="max-inline-size: 18rem; background: #e0e0e0; padding: 1rem; margin-block-start: 1rem">
+        <p>Inner container (18rem)</p>
+        <div class="cq-card">
+          <div class="layout">
+            <div class="demo-box">Image</div>
+            <div>
+              <h3>Inner Card</h3>
+              <p class="detail">Should be hidden (container is narrow).</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if inner card uses stacked layout despite outer container being wide</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Container with No Children</h2>
+    <p>Empty container should not cause errors.</p>
+    <div class="container" style="border: 1px dashed #ccc; min-height: 50px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty Container renders without errors</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Container in Grid</h2>
+    <p>Container queries should work inside grid items.</p>
+    <div class="grid" style="--min: 15rem">
+      <div class="container">
+        <div class="cq-card">
+          <div class="layout">
+            <div class="demo-box">Img</div>
+            <div><h3>Grid Card 1</h3><p class="detail">Detail</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="container">
+        <div class="cq-card">
+          <div class="layout">
+            <div class="demo-box">Img</div>
+            <div><h3>Grid Card 2</h3><p class="detail">Detail</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if each grid item independently responds to its own container width</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Container in Sidebar</h2>
+    <p>Container query should respond to sidebar panel width.</p>
+    <div class="with-sidebar" style="--side-width: 15rem; --content-min: 50%">
+      <div class="container">
+        <div class="cq-card">
+          <div class="layout">
+            <div class="demo-box">Img</div>
+            <div><h3>Sidebar Card</h3><p class="detail">Detail</p></div>
+          </div>
+        </div>
+      </div>
+      <div class="container">
+        <div class="cq-card">
+          <div class="layout">
+            <div class="demo-box">Img</div>
+            <div><h3>Main Card</h3><p class="detail">Detail</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if sidebar card stacks but main card uses two-column layout</p>
+  </section>
+
+</body>
+</html>

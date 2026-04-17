@@ -1,0 +1,83 @@
+# ============================================================
+# Example site configuration — copy and customize for each target
+# See references/site-config-schema.md for full documentation
+# ============================================================
+
+name: mysite                         # Short name for output files (no spaces)
+display_name: "My Store"             # Human-readable name
+credit_line: "My Store"              # Credit line in metadata.txt
+
+domains:
+  - mystore.com
+  - www.mystore.com
+  # - shop.mystore.com              # Include all subdomains that served products
+
+# Working directory — all stage outputs go here
+project_dir: ./projects/mysite
+
+# CDX dump files — populated automatically by cdx_dump stage, or set manually
+# cdx_files:
+#   - /path/to/mystore_com_wayback.txt
+
+# ── Stage 0: CDX dump ──────────────────────────────────────
+# Uses bundled tools/wayback_cdx by default
+cdx_dump_max_age_days: 7             # Skip re-dump if file is newer
+cdx_dump_proxy_mode: auto            # auto | dc | isp | off
+# cdx_dump_from: "2018"             # Optional: start timestamp filter
+# cdx_dump_to: ""                   # Optional: end timestamp filter
+
+# ── Stage 1: URL classification ─────────────────────────────
+url_rules:
+  - path_prefix: "/products/"
+    url_type: slug
+    require_status: "200"
+    require_ctype: "text/html"
+
+  # Uncomment for stores with API endpoints:
+  # - path_prefix: "/api/products/"
+  #   url_type: api
+  #   require_status: "200"
+  #   require_ctype: "application/json"
+
+junk_patterns:
+  - '%22|%3[CcEe]|%7[Bb]|%5[Bb]'
+
+era_rules:
+  - condition: "default"
+    era: shopify
+
+type_priority:
+  - slug
+
+# ── Stage 2: CDN patterns ───────────────────────────────────
+cdn_patterns:
+  - name: shopify
+    regex: 'https?://cdn\.shopify\.com/s/files/[^\s"''\\]+/products/[^\s"''\\]+'
+    size_strip: '_(?:\d+|\{width\})x(?:@\dx)?(?=\.\w+)'
+    named_size_strip: '_(?:grande|medium|small|large|compact|master|pico|icon|thumb)(?=\.\w+)'
+
+  # Add patterns for other CDNs as needed:
+  # - name: custom_cdn
+  #   regex: 'https?://assets\.mystore\.com/images/[^\s"''\\)]+\.(png|jpg|jpeg|webp)'
+
+# ── Shopify CDN archaeology (optional) ──────────────────────
+# Enable for Shopify stores to discover all CDN images including delisted products
+shopify_cdn:
+  enabled: true
+  # myshopify_domain: "mystore.myshopify.com"  # Auto-discovered if omitted
+  full_size: true
+  max_wayback_json: 200
+
+# ── Alternative archive fallbacks ────────────────────────────
+alternative_archives:
+  enabled: true
+  sources:
+    - archive_today
+    - memento
+
+# ── Stage 4: Download cascade ───────────────────────────────
+download_cascade:
+  - live_cdn
+  - direct_fetch
+  - wayback_cdx_best
+  - exhaustive

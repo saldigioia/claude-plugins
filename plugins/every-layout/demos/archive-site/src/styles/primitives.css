@@ -1,0 +1,221 @@
+/* === Every Layout Primitives === */
+/* 13 composable layout primitives */
+
+/* ELC_STACK */
+.stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.stack > * {
+  margin-block: 0;
+}
+
+.stack > * + * {
+  margin-block-start: var(--space, 1.5rem);
+}
+
+/* ELC_BOX */
+.box {
+  padding: var(--padding, var(--s1));
+  border: var(--border-thin, 1px) solid;
+  outline: var(--border-thin, 1px) transparent;
+  outline-offset: calc(var(--border-thin, 1px) * -1);
+}
+
+.box * {
+  color: inherit;
+}
+
+.box[data-invert] {
+  color: var(--br-color-surface);
+  background-color: var(--br-color-text);
+}
+
+/* ELC_CENTER */
+.center {
+  box-sizing: content-box;
+  max-inline-size: var(--measure, 65ch);
+  margin-inline: auto;
+  padding-inline: var(--gutter, 1rem);
+}
+
+/* ELC_CLUSTER */
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space, 1rem);
+  justify-content: flex-start;
+  align-items: center;
+}
+
+/* ELC_SIDEBAR */
+.with-sidebar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space, 1rem);
+}
+
+.with-sidebar > :first-child {
+  flex-basis: var(--side-width, 20rem);
+  flex-grow: 1;
+}
+
+.with-sidebar > :last-child {
+  flex-basis: 0;
+  flex-grow: 999;
+  min-inline-size: var(--content-min, 50%);
+}
+
+/* ELC_SWITCHER */
+.switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space, 1rem);
+}
+
+.switcher > * {
+  flex-grow: 1;
+  flex-basis: calc((var(--threshold, 30rem) - 100%) * 999);
+}
+
+/* ELC_COVER */
+.cover {
+  display: flex;
+  flex-direction: column;
+  min-block-size: var(--min-height, 100vh);
+  padding: var(--padding, var(--s1));
+}
+
+.cover > * {
+  margin-block: var(--space, var(--s1));
+}
+
+.cover > :first-child:not(.principal) {
+  margin-block-start: 0;
+}
+
+.cover > :last-child:not(.principal) {
+  margin-block-end: 0;
+}
+
+.cover > .principal {
+  margin-block: auto;
+}
+
+/* ELC_GRID */
+.grid {
+  display: grid;
+  gap: var(--space, 1rem);
+  grid-template-columns: repeat(auto-fit, minmax(min(var(--min, 15rem), 100%), 1fr));
+}
+
+.grid[data-ragged] {
+  align-items: start;
+}
+
+/* ELC_FRAME */
+.frame {
+  aspect-ratio: var(--ratio, 16/9);
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.frame > img,
+.frame > video {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+/* ELC_REEL */
+.reel {
+  display: flex;
+  block-size: auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: var(--space, var(--s1));
+}
+
+.reel > * {
+  flex: 0 0 var(--item-width, auto);
+}
+
+/* ELC_IMPOSTER */
+.imposter {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.imposter[data-contain] {
+  --margin: var(--s1);
+  overflow: auto;
+  max-inline-size: calc(100% - (var(--margin) * 2));
+  max-block-size: calc(100% - (var(--margin) * 2));
+}
+
+/* ELC_ICON */
+.icon {
+  width: 0.75em;
+  width: 1cap;
+  height: 0.75em;
+  height: 1cap;
+}
+
+.with-icon {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space, 0.5em);
+}
+
+/* ELC_CONTAINER */
+.container {
+  container-type: inline-size;
+  container-name: var(--container-name, layout);
+}
+
+/* Print overrides */
+@media print {
+  .cover {
+    min-block-size: auto;
+  }
+
+  .with-sidebar,
+  .switcher,
+  .cluster {
+    flex-direction: column;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .reel {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .frame {
+    aspect-ratio: auto;
+  }
+
+  .frame > img,
+  .frame > video {
+    object-fit: contain;
+    max-block-size: 15cm;
+  }
+
+  .imposter {
+    position: static;
+    transform: none;
+  }
+
+  .center {
+    padding-inline: 0;
+  }
+}

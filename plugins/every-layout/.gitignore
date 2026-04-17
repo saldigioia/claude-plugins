@@ -1,0 +1,9 @@
+.DS_Store
+.full-review/
+*.swp
+*~
+
+# Demo build artifacts
+demos/**/node_modules/
+demos/**/dist/
+demos/**/.astro/

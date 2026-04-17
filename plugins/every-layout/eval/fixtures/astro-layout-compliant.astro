@@ -1,0 +1,100 @@
+---
+// FIXTURE: Compliant Astro layout for evaluation
+// This layout follows all astro-site-architect patterns.
+// Should score 9-10/10 on the architecture eval.
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width" />
+  <title>{title}</title>
+  {description && <meta name="description" content={description} />}
+  <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
+
+  <!-- Critical CSS inline: tokens + center + stack + cover + reset -->
+  <style is:inline>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --ratio: 1.5;
+      --s-2: 0.444rem; --s-1: 0.667rem; --s0: 1rem;
+      --s1: 1.5rem; --s2: 2.25rem; --s3: 3.375rem;
+      --measure: 65ch;
+      --br-color-surface: light-dark(#fafafa, #1a1a1a);
+      --br-color-text: light-dark(#1a1a1a, #e5e5e5);
+      --br-color-focus: light-dark(#2563eb, #60a5fa);
+      color-scheme: light dark;
+      font-family: system-ui, -apple-system, sans-serif;
+      color: var(--br-color-text);
+      background-color: var(--br-color-surface);
+      line-height: var(--ratio);
+    }
+    body { margin: 0; }
+    .center {
+      box-sizing: content-box;
+      max-inline-size: var(--measure, 65ch);
+      margin-inline: auto;
+      padding-inline: var(--gutter, 1rem);
+    }
+    .stack { display: flex; flex-direction: column; justify-content: flex-start; }
+    .stack > * { margin-block: 0; }
+    .stack > * + * { margin-block-start: var(--space, 1.5rem); }
+    .cover { display: flex; flex-direction: column; min-block-size: 100vh; }
+    .cover > * { margin-block: var(--s1); }
+    .cover > :first-child:not(.principal) { margin-block-start: 0; }
+    .cover > :last-child:not(.principal) { margin-block-end: 0; }
+    .cover > .principal { margin-block: auto; }
+    .skip-link {
+      position: absolute; inset-block-start: 0; inset-inline-start: 0;
+      padding: var(--s-1) var(--s0); background: var(--br-color-surface);
+      z-index: 60; clip-path: inset(50%);
+    }
+    .skip-link:focus { clip-path: none; }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+
+  <!-- Core CSS preloaded -->
+  <link rel="preload" href="/styles/primitives.css" as="style" />
+  <link rel="stylesheet" href="/styles/primitives.css" />
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <div class="cover">
+    <header>
+      <div class="center">
+        <nav aria-label="Primary">
+          <a href="/">Home</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main" class="principal">
+      <div class="center">
+        <div class="stack">
+          <slot />
+        </div>
+      </div>
+    </main>
+
+    <footer>
+      <div class="center">
+        <small>Built with Every Layout primitives.</small>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

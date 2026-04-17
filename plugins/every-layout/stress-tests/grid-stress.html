@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grid Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; }
+    .pass { color: green; }
+  </style>
+</head>
+<body>
+  <h1>Grid Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Single Item</h2>
+    <p>Grid with one item should fill available width.</p>
+    <div class="grid" style="--min: 15rem">
+      <div class="demo-box">Single item</div>
+    </div>
+    <p class="pass">✓ Pass if item spans full width</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Very Small Minimum</h2>
+    <p>Grid with small --min should create many columns on wide screens.</p>
+    <div class="grid" style="--min: 5rem">
+      <div class="demo-box">1</div>
+      <div class="demo-box">2</div>
+      <div class="demo-box">3</div>
+      <div class="demo-box">4</div>
+      <div class="demo-box">5</div>
+      <div class="demo-box">6</div>
+      <div class="demo-box">7</div>
+      <div class="demo-box">8</div>
+    </div>
+    <p class="pass">✓ Pass if many columns appear on wide viewport</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Very Large Minimum</h2>
+    <p>Grid with large --min should create fewer columns.</p>
+    <div class="grid" style="--min: 25rem">
+      <div class="demo-box">Item 1</div>
+      <div class="demo-box">Item 2</div>
+      <div class="demo-box">Item 3</div>
+      <div class="demo-box">Item 4</div>
+    </div>
+    <p class="pass">✓ Pass if columns are at least 25rem wide</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Narrow Container</h2>
+    <p>Grid in narrow container should stack to single column.</p>
+    <div style="width: 200px; border: 1px dashed #ccc">
+      <div class="grid" style="--min: 15rem">
+        <div class="demo-box">Item 1</div>
+        <div class="demo-box">Item 2</div>
+        <div class="demo-box">Item 3</div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if items stack into single column</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Items with Varying Heights</h2>
+    <p>Grid should handle items of different heights.</p>
+    <div class="grid" style="--min: 15rem">
+      <div class="demo-box">Short</div>
+      <div class="demo-box">This item has<br>multiple<br>lines<br>of<br>content</div>
+      <div class="demo-box">Short</div>
+      <div class="demo-box">Medium height item with some text</div>
+      <div class="demo-box">Short</div>
+    </div>
+    <p class="pass">✓ Pass if grid handles varying heights (rows align)</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Empty Grid</h2>
+    <p>Grid with no children should render without errors.</p>
+    <div class="grid" style="--min: 15rem; border: 1px dashed #ccc; min-height: 50px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty box renders without errors</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Many Items (50+)</h2>
+    <p>Grid should handle many items without performance issues.</p>
+    <div class="grid" style="--min: 8rem; max-height: 400px; overflow: auto">
+      <div class="demo-box">1</div><div class="demo-box">2</div>
+      <div class="demo-box">3</div><div class="demo-box">4</div>
+      <div class="demo-box">5</div><div class="demo-box">6</div>
+      <div class="demo-box">7</div><div class="demo-box">8</div>
+      <div class="demo-box">9</div><div class="demo-box">10</div>
+      <div class="demo-box">11</div><div class="demo-box">12</div>
+      <div class="demo-box">13</div><div class="demo-box">14</div>
+      <div class="demo-box">15</div><div class="demo-box">16</div>
+      <div class="demo-box">17</div><div class="demo-box">18</div>
+      <div class="demo-box">19</div><div class="demo-box">20</div>
+      <div class="demo-box">21</div><div class="demo-box">22</div>
+      <div class="demo-box">23</div><div class="demo-box">24</div>
+    </div>
+    <p class="pass">✓ Pass if renders quickly with consistent spacing</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Zero Gap</h2>
+    <p>Grid with --space: 0 should have no gaps.</p>
+    <div class="grid" style="--min: 10rem; --space: 0">
+      <div class="demo-box">1</div>
+      <div class="demo-box">2</div>
+      <div class="demo-box">3</div>
+      <div class="demo-box">4</div>
+    </div>
+    <p class="pass">✓ Pass if items are directly touching</p>
+  </section>
+
+</body>
+</html>

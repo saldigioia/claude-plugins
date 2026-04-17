@@ -1,0 +1,129 @@
+/**
+ * Every Layout - Fluid Type Scale
+ * Utopia-inspired fluid typography using clamp()
+ *
+ * Principles: ELP_025 (Fluid Sizing via Clamp), ELP_026 (Accessibility-Safe Fluid Values)
+ *
+ * 8-step scale from --step--2 to --step-5
+ * Viewport range: 320px (20rem) to 1240px (77.5rem)
+ * Base size: 1rem (--step-0) at minimum viewport
+ * Scale ratio: 1.25 (major third) at min, 1.333 (perfect fourth) at max
+ *
+ * All values combine rem + vw to preserve browser zoom (WCAG F94).
+ *
+ * Usage:
+ *   h1 { font-size: var(--step-5); }
+ *   h2 { font-size: var(--step-4); }
+ *   h3 { font-size: var(--step-3); }
+ *   h4 { font-size: var(--step-2); }
+ *   p  { font-size: var(--step-0); }
+ *   small { font-size: var(--step--1); }
+ *
+ * Source: Utopia fluid type scale methodology (utopia.fyi)
+ * Reference: "Fluid typography with CSS clamp" by Andy Bell (Piccalilli)
+ */
+
+:root {
+  /* ========================================
+     FLUID TYPE CONFIGURATION
+     Adjust these to change the scale behavior
+     ======================================== */
+
+  /* Viewport range (where fluid scaling occurs) */
+  --fluid-min-width: 20;    /* rem — 320px */
+  --fluid-max-width: 77.5;  /* rem — 1240px */
+
+  /* Base size at each viewport bound */
+  --fluid-min-size: 1;      /* rem — base size at min viewport */
+  --fluid-max-size: 1.25;   /* rem — base size at max viewport */
+
+  /* Scale ratios */
+  --fluid-min-ratio: 1.25;  /* Major third at min viewport */
+  --fluid-max-ratio: 1.333; /* Perfect fourth at max viewport */
+
+  /* ========================================
+     FLUID TYPE STEPS
+     Each step: clamp(min, preferred, max)
+
+     The preferred value uses the formula:
+       vi + rem-offset
+     where:
+       vi  = (max-size - min-size) / (max-width - min-width) * 100vw
+       rem = min-size - (max-size - min-size) / (max-width - min-width) * min-width
+
+     This ensures the value equals min-size at min-width
+     and max-size at max-width, scaling linearly between.
+     ======================================== */
+
+  /* Step -2: minor text, captions */
+  --step--2: clamp(
+    0.64rem,
+    calc(0.61rem + 0.14vw),
+    0.70rem
+  );
+
+  /* Step -1: small text, metadata */
+  --step--1: clamp(
+    0.80rem,
+    calc(0.77rem + 0.17vw),
+    0.94rem
+  );
+
+  /* Step 0: body text (base) */
+  --step-0: clamp(
+    1.00rem,
+    calc(0.96rem + 0.22vw),
+    1.25rem
+  );
+
+  /* Step 1: lead paragraphs, large body */
+  --step-1: clamp(
+    1.25rem,
+    calc(1.18rem + 0.35vw),
+    1.67rem
+  );
+
+  /* Step 2: h4, subheadings */
+  --step-2: clamp(
+    1.56rem,
+    calc(1.45rem + 0.57vw),
+    2.22rem
+  );
+
+  /* Step 3: h3 */
+  --step-3: clamp(
+    1.95rem,
+    calc(1.77rem + 0.92vw),
+    2.96rem
+  );
+
+  /* Step 4: h2 */
+  --step-4: clamp(
+    2.44rem,
+    calc(2.15rem + 1.46vw),
+    3.95rem
+  );
+
+  /* Step 5: h1, display headings */
+  --step-5: clamp(
+    3.05rem,
+    calc(2.60rem + 2.26vw),
+    5.26rem
+  );
+}
+
+/* ========================================
+   FLUID TYPE APPLICATION
+   Optional: apply scale to semantic elements
+   Remove or adjust as needed for your project
+   ======================================== */
+
+/*
+h1 { font-size: var(--step-5); }
+h2 { font-size: var(--step-4); }
+h3 { font-size: var(--step-3); }
+h4 { font-size: var(--step-2); }
+h5 { font-size: var(--step-1); }
+h6 { font-size: var(--step-0); }
+small { font-size: var(--step--1); }
+*/

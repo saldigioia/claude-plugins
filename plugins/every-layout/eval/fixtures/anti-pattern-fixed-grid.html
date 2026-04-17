@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Fixture: Anti-Pattern Fixed Grid</title>
+  <style>
+    /*
+     * ANTI-PATTERN EXAMPLE
+     * This CSS demonstrates common mistakes that violate Every Layout principles
+     * Used for testing layout audit capabilities
+     */
+
+    .container {
+      /* VIOLATION: Fixed width (ELP_002) */
+      width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .cards {
+      display: flex;
+      flex-wrap: wrap;
+      /* VIOLATION: Arbitrary spacing (ELP_005) */
+      gap: 17px;
+    }
+
+    .card {
+      /* VIOLATION: Fixed width (ELP_002) */
+      width: 280px;
+      /* VIOLATION: Fixed height (ELP_002) */
+      height: 350px;
+      padding: 15px;
+      border: 1px solid #ccc;
+    }
+
+    /* VIOLATION: Media query for layout (ELP_009) */
+    @media (max-width: 900px) {
+      .card {
+        width: 45%;
+      }
+    }
+
+    /* VIOLATION: Media query for layout (ELP_009) */
+    @media (max-width: 600px) {
+      .card {
+        width: 100%;
+      }
+    }
+
+    .card-title {
+      /* VIOLATION: Physical property (ELP_004) */
+      margin-bottom: 10px;
+      font-size: 18px;
+    }
+
+    .card-image {
+      /* VIOLATION: Fixed dimensions (ELP_002) */
+      width: 250px;
+      height: 150px;
+    }
+  </style>
+</head>
+<body>
+  <!--
+    EXPECTED AUDIT RESULT:
+    - Score: 3-6/24 (F grade)
+    - Violations: 8+
+    - Recommended primitives: ELC_GRID, ELC_STACK, ELC_FRAME, ELC_BOX
+  -->
+
+  <div class="container">
+    <div class="cards">
+      <div class="card">
+        <img class="card-image" src="placeholder.jpg" alt="Card image">
+        <h3 class="card-title">Card Title 1</h3>
+        <p>Card description text goes here.</p>
+      </div>
+      <div class="card">
+        <img class="card-image" src="placeholder.jpg" alt="Card image">
+        <h3 class="card-title">Card Title 2</h3>
+        <p>Card description text goes here.</p>
+      </div>
+      <div class="card">
+        <img class="card-image" src="placeholder.jpg" alt="Card image">
+        <h3 class="card-title">Card Title 3</h3>
+        <p>Card description text goes here.</p>
+      </div>
+      <div class="card">
+        <img class="card-image" src="placeholder.jpg" alt="Card image">
+        <h3 class="card-title">Card Title 4</h3>
+        <p>Card description text goes here.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

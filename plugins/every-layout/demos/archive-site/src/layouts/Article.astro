@@ -1,0 +1,25 @@
+---
+import Base from './Base.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+  date?: string;
+}
+
+const { title, description, date } = Astro.props;
+---
+
+<Base title={title} description={description}>
+  <article>
+    <div class="stack" style="--space: var(--s2)">
+      <header class="stack" style="--space: var(--s-1)">
+        <h1>{title}</h1>
+        {date && <time datetime={date}>{date}</time>}
+      </header>
+      <div class="stack">
+        <slot />
+      </div>
+    </div>
+  </article>
+</Base>

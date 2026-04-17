@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cluster Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 0.5rem 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Cluster Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Empty Cluster</h2>
+    <p>Cluster with no children should render without errors.</p>
+    <div class="cluster" style="border: 1px dashed #ccc; min-height: 50px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty Cluster renders</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Single Child</h2>
+    <p>Single child should be positioned at flex-start.</p>
+    <div class="cluster">
+      <span class="demo-box">Only child</span>
+    </div>
+    <p class="pass">✓ Pass if item is at the start</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Many Children (Wrapping)</h2>
+    <p>Many items should wrap naturally.</p>
+    <div class="cluster" style="--space: var(--s-1)">
+      <span class="demo-box">Tag 1</span><span class="demo-box">Tag 2</span>
+      <span class="demo-box">Tag 3</span><span class="demo-box">Tag 4</span>
+      <span class="demo-box">Tag 5</span><span class="demo-box">Tag 6</span>
+      <span class="demo-box">Tag 7</span><span class="demo-box">Tag 8</span>
+      <span class="demo-box">Tag 9</span><span class="demo-box">Tag 10</span>
+      <span class="demo-box">Tag 11</span><span class="demo-box">Tag 12</span>
+      <span class="demo-box">Tag 13</span><span class="demo-box">Tag 14</span>
+      <span class="demo-box">Tag 15</span><span class="demo-box">Tag 16</span>
+      <span class="demo-box">Tag 17</span><span class="demo-box">Tag 18</span>
+      <span class="demo-box">Tag 19</span><span class="demo-box">Tag 20</span>
+    </div>
+    <p class="pass">✓ Pass if items wrap to multiple lines with consistent gaps</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Justify Space-Between</h2>
+    <p>Items should be spread across the full width.</p>
+    <div class="cluster" style="--justify: space-between">
+      <span class="demo-box">Left</span>
+      <span class="demo-box">Center</span>
+      <span class="demo-box">Right</span>
+    </div>
+    <p class="pass">✓ Pass if items are distributed with space between</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Justify Center</h2>
+    <p>Items should be centered horizontally.</p>
+    <div class="cluster" style="--justify: center">
+      <span class="demo-box">One</span>
+      <span class="demo-box">Two</span>
+      <span class="demo-box">Three</span>
+    </div>
+    <p class="pass">✓ Pass if items are centered</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Align Start</h2>
+    <p>Items of different heights should align to flex-start.</p>
+    <div class="cluster" style="--align: flex-start">
+      <span class="demo-box">Short</span>
+      <span class="demo-box">Tall<br>item<br>here</span>
+      <span class="demo-box">Short</span>
+    </div>
+    <p class="pass">✓ Pass if items align to the top</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Zero Gap</h2>
+    <p>Cluster with --space: 0 should have items touching.</p>
+    <div class="cluster" style="--space: 0">
+      <span class="demo-box">A</span>
+      <span class="demo-box">B</span>
+      <span class="demo-box">C</span>
+    </div>
+    <p class="pass">✓ Pass if items are directly adjacent</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Variable Width Children</h2>
+    <p>Items of very different widths should wrap correctly.</p>
+    <div class="cluster">
+      <span class="demo-box">X</span>
+      <span class="demo-box">A much longer tag label that takes more space</span>
+      <span class="demo-box">Y</span>
+      <span class="demo-box">Another moderately long label</span>
+      <span class="demo-box">Z</span>
+    </div>
+    <p class="pass">✓ Pass if all items wrap naturally with consistent gap</p>
+  </section>
+
+</body>
+</html>

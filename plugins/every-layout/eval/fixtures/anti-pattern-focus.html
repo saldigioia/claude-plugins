@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Fixture: Anti-Pattern Focus Visibility</title>
+  <style>
+    /*
+     * ANTI-PATTERN EXAMPLE
+     * This CSS demonstrates focus visibility violations (ELP_029)
+     * Used for testing layout audit capabilities
+     */
+
+    /* VIOLATION: Global outline removal with no replacement (ELP_029) */
+    *:focus {
+      outline: none;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+    }
+
+    /* VIOLATION: Sticky header that obscures focus rings (ELP_029) */
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: white;
+      padding: 1rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .nav-link {
+      display: inline-block;
+      padding: 0.5rem 1rem;
+      text-decoration: none;
+      color: #333;
+    }
+
+    /* VIOLATION: Hover style but no focus style (ELP_029) */
+    .nav-link:hover {
+      background: #f0f0f0;
+      border-radius: 4px;
+    }
+
+    .main-content {
+      padding: 2rem;
+      max-width: 60ch;
+      margin: 0 auto;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.25rem;
+      font-weight: 600;
+    }
+
+    /* VIOLATION: Focus ring removed via box-shadow trick but no :focus-visible (ELP_029) */
+    input,
+    textarea {
+      width: 100%;
+      padding: 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+
+    input:focus,
+    textarea:focus {
+      /* VIOLATION: Using box-shadow alone for focus, not outline (ELP_029) */
+      box-shadow: 0 0 0 2px rgba(0, 100, 255, 0.3);
+      border-color: blue;
+    }
+
+    /* VIOLATION: Custom button with no focus style at all (ELP_029) */
+    .btn {
+      display: inline-block;
+      padding: 0.75rem 1.5rem;
+      background: #0066ff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+
+    .btn:hover {
+      background: #0052cc;
+    }
+
+    /* VIOLATION: Custom control that is not keyboard-focusable (ELP_029) */
+    .toggle {
+      display: inline-block;
+      width: 3rem;
+      height: 1.5rem;
+      background: #ccc;
+      border-radius: 1rem;
+      position: relative;
+      cursor: pointer;
+    }
+
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 0.125rem;
+      left: 0.125rem;
+      width: 1.25rem;
+      height: 1.25rem;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+
+    .toggle.active::after {
+      transform: translateX(1.5rem);
+    }
+
+    .toggle.active {
+      background: #0066ff;
+    }
+
+    /* VIOLATION: Dropdown menu items have no visible focus (ELP_029) */
+    .dropdown-menu {
+      display: none;
+      position: absolute;
+      background: white;
+      border: 1px solid #ccc;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      z-index: 200;
+    }
+
+    .dropdown:hover .dropdown-menu,
+    .dropdown:focus-within .dropdown-menu {
+      display: block;
+    }
+
+    .dropdown-item {
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+    }
+
+    /* VIOLATION: Hover style but no focus equivalent (ELP_029) */
+    .dropdown-item:hover {
+      background: #f0f0f0;
+    }
+
+    /* VIOLATION: Skip link is visually hidden but has no focus style to make it visible (ELP_029) */
+    .skip-link {
+      position: absolute;
+      left: -9999px;
+      top: -9999px;
+    }
+
+    /* Missing: .skip-link:focus { position: static; ... } */
+  </style>
+</head>
+<body>
+  <!--
+    EXPECTED AUDIT RESULT:
+    - Focus Visibility Score: 0/3
+    - Violations: 8+
+    - Key issues:
+      1. Global *:focus { outline: none } with no :focus-visible replacement
+      2. Sticky header can obscure focus rings on elements behind it
+      3. Nav links have hover style but no focus style
+      4. Inputs use box-shadow for focus instead of outline
+      5. No :focus-visible / :focus:not(:focus-visible) differentiation
+      6. Button has hover style but no focus style
+      7. Custom toggle control is not keyboard-focusable (div, not button/input)
+      8. Dropdown items have hover but no focus styles
+      9. Skip link has no :focus style to reveal it
+  -->
+
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <nav>
+      <a class="nav-link" href="#">Home</a>
+      <a class="nav-link" href="#">About</a>
+      <div class="dropdown" style="display: inline-block; position: relative;">
+        <a class="nav-link" href="#">Products</a>
+        <ul class="dropdown-menu">
+          <li class="dropdown-item">Widget A</li>
+          <li class="dropdown-item">Widget B</li>
+          <li class="dropdown-item">Widget C</li>
+        </ul>
+      </div>
+      <a class="nav-link" href="#">Contact</a>
+    </nav>
+  </header>
+
+  <main class="main-content" id="main">
+    <h1>Contact Form</h1>
+
+    <form>
+      <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name">
+      </div>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email">
+      </div>
+      <div class="form-group">
+        <label for="message">Message</label>
+        <textarea id="message" name="message" rows="4"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Notifications</label>
+        <!-- VIOLATION: div-based toggle is not keyboard-focusable -->
+        <div class="toggle" onclick="this.classList.toggle('active')"></div>
+      </div>
+      <button class="btn" type="submit">Send Message</button>
+    </form>
+  </main>
+</body>
+</html>

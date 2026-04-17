@@ -1,0 +1,51 @@
+# Escape Hatch Registry
+
+> Copy this file to your project root as `escapes.md`. Every intentional deviation from the plugin's axioms lives here, with a justification and an expiry date. The `/strict-check` skill and `bin/css-strict.sh` gate will tell you when an entry has expired.
+
+## How this works
+
+The plugin's six axioms (`skills/css-layout-engine/references/axioms.md`) are enforced by `bin/css-strict.sh` and `bin/js-budget.sh`. When a violation is intentional — a third-party widget you can't strip, a legacy route awaiting migration, an editorial page that breaks the system on purpose — you register it here. The build stays green; the debt stays visible.
+
+Every entry MUST include:
+
+- **ID** — one of: `ESC_EDITORIAL`, `ESC_EMBED`, `ESC_DATAVIZ`, `ESC_LEGACY`, `ESC_JS_EAGER`, `ESC_JS_EXCESS`, or a project-specific `ESC_<CATEGORY>`
+- **Scope** — which files, routes, or components are affected
+- **Axiom violated** — which `ELA_###` and/or `ELP_###` are suspended here
+- **Justification** — why the canonical CSS/JS alternative was rejected
+- **Author** — @handle or owner
+- **Opened** — date when the exception was registered
+- **Expires** — review date. Entries without an expiry are forbidden.
+- **Owner** — who reviews the entry on expiry
+
+## Review cadence
+
+- Quarterly review of every entry. If still justified, extend the expiry with a fresh note.
+- If the justification no longer holds, remove the entry and fix the underlying violation.
+- If the violation was registered under false pretenses, remove the entry and open a ticket.
+
+---
+
+## Template entry
+
+```markdown
+## ESC_<CATEGORY> — short label
+
+- **Scope:** `src/components/<file>` (lines X-Y) or `/app/dashboard` route
+- **Axiom violated:** ELA_005, ELP_028
+- **Justification:** [one paragraph — what the CSS alternative looked like and why you rejected it]
+- **Author:** @handle
+- **Opened:** YYYY-MM-DD
+- **Expires:** YYYY-MM-DD (next review)
+- **Owner:** @team-or-person
+
+### Entry / exit criteria (optional)
+
+- Entry: [what made this necessary]
+- Exit: [what would let us retire this exception — new CSS feature, third-party fix, migration milestone]
+```
+
+---
+
+## Your active entries go below this line
+
+(None yet — clean slate.)

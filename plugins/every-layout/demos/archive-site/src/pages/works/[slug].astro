@@ -1,0 +1,38 @@
+---
+import { getCollection } from 'astro:content';
+import Article from '../../layouts/Article.astro';
+
+export async function getStaticPaths() {
+  const works = await getCollection('works');
+  return works.map(work => ({
+    params: { slug: work.id },
+    props: { work },
+  }));
+}
+
+const { work } = Astro.props;
+---
+
+<Article title={work.data.title} date={work.data.release_date}>
+  <dl class="cluster" style="--space: var(--s1)">
+    <div class="stack" style="--space: var(--s-2)">
+      <dt>Year</dt>
+      <dd>{work.data.year}</dd>
+    </div>
+    <div class="stack" style="--space: var(--s-2)">
+      <dt>Type</dt>
+      <dd>{work.data.type}</dd>
+    </div>
+    <div class="stack" style="--space: var(--s-2)">
+      <dt>Released</dt>
+      <dd>{work.data.release_date}</dd>
+    </div>
+  </dl>
+
+  {work.data.description && (
+    <section class="stack">
+      <h2>About</h2>
+      <p>{work.data.description}</p>
+    </section>
+  )}
+</Article>

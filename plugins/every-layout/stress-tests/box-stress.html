@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Box Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Box Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Empty Box</h2>
+    <p>Box with no children should render padding and border.</p>
+    <div class="box" style="min-height: 50px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty box renders with padding and border</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Default Styling</h2>
+    <p>Box should apply default padding, border, and colors.</p>
+    <div class="box">
+      <p>Default Box with standard padding and thin border.</p>
+    </div>
+    <p class="pass">✓ Pass if padding, border, and color are applied</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Inverted Variant</h2>
+    <p>data-invert should swap foreground and background colors.</p>
+    <div class="box" data-invert>
+      <p>Inverted Box — dark background, light text.</p>
+    </div>
+    <p class="pass">✓ Pass if background is dark and text is light</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Custom Padding</h2>
+    <p>Box with very large and very small padding values.</p>
+    <div class="box" style="--padding: var(--s3)">
+      <p>Large padding (--s3)</p>
+    </div>
+    <br>
+    <div class="box" style="--padding: var(--s-2)">
+      <p>Small padding (--s-2)</p>
+    </div>
+    <p class="pass">✓ Pass if padding differs visibly between boxes</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Custom Border Width</h2>
+    <p>Box with thick border.</p>
+    <div class="box" style="--border-width: 4px">
+      <p>Thick border Box</p>
+    </div>
+    <p class="pass">✓ Pass if border is visibly thicker than default</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Color Inheritance</h2>
+    <p>Child elements should inherit Box's color.</p>
+    <div class="box" data-invert>
+      <h3>Heading inside inverted Box</h3>
+      <p>Paragraph text</p>
+      <a href="#">Link text</a>
+      <ul><li>List item</li></ul>
+    </div>
+    <p class="pass">✓ Pass if all child text inherits the inverted color</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Nested Boxes</h2>
+    <p>Boxes nested inside each other should maintain independent styles.</p>
+    <div class="box" style="--padding: var(--s2)">
+      <p>Outer Box</p>
+      <div class="box" data-invert style="--padding: var(--s0)">
+        <p>Inner inverted Box</p>
+        <div class="box" style="--padding: var(--s-1)">
+          <p>Innermost Box (back to default)</p>
+        </div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if each Box maintains its own padding and color scheme</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Very Long Content</h2>
+    <p>Box should expand to fit long content without overflow.</p>
+    <div class="box">
+      <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+    </div>
+    <p class="pass">✓ Pass if text wraps and Box expands vertically</p>
+  </section>
+
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "wayback-archive",
+  "version": "1.0.1",
+  "description": "Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline: CDX dump, filter, fetch, Shopify CDN discovery, match, download, normalize, build. Supports Shopify, Swell Commerce, Fourthwall, and custom platforms. Use for recovering products from dead websites, archiving defunct stores, rebuilding catalogs from web archives, CDX dumps, WARC files, or Shopify CDN URLs.",
+  "author": {
+    "name": "Rare Data Club"
+  },
+  "keywords": [
+    "wayback", "archive", "web-scraping", "e-commerce",
+    "shopify", "commoncrawl", "cdx", "warc",
+    "product-catalog", "image-recovery", "cdn",
+    "data-recovery", "defunct-sites", "internet-archive"
+  ]
+}

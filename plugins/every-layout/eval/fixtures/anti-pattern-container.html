@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anti-pattern: Container (ELC_CONTAINER)</title>
+  <!--
+    EXPECTED AUDIT RESULT: Score 5-9/24 (F)
+    Fixture category: anti-pattern
+    Primitive under test: ELC_CONTAINER
+    Most relevant rubric dimensions: Responsive Without Breakpoints, Composition, Intrinsic Sizing
+  -->
+  <style>
+    :root { --ratio: 1.5; --s0: 1rem; --s-1: calc(var(--s0) / var(--ratio)); --s1: calc(var(--s0) * var(--ratio)); }
+
+    body { margin: 0; font-family: system-ui, sans-serif; color: black; background-color: white; }
+
+    /* The product-card component is dropped into various slots — sidebar, main column, full-width hero — but its responsive behaviour is tied to the viewport instead of to its own container. */
+    .product-card {
+      padding: var(--s1);
+      border: 1px solid ButtonFace;
+    }
+
+    .product-card__media {
+      display: block;
+      inline-size: 100%;
+    }
+
+    /* VIOLATION: ELP_019 (Container Query Measurement Invariance) — the card adapts to viewport width, not to the width of its own container; the same card reads "wide" in a narrow sidebar on a large screen and "narrow" in a full-width slot on a small screen */
+    @media (min-width: 720px) {
+      .product-card {
+        display: grid;
+        grid-template-columns: 12rem 1fr;
+        gap: var(--s1);
+      }
+    }
+
+    /* VIOLATION: ELP_019 — a second viewport-keyed breakpoint cements the coupling between component layout and viewport size, making the component non-portable across slots */
+    @media (min-width: 1024px) {
+      .product-card {
+        grid-template-columns: 16rem 1fr auto;
+      }
+    }
+
+    /* VIOLATION: ELP_020 (Inline-Size Containment Default) — the wrapper is the natural query host but has no container-type: inline-size, so descendants cannot use @container queries at all */
+    .product-card-host {
+      /* intentionally missing: container-type: inline-size; */
+      padding-block: var(--s1);
+    }
+
+    /* VIOLATION: ELP_009 (Algorithmic Self-Governing Layout) — the component relies on viewport magic numbers (720px, 1024px) instead of establishing a CQ context and letting @container (inline-size > 30rem) self-govern */
+    .product-card__meta {
+      margin-block-start: var(--s-1);
+    }
+  </style>
+</head>
+<body>
+  <aside class="product-card-host" style="inline-size: 22rem">
+    <article class="product-card">
+      <img class="product-card__media" src="placeholder.jpg" alt="Silver gelatin print, 8x10, Hale County 1972">
+      <div class="product-card__meta">
+        <h3>Silver gelatin print, 8x10</h3>
+        <p>Hale County, 1972. Signed verso. Edition of 12.</p>
+      </div>
+    </article>
+  </aside>
+
+  <main class="product-card-host">
+    <article class="product-card">
+      <img class="product-card__media" src="placeholder.jpg" alt="Contact sheet, 35mm, Roll 043">
+      <div class="product-card__meta">
+        <h3>Contact sheet, 35 mm</h3>
+        <p>Roll 043. Annotations in graphite on mat-board overlay.</p>
+      </div>
+    </article>
+  </main>
+
+  <!--
+    Correct version would put .product-card-host { container-type: inline-size } on the
+    wrapper and rewrite the breakpoints as @container (inline-size > 30rem) { .product-card
+    { display: grid; grid-template-columns: 12rem 1fr } }, so the card adapts to its slot
+    rather than the viewport and can be dropped into Sidebar/Grid/Switcher contexts freely.
+  -->
+</body>
+</html>

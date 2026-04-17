@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Stack Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Stack Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Empty Stack</h2>
+    <p>Stack with no children should render with no errors.</p>
+    <div class="stack" style="border: 1px dashed #ccc; min-height: 50px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if no errors, empty box renders</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Single Child</h2>
+    <p>Single child should have no margin.</p>
+    <div class="stack">
+      <div class="demo-box">Single child</div>
+    </div>
+    <p class="pass">✓ Pass if child has no top margin</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Many Children (50+)</h2>
+    <p>Stack should handle many children without performance issues.</p>
+    <div class="stack" style="max-height: 300px; overflow: auto">
+      <!-- Generated 50 items -->
+      <div class="demo-box">Item 1</div><div class="demo-box">Item 2</div>
+      <div class="demo-box">Item 3</div><div class="demo-box">Item 4</div>
+      <div class="demo-box">Item 5</div><div class="demo-box">Item 6</div>
+      <div class="demo-box">Item 7</div><div class="demo-box">Item 8</div>
+      <div class="demo-box">Item 9</div><div class="demo-box">Item 10</div>
+      <div class="demo-box">Item 11</div><div class="demo-box">Item 12</div>
+      <div class="demo-box">Item 13</div><div class="demo-box">Item 14</div>
+      <div class="demo-box">Item 15</div><div class="demo-box">Item 16</div>
+      <div class="demo-box">Item 17</div><div class="demo-box">Item 18</div>
+      <div class="demo-box">Item 19</div><div class="demo-box">Item 20</div>
+    </div>
+    <p class="pass">✓ Pass if renders quickly, spacing consistent</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Variable Content Heights</h2>
+    <p>Children of varying heights should maintain consistent spacing.</p>
+    <div class="stack">
+      <div class="demo-box">Short</div>
+      <div class="demo-box">This one has<br>multiple lines<br>of content</div>
+      <div class="demo-box">Short again</div>
+      <div class="demo-box">Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.</div>
+    </div>
+    <p class="pass">✓ Pass if spacing is consistent regardless of height</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Nested Stacks</h2>
+    <p>Inner Stack should have independent spacing from outer.</p>
+    <div class="stack" style="--space: 2rem; border: 2px solid blue; padding: 1rem">
+      <div class="demo-box">Outer item 1</div>
+      <div class="stack" style="--space: 0.5rem; border: 2px solid red; padding: 1rem">
+        <div class="demo-box">Inner item 1</div>
+        <div class="demo-box">Inner item 2</div>
+        <div class="demo-box">Inner item 3</div>
+      </div>
+      <div class="demo-box">Outer item 3</div>
+    </div>
+    <p class="pass">✓ Pass if inner spacing (0.5rem) is different from outer (2rem)</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Zero Spacing</h2>
+    <p>Stack with --space: 0 should have no gaps.</p>
+    <div class="stack" style="--space: 0">
+      <div class="demo-box">Item 1</div>
+      <div class="demo-box">Item 2</div>
+      <div class="demo-box">Item 3</div>
+    </div>
+    <p class="pass">✓ Pass if items are directly touching</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Large Spacing</h2>
+    <p>Stack with very large spacing value.</p>
+    <div class="stack" style="--space: 5rem">
+      <div class="demo-box">Item 1</div>
+      <div class="demo-box">Item 2</div>
+    </div>
+    <p class="pass">✓ Pass if spacing is exactly 5rem</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: With Display: Contents Child</h2>
+    <p>Child with display: contents should be handled.</p>
+    <div class="stack">
+      <div class="demo-box">Normal item</div>
+      <div style="display: contents">
+        <div class="demo-box">Contents child 1</div>
+        <div class="demo-box">Contents child 2</div>
+      </div>
+      <div class="demo-box">Normal item</div>
+    </div>
+    <p class="pass">✓ Pass if display:contents children get spacing</p>
+  </section>
+
+</body>
+</html>

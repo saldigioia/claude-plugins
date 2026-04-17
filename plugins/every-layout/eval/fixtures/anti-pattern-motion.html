@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Fixture: Anti-Pattern Motion Safety</title>
+  <style>
+    /*
+     * ANTI-PATTERN EXAMPLE
+     * This CSS demonstrates motion safety violations (ELP_028)
+     * Used for testing layout audit capabilities
+     */
+
+    /* VIOLATION: No prefers-reduced-motion reset (ELP_028) */
+
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .hero-title {
+      font-size: 3rem;
+      /* VIOLATION: transition: all (ELP_028) */
+      transition: all 0.5s ease;
+    }
+
+    .hero-title:hover {
+      transform: scale(1.1);
+      color: blue;
+    }
+
+    /* VIOLATION: Animation without motion gate (ELP_028) */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .card {
+      padding: 1rem;
+      border: 1px solid #ccc;
+      /* VIOLATION: Animation plays unconditionally (ELP_028) */
+      animation: fadeInUp 0.6s ease-out both;
+    }
+
+    /* VIOLATION: Staggered animations without motion gate (ELP_028) */
+    .card:nth-child(1) { animation-delay: 0.1s; }
+    .card:nth-child(2) { animation-delay: 0.2s; }
+    .card:nth-child(3) { animation-delay: 0.3s; }
+    .card:nth-child(4) { animation-delay: 0.4s; }
+
+    /* VIOLATION: Infinite animation without motion gate (ELP_028) */
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+
+    .cta-button {
+      padding: 0.75rem 1.5rem;
+      background: blue;
+      color: white;
+      border: none;
+      cursor: pointer;
+      animation: pulse 2s infinite;
+    }
+
+    /* VIOLATION: Scroll-driven animation without motion gate (ELP_028) */
+    @keyframes slideIn {
+      from { transform: translateX(-100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    .scroll-reveal {
+      animation: slideIn linear both;
+      animation-timeline: view();
+      animation-range: entry 0% entry 100%;
+    }
+
+    /* VIOLATION: transition: all on hover (ELP_028) */
+    .nav-link {
+      transition: all 0.3s;
+    }
+
+    .nav-link:hover {
+      background: #f0f0f0;
+      padding-left: 1rem;
+      color: blue;
+    }
+
+    /*
+     * VIOLATION: Reduced motion attempt uses 0s instead of 0.01ms (ELP_028)
+     * Using 0s can fire transitionend events incorrectly
+     */
+    @media (prefers-reduced-motion: reduce) {
+      .hero-title {
+        /* VIOLATION: duration 0s instead of 0.01ms */
+        transition-duration: 0s;
+      }
+      /* Note: other animations are NOT gated at all */
+    }
+  </style>
+</head>
+<body>
+  <!--
+    EXPECTED AUDIT RESULT:
+    - Motion Safety Score: 0/3
+    - Violations: 8+
+    - Key issues:
+      1. No global prefers-reduced-motion reset
+      2. transition: all used twice
+      3. Animations play unconditionally (fadeInUp, pulse)
+      4. Staggered delays without motion gate
+      5. Infinite animation without motion gate
+      6. Scroll-driven animation without motion gate
+      7. Partial reduced-motion rule uses 0s instead of 0.01ms
+      8. Most animations not covered by reduced-motion rule
+  -->
+
+  <div class="hero">
+    <h1 class="hero-title">Welcome to Our Site</h1>
+  </div>
+
+  <nav>
+    <a class="nav-link" href="#">Home</a>
+    <a class="nav-link" href="#">About</a>
+    <a class="nav-link" href="#">Contact</a>
+  </nav>
+
+  <section>
+    <div class="card">
+      <h2>Card 1</h2>
+      <p>Content that fades in with animation.</p>
+    </div>
+    <div class="card">
+      <h2>Card 2</h2>
+      <p>Content that fades in with staggered delay.</p>
+    </div>
+    <div class="card">
+      <h2>Card 3</h2>
+      <p>Content that fades in with staggered delay.</p>
+    </div>
+    <div class="card">
+      <h2>Card 4</h2>
+      <p>Content that fades in with staggered delay.</p>
+    </div>
+  </section>
+
+  <button class="cta-button">Get Started</button>
+
+  <div class="scroll-reveal">
+    <p>This content slides in as you scroll.</p>
+  </div>
+</body>
+</html>

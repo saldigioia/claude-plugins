@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anti-pattern: Sidebar (ELC_SIDEBAR)</title>
+  <!--
+    EXPECTED AUDIT RESULT: Score 5-8/24 (F)
+    Fixture category: anti-pattern
+    Primitive under test: ELC_SIDEBAR
+    Most relevant rubric dimensions: Intrinsic Sizing, Responsive Without Breakpoints, Logical Properties
+  -->
+  <style>
+    /* Minimal token block so the fixture doesn't fail spacing for the wrong reason */
+    :root { --ratio: 1.5; --s0: 1rem; --s-1: calc(var(--s0) / var(--ratio)); --s1: calc(var(--s0) * var(--ratio)); }
+
+    body { margin: 0; font-family: system-ui, sans-serif; color: black; background-color: white; }
+
+    .layout {
+      display: flex;
+      gap: var(--s1);
+    }
+
+    /* VIOLATION: ELP_002 (Intrinsic Sizing Over Extrinsic Sizing) — hard-coded pixel width on the sidebar instead of flex-basis + flex-grow so the shape is extrinsic, not content-driven */
+    .sidebar-nav {
+      width: 250px;
+      padding: var(--s1);
+      background-color: ButtonFace;
+    }
+
+    /* VIOLATION: ELP_002 — fixed width on main content prevents the algorithmic fill behaviour of a real Sidebar (flex-basis: 0; flex-grow: 999) */
+    .main-content {
+      width: 800px;
+      padding: var(--s1);
+    }
+
+    /* VIOLATION: ELP_009 (Algorithmic Self-Governing Layout) — media query simulates the fold instead of letting the primitive self-govern via content-min threshold */
+    @media (max-width: 768px) {
+      .layout {
+        flex-direction: column;
+      }
+      .sidebar-nav {
+        width: 100%;
+      }
+      .main-content {
+        width: 100%;
+      }
+    }
+
+    /* VIOLATION: ELP_004 (Logical Properties) — physical width/padding-left/right instead of inline-size and padding-inline */
+    .sidebar-nav ul {
+      list-style: none;
+      padding-left: 0;
+      margin: 0;
+    }
+    .sidebar-nav li + li { margin-top: var(--s-1); }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar-nav">
+      <ul>
+        <li><a href="/archive">Archive</a></li>
+        <li><a href="/issues">Issues</a></li>
+        <li><a href="/contributors">Contributors</a></li>
+        <li><a href="/about">About</a></li>
+      </ul>
+    </aside>
+    <main class="main-content">
+      <h1>Editorial Notes, Spring 1974</h1>
+      <p>Walker Evans spent the morning at the Farm Security Administration darkroom, printing a
+      negative he had shot outside Hale County three years earlier. The contact sheet showed four
+      frames; only one survived his second look.</p>
+    </main>
+  </div>
+
+  <!--
+    Correct version would use .with-sidebar { display: flex; flex-wrap: wrap; gap: var(--s1) },
+    first child with flex-basis: 20rem; flex-grow: 1, and last child with flex-basis: 0;
+    flex-grow: 999; min-inline-size: 50% — no media queries required.
+  -->
+</body>
+</html>

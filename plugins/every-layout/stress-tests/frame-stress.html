@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frame Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .frame-demo { max-inline-size: 400px; }
+    .placeholder { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; width: 800px; height: 600px; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Frame Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Default 16:9 Frame</h2>
+    <p>Frame should maintain 16:9 aspect ratio.</p>
+    <div class="frame frame-demo">
+      <div class="placeholder">16:9</div>
+    </div>
+    <p class="pass">✓ Pass if frame has a widescreen (16:9) aspect ratio</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Square Frame (1:1)</h2>
+    <p>Frame with equal numerator and denominator.</p>
+    <div class="frame frame-demo" style="--n: 1; --d: 1">
+      <div class="placeholder">1:1</div>
+    </div>
+    <p class="pass">✓ Pass if frame is a perfect square</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Tall Frame (9:16)</h2>
+    <p>Portrait-orientation frame.</p>
+    <div class="frame" style="--n: 9; --d: 16; max-inline-size: 200px">
+      <div class="placeholder">9:16</div>
+    </div>
+    <p class="pass">✓ Pass if frame is taller than wide (portrait)</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Ultra-Wide Frame (21:9)</h2>
+    <p>Cinema-style letterbox frame.</p>
+    <div class="frame frame-demo" style="--n: 21; --d: 9">
+      <div class="placeholder">21:9</div>
+    </div>
+    <p class="pass">✓ Pass if frame is very wide relative to height</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Overflow Clipping</h2>
+    <p>Content larger than the frame should be clipped.</p>
+    <div class="frame frame-demo" style="--n: 4; --d: 3">
+      <div class="placeholder" style="width: 1200px; height: 1200px">Large content (should be clipped)</div>
+    </div>
+    <p class="pass">✓ Pass if oversized content is hidden/clipped by the frame</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Empty Frame</h2>
+    <p>Frame with no children should maintain aspect ratio.</p>
+    <div class="frame frame-demo" style="border: 1px dashed #ccc">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty frame maintains 16:9 ratio</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Frame in Narrow Container</h2>
+    <p>Frame should shrink proportionally in narrow containers.</p>
+    <div style="max-inline-size: 150px; border: 1px dashed #ccc">
+      <div class="frame">
+        <div class="placeholder">Narrow</div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if frame maintains 16:9 ratio at narrow width</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Multiple Frames in Grid</h2>
+    <p>Multiple frames should maintain consistent ratios in a grid.</p>
+    <div class="grid" style="--min: 12rem">
+      <div class="frame" style="--n: 1; --d: 1"><div class="placeholder">1:1</div></div>
+      <div class="frame"><div class="placeholder">16:9</div></div>
+      <div class="frame" style="--n: 4; --d: 3"><div class="placeholder">4:3</div></div>
+      <div class="frame" style="--n: 3; --d: 2"><div class="placeholder">3:2</div></div>
+    </div>
+    <p class="pass">✓ Pass if each frame maintains its own ratio</p>
+  </section>
+
+</body>
+</html>

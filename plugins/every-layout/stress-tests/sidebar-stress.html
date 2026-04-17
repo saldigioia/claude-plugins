@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sidebar Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; }
+    .demo-side { background: #c0d8f0; padding: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Sidebar Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Default Sidebar</h2>
+    <p>Two elements: sidebar on left, content on right.</p>
+    <div class="with-sidebar">
+      <div class="demo-side">Sidebar</div>
+      <div class="demo-box">Main content area that fills remaining space.</div>
+    </div>
+    <p class="pass">✓ Pass if sidebar has fixed basis and content fills remaining width</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Narrow Container (Stacking)</h2>
+    <p>Sidebar should stack when container is too narrow.</p>
+    <div style="max-inline-size: 300px; border: 1px dashed #ccc; padding: 0.5rem">
+      <div class="with-sidebar" style="--content-min: 60%">
+        <div class="demo-side">Sidebar</div>
+        <div class="demo-box">Content</div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if elements stack vertically in the narrow container</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Custom Side Width</h2>
+    <p>Different --side-width values.</p>
+    <div class="with-sidebar" style="--side-width: 8rem">
+      <div class="demo-side">Narrow sidebar (8rem)</div>
+      <div class="demo-box">Content with narrow sidebar.</div>
+    </div>
+    <br>
+    <div class="with-sidebar" style="--side-width: 25rem">
+      <div class="demo-side">Wide sidebar (25rem)</div>
+      <div class="demo-box">Content with wide sidebar.</div>
+    </div>
+    <p class="pass">✓ Pass if sidebar widths are visibly different</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: No Stretch Variant</h2>
+    <p>data-no-stretch should prevent cross-axis stretching.</p>
+    <div class="with-sidebar" data-no-stretch>
+      <div class="demo-side">Short sidebar</div>
+      <div class="demo-box">
+        <p>Content with much more text that makes this column significantly taller than the sidebar. The sidebar should not stretch to match this height.</p>
+        <p>More content to increase height further.</p>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if sidebar height is shorter than content height</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Sidebar on Right</h2>
+    <p>Sidebar element as last-child should appear on the right (when content is first).</p>
+    <div class="with-sidebar">
+      <div class="demo-box" style="flex-basis: 0; flex-grow: 999; min-inline-size: 50%">Main content on the left</div>
+      <div class="demo-side" style="flex-basis: 20rem; flex-grow: 1">Sidebar on the right</div>
+    </div>
+    <p class="pass">✓ Pass if main content is left and sidebar is right</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Very Long Sidebar Content</h2>
+    <p>Sidebar with lots of content should expand vertically.</p>
+    <div class="with-sidebar">
+      <div class="demo-side">
+        <p>Nav item 1</p><p>Nav item 2</p><p>Nav item 3</p>
+        <p>Nav item 4</p><p>Nav item 5</p><p>Nav item 6</p>
+        <p>Nav item 7</p><p>Nav item 8</p><p>Nav item 9</p>
+        <p>Nav item 10</p>
+      </div>
+      <div class="demo-box">Short main content.</div>
+    </div>
+    <p class="pass">✓ Pass if sidebar expands and content stretches to match</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Zero Gap</h2>
+    <p>Sidebar with --space: 0 should have no gap between elements.</p>
+    <div class="with-sidebar" style="--space: 0">
+      <div class="demo-side">Sidebar</div>
+      <div class="demo-box">Content</div>
+    </div>
+    <p class="pass">✓ Pass if sidebar and content are directly adjacent</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Empty Content Area</h2>
+    <p>Empty content area should not cause errors.</p>
+    <div class="with-sidebar">
+      <div class="demo-side">Sidebar with content</div>
+      <div style="min-height: 50px; border: 1px dashed #ccc">
+        <!-- Empty content -->
+      </div>
+    </div>
+    <p class="pass">✓ Pass if sidebar displays and empty content area renders</p>
+  </section>
+
+</body>
+</html>

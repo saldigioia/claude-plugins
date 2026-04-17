@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Imposter Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; }
+    .demo-parent { position: relative; background: #f5f5f5; border: 2px solid #ccc; min-block-size: 200px; }
+    .demo-overlay { background: #4a90d9; color: white; padding: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Imposter Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Basic Centered Imposter</h2>
+    <p>Imposter should be centered in its positioned parent.</p>
+    <div class="demo-parent">
+      <p class="demo-box">Background content</p>
+      <div class="imposter demo-overlay">Centered Overlay</div>
+    </div>
+    <p class="pass">✓ Pass if overlay is centered both horizontally and vertically</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Contained Imposter</h2>
+    <p>data-contain should prevent overflow beyond parent.</p>
+    <div class="demo-parent" style="max-inline-size: 300px; min-block-size: 150px">
+      <div class="imposter demo-overlay" data-contain style="--margin: 1rem">
+        <p>This overlay has a lot of content that might overflow but should be constrained by data-contain with a margin of 1rem from the parent edges.</p>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if overlay stays within parent with 1rem margin and scrolls if needed</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Contained with Zero Margin</h2>
+    <p>data-contain with no --margin should fill parent exactly.</p>
+    <div class="demo-parent" style="max-inline-size: 250px; min-block-size: 150px">
+      <div class="imposter demo-overlay" data-contain>
+        <p>Content constrained to parent bounds with zero margin.</p>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if overlay fills parent completely (no margin offset)</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Small Content in Large Parent</h2>
+    <p>Small overlay should stay centered in a large parent.</p>
+    <div class="demo-parent" style="min-block-size: 300px">
+      <div class="imposter demo-overlay" style="max-inline-size: 100px">
+        Small
+      </div>
+    </div>
+    <p class="pass">✓ Pass if small overlay is centered in the large parent</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Multiple Imposters</h2>
+    <p>Multiple Imposters should all center on the same parent.</p>
+    <div class="demo-parent" style="min-block-size: 250px">
+      <div class="imposter" style="background: rgba(255,0,0,0.5); color: white; padding: 0.5rem; transform: translate(-50%, -100%)">Top overlay</div>
+      <div class="imposter demo-overlay">Center overlay</div>
+      <div class="imposter" style="background: rgba(0,128,0,0.5); color: white; padding: 0.5rem; transform: translate(-50%, 0%)">Bottom overlay</div>
+    </div>
+    <p class="pass">✓ Pass if three overlays are visible at different vertical positions</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Imposter with Interactive Content</h2>
+    <p>Imposter with form content should be interactive.</p>
+    <div class="demo-parent" style="min-block-size: 250px">
+      <p class="demo-box">Background content you cannot interact with when overlay is open.</p>
+      <div class="imposter demo-overlay" data-contain style="--margin: 2rem">
+        <div class="stack" style="--space: 0.5rem">
+          <h3>Dialog</h3>
+          <label>Name <input type="text" placeholder="Type here..."></label>
+          <button type="button">Submit</button>
+        </div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if form elements inside the Imposter are focusable and interactive</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Nested Positioned Contexts</h2>
+    <p>Imposter should respect its nearest positioned ancestor.</p>
+    <div class="demo-parent" style="min-block-size: 200px">
+      <div style="position: relative; background: #ffe0e0; padding: 1rem; margin: 2rem; min-block-size: 100px">
+        <p>Inner positioned context</p>
+        <div class="imposter demo-overlay">Centered in inner context</div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if overlay is centered within the inner positioned element, not the outer</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Empty Imposter</h2>
+    <p>Empty Imposter should render without errors.</p>
+    <div class="demo-parent" style="min-block-size: 100px">
+      <div class="imposter" style="border: 2px dashed blue; min-inline-size: 50px; min-block-size: 30px">
+        <!-- Empty -->
+      </div>
+    </div>
+    <p class="pass">✓ Pass if empty Imposter renders centered</p>
+  </section>
+
+</body>
+</html>

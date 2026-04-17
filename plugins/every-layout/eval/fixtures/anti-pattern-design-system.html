@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Fixture: Anti-Pattern Design System</title>
+  <style>
+    /*
+     * ANTI-PATTERN EXAMPLE — Design System Violations
+     * Tests css-design-system skill compliance: token architecture, color theming,
+     * typography, accessibility, and motion safety.
+     */
+
+    /* VIOLATION: No modular scale tokens defined — raw values everywhere */
+
+    body {
+      /* VIOLATION: Arbitrary font-size, no fluid type scale (ELP_005) */
+      font-size: 16px;
+      /* VIOLATION: Hard-coded color, no token tier (ELP_016) */
+      color: #333333;
+      background-color: #ffffff;
+      /* VIOLATION: Physical property (ELP_004) */
+      margin-left: 20px;
+      margin-right: 20px;
+    }
+
+    /* VIOLATION: No @layer ordering — specificity wars incoming */
+
+    h1 {
+      /* VIOLATION: Arbitrary font-size, no scale step (ELP_005) */
+      font-size: 42px;
+      /* VIOLATION: Physical margin (ELP_004) */
+      margin-bottom: 24px;
+      /* VIOLATION: Hard-coded color (ELP_016) */
+      color: #1a1a1a;
+    }
+
+    h2 {
+      font-size: 28px;
+      margin-bottom: 16px;
+    }
+
+    /* VIOLATION: No text-wrap: balance on headings (ELP_030) */
+
+    .button {
+      /* VIOLATION: Hard-coded colors, no token (ELP_016) */
+      background-color: #0066cc;
+      color: white;
+      /* VIOLATION: Arbitrary spacing (ELP_005) */
+      padding: 12px 24px;
+      /* VIOLATION: Arbitrary border-radius */
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      /* VIOLATION: transition without motion gate (ELP_028) */
+      transition: all 0.3s ease;
+    }
+
+    .button:hover {
+      background-color: #0052a3;
+      /* VIOLATION: box-shadow without token (ELP_016) */
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    /* VIOLATION: outline:none without :focus-visible replacement (ELP_029) */
+    .button:focus {
+      outline: none;
+    }
+
+    .card {
+      /* VIOLATION: Arbitrary padding (ELP_005) */
+      padding: 20px;
+      /* VIOLATION: Hard-coded border color (ELP_016) */
+      border: 1px solid #e0e0e0;
+      border-radius: 12px;
+      /* VIOLATION: Fixed shadow, no token, no reduced-motion consideration */
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      /* VIOLATION: transition without motion gate (ELP_028) */
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    }
+
+    /* VIOLATION: No prefers-reduced-motion reset anywhere (ELP_028) */
+
+    .hero {
+      /* VIOLATION: Fixed height (ELP_002) */
+      height: 600px;
+      /* VIOLATION: Hard-coded gradient, no token (ELP_016) */
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      /* VIOLATION: Physical properties (ELP_004) */
+      padding-top: 100px;
+      padding-bottom: 100px;
+    }
+
+    .hero-text {
+      /* VIOLATION: Fixed width (ELP_002) */
+      width: 800px;
+      margin: 0 auto;
+      color: white;
+    }
+
+    /* VIOLATION: z-index without named scale — magic numbers */
+    .modal-overlay {
+      z-index: 9999;
+      position: fixed;
+    }
+
+    .modal {
+      z-index: 10000;
+      position: fixed;
+    }
+
+    .tooltip {
+      z-index: 99999;
+      position: absolute;
+    }
+
+    /* VIOLATION: @font-face without font-display (ELP_032) */
+    @font-face {
+      font-family: 'CustomFont';
+      src: url('/fonts/custom.woff2') format('woff2');
+      /* Missing: font-display: optional */
+    }
+  </style>
+</head>
+<body>
+  <!--
+    EXPECTED AUDIT RESULT:
+    - Score: 2-5/24 (F grade)
+    - Violations: 15+
+    - Key violations: no modular scale tokens, no motion safety, no focus
+      visibility, arbitrary colors, no @layer, no font-display, physical
+      properties, fixed dimensions, z-index magic numbers
+    - Recommended: complete token architecture overhaul, modular scale,
+      prefers-reduced-motion reset, :focus-visible styles
+  -->
+
+  <div class="hero">
+    <div class="hero-text">
+      <h1>Welcome to Our Site</h1>
+      <p>A description that lives inside a fixed-width container.</p>
+      <button class="button">Get Started</button>
+    </div>
+  </div>
+
+  <main>
+    <div class="card">
+      <h2>Feature One</h2>
+      <p>Description with hard-coded spacing and no measure constraint.</p>
+      <button class="button">Learn More</button>
+    </div>
+    <div class="card">
+      <h2>Feature Two</h2>
+      <p>Another card with the same arbitrary values repeated.</p>
+      <button class="button">Learn More</button>
+    </div>
+  </main>
+
+  <div class="modal-overlay">
+    <div class="modal">
+      <p>Modal content with z-index: 10000</p>
+    </div>
+  </div>
+</body>
+</html>

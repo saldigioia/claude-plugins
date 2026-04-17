@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Switcher Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Switcher Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Empty Switcher</h2>
+    <p>Switcher with no children should render without errors.</p>
+    <div class="switcher" style="border: 1px dashed #ccc; min-height: 50px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty Switcher renders</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Two Columns</h2>
+    <p>Two equal-width children above threshold.</p>
+    <div class="switcher" style="--threshold: 20rem">
+      <div class="demo-box">Column 1</div>
+      <div class="demo-box">Column 2</div>
+    </div>
+    <p class="pass">✓ Pass if two columns are equal width</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Three Columns</h2>
+    <p>Three equal-width children above threshold.</p>
+    <div class="switcher" style="--threshold: 20rem">
+      <div class="demo-box">Column 1</div>
+      <div class="demo-box">Column 2</div>
+      <div class="demo-box">Column 3</div>
+    </div>
+    <p class="pass">✓ Pass if three columns are equal width</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Narrow Container (Stacked)</h2>
+    <p>Columns should stack when container is below threshold.</p>
+    <div style="max-inline-size: 250px; border: 1px dashed #ccc; padding: 0.5rem">
+      <div class="switcher" style="--threshold: 30rem">
+        <div class="demo-box">Column 1</div>
+        <div class="demo-box">Column 2</div>
+        <div class="demo-box">Column 3</div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if columns stack to full width</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Limit (data-limit="2")</h2>
+    <p>Maximum 2 columns per row, extras wrap.</p>
+    <div class="switcher" data-limit="2" style="--threshold: 15rem">
+      <div class="demo-box">Item 1</div>
+      <div class="demo-box">Item 2</div>
+      <div class="demo-box">Item 3</div>
+      <div class="demo-box">Item 4</div>
+    </div>
+    <p class="pass">✓ Pass if max 2 items per row, items 3-4 wrap to full-width rows</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Limit (data-limit="3")</h2>
+    <p>Maximum 3 columns per row.</p>
+    <div class="switcher" data-limit="3" style="--threshold: 10rem">
+      <div class="demo-box">Item 1</div>
+      <div class="demo-box">Item 2</div>
+      <div class="demo-box">Item 3</div>
+      <div class="demo-box">Item 4</div>
+      <div class="demo-box">Item 5</div>
+    </div>
+    <p class="pass">✓ Pass if max 3 items per row, items 4-5 wrap to full-width rows</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Variable Height Content</h2>
+    <p>Columns with different content heights should all stretch to match.</p>
+    <div class="switcher" style="--threshold: 20rem">
+      <div class="demo-box">Short</div>
+      <div class="demo-box">This column has<br>significantly<br>more content<br>than the others</div>
+      <div class="demo-box">Medium height content</div>
+    </div>
+    <p class="pass">✓ Pass if all columns are equal height</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Many Columns (6+)</h2>
+    <p>Six children with low threshold should display in a row.</p>
+    <div class="switcher" style="--threshold: 10rem">
+      <div class="demo-box">1</div>
+      <div class="demo-box">2</div>
+      <div class="demo-box">3</div>
+      <div class="demo-box">4</div>
+      <div class="demo-box">5</div>
+      <div class="demo-box">6</div>
+    </div>
+    <p class="pass">✓ Pass if all 6 items display in equal columns (or stack if narrow)</p>
+  </section>
+
+</body>
+</html>

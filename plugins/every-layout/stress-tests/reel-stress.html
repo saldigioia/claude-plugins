@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reel Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; min-block-size: 80px; display: flex; align-items: center; justify-content: center; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Reel Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Empty Reel</h2>
+    <p>Reel with no children should render without errors.</p>
+    <div class="reel" style="border: 1px dashed #ccc; min-height: 50px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty Reel renders</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Few Items (No Overflow)</h2>
+    <p>Items that fit should not show a scrollbar.</p>
+    <div class="reel" style="--item-width: 8rem">
+      <div class="demo-box">Item 1</div>
+      <div class="demo-box">Item 2</div>
+    </div>
+    <p class="pass">✓ Pass if items display without scrollbar</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Many Items (Overflow)</h2>
+    <p>Many items should trigger horizontal scrolling.</p>
+    <div class="reel" style="--item-width: 12rem">
+      <div class="demo-box">Item 1</div><div class="demo-box">Item 2</div>
+      <div class="demo-box">Item 3</div><div class="demo-box">Item 4</div>
+      <div class="demo-box">Item 5</div><div class="demo-box">Item 6</div>
+      <div class="demo-box">Item 7</div><div class="demo-box">Item 8</div>
+      <div class="demo-box">Item 9</div><div class="demo-box">Item 10</div>
+    </div>
+    <p class="pass">✓ Pass if items scroll horizontally with visible scrollbar</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: No Scrollbar Variant</h2>
+    <p>data-no-bar should hide the scrollbar.</p>
+    <div class="reel" data-no-bar style="--item-width: 12rem">
+      <div class="demo-box">Item 1</div><div class="demo-box">Item 2</div>
+      <div class="demo-box">Item 3</div><div class="demo-box">Item 4</div>
+      <div class="demo-box">Item 5</div><div class="demo-box">Item 6</div>
+    </div>
+    <p class="pass">✓ Pass if no scrollbar is visible but content is scrollable</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Scroll Snap</h2>
+    <p>data-snap should snap items on scroll.</p>
+    <div class="reel" data-snap style="--item-width: 15rem">
+      <div class="demo-box">Snap 1</div>
+      <div class="demo-box">Snap 2</div>
+      <div class="demo-box">Snap 3</div>
+      <div class="demo-box">Snap 4</div>
+      <div class="demo-box">Snap 5</div>
+    </div>
+    <p class="pass">✓ Pass if scrolling snaps to item boundaries</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Proximity Snap</h2>
+    <p>data-snap="proximity" should snap less strictly.</p>
+    <div class="reel" data-snap="proximity" style="--item-width: 15rem">
+      <div class="demo-box">Prox 1</div>
+      <div class="demo-box">Prox 2</div>
+      <div class="demo-box">Prox 3</div>
+      <div class="demo-box">Prox 4</div>
+    </div>
+    <p class="pass">✓ Pass if scrolling snaps loosely (proximity) near item boundaries</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Fixed Height</h2>
+    <p>--height should constrain the Reel's block size.</p>
+    <div class="reel" style="--item-width: 10rem; --height: 120px">
+      <div class="demo-box">Item 1</div>
+      <div class="demo-box">Item 2</div>
+      <div class="demo-box">Item 3</div>
+    </div>
+    <p class="pass">✓ Pass if Reel height is exactly 120px</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Variable Width Items</h2>
+    <p>Items without --item-width should use their intrinsic width.</p>
+    <div class="reel">
+      <div class="demo-box">Short</div>
+      <div class="demo-box">A moderately long item</div>
+      <div class="demo-box">X</div>
+      <div class="demo-box">This item has quite a bit more content than others</div>
+      <div class="demo-box">End</div>
+    </div>
+    <p class="pass">✓ Pass if items have varying widths based on content</p>
+  </section>
+
+</body>
+</html>

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cover Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .demo-box { background: #e0e0e0; padding: 1rem; }
+    .cover-demo { background: #f5f5f5; border: 2px solid #ccc; }
+    .pass { color: green; }
+    .fail { color: red; }
+  </style>
+</head>
+<body>
+  <h1>Cover Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Basic Cover with Centered Element</h2>
+    <p>Centered element should be vertically centered in the cover.</p>
+    <div class="cover cover-demo" style="--min-height: 300px">
+      <header class="demo-box">Header</header>
+      <div data-centered class="demo-box">Centered Content</div>
+      <footer class="demo-box">Footer</footer>
+    </div>
+    <p class="pass">✓ Pass if centered element is vertically centered between header and footer</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: No Header</h2>
+    <p>Cover with only centered element and footer.</p>
+    <div class="cover cover-demo" style="--min-height: 250px">
+      <div data-centered class="demo-box">Centered (no header)</div>
+      <footer class="demo-box">Footer</footer>
+    </div>
+    <p class="pass">✓ Pass if centered element is pushed toward vertical center</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: No Footer</h2>
+    <p>Cover with only header and centered element.</p>
+    <div class="cover cover-demo" style="--min-height: 250px">
+      <header class="demo-box">Header</header>
+      <div data-centered class="demo-box">Centered (no footer)</div>
+    </div>
+    <p class="pass">✓ Pass if centered element is pushed toward vertical center</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Only Centered Element</h2>
+    <p>Cover with a single centered child.</p>
+    <div class="cover cover-demo" style="--min-height: 250px">
+      <div data-centered class="demo-box">Only element, centered</div>
+    </div>
+    <p class="pass">✓ Pass if element is vertically centered</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: No Padding Variant</h2>
+    <p>data-no-pad should remove all cover padding.</p>
+    <div class="cover cover-demo" data-no-pad style="--min-height: 200px">
+      <header class="demo-box">Header (no pad)</header>
+      <div data-centered class="demo-box">Centered</div>
+      <footer class="demo-box">Footer</footer>
+    </div>
+    <p class="pass">✓ Pass if cover has no padding (children touch edges)</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Content Taller Than Min-Height</h2>
+    <p>Cover should expand when content exceeds min-height.</p>
+    <div class="cover cover-demo" style="--min-height: 100px">
+      <header class="demo-box">Header</header>
+      <div data-centered class="demo-box">
+        <p>Line 1</p><p>Line 2</p><p>Line 3</p><p>Line 4</p>
+        <p>Line 5</p><p>Line 6</p><p>Line 7</p><p>Line 8</p>
+      </div>
+      <footer class="demo-box">Footer</footer>
+    </div>
+    <p class="pass">✓ Pass if cover expands beyond 100px to fit all content</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Large Min-Height</h2>
+    <p>Cover with very large min-height.</p>
+    <div class="cover cover-demo" style="--min-height: 500px">
+      <header class="demo-box">Header</header>
+      <div data-centered class="demo-box">Centered in 500px cover</div>
+      <footer class="demo-box">Footer</footer>
+    </div>
+    <p class="pass">✓ Pass if cover is at least 500px tall with centered element in middle</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Empty Cover</h2>
+    <p>Cover with no children should not cause errors.</p>
+    <div class="cover cover-demo" style="--min-height: 100px">
+      <!-- Empty -->
+    </div>
+    <p class="pass">✓ Pass if empty Cover renders at min-height</p>
+  </section>
+
+</body>
+</html>

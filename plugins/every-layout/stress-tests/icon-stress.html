@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Icon Stress Test</title>
+  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <style>
+    body { padding: 2rem; font-family: system-ui; }
+    .test-section { margin-bottom: 3rem; }
+    .test-section h2 { margin-bottom: 1rem; }
+    .pass { color: green; }
+    .fail { color: red; }
+    /* Simple inline SVG for testing */
+    .test-icon { fill: currentColor; }
+  </style>
+  <!-- SVG sprite for test icons -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display: none">
+    <symbol id="test-star" viewBox="0 0 24 24">
+      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+    </symbol>
+    <symbol id="test-check" viewBox="0 0 24 24">
+      <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+    </symbol>
+  </svg>
+</head>
+<body>
+  <h1>Icon Stress Tests</h1>
+
+  <section class="test-section">
+    <h2>Test 1: Basic Icon with Text</h2>
+    <p>Icon should align with text baseline and scale with font.</p>
+    <p>
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Favorite
+      </span>
+    </p>
+    <p class="pass">✓ Pass if icon is aligned with text baseline and roughly text-height</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Different Font Sizes</h2>
+    <p>Icon should scale proportionally with text size.</p>
+    <p style="font-size: 0.75rem">
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Small text (0.75rem)
+      </span>
+    </p>
+    <p style="font-size: 1rem">
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Normal text (1rem)
+      </span>
+    </p>
+    <p style="font-size: 2rem">
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Large text (2rem)
+      </span>
+    </p>
+    <p style="font-size: 3rem">
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Extra large (3rem)
+      </span>
+    </p>
+    <p class="pass">✓ Pass if icon scales proportionally at each font size</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: Icon Color Inheritance</h2>
+    <p>Icon should inherit its parent's color.</p>
+    <p style="color: red">
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Red text and icon
+      </span>
+    </p>
+    <p style="color: blue">
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Blue text and icon
+      </span>
+    </p>
+    <p style="color: green">
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Green text and icon
+      </span>
+    </p>
+    <p class="pass">✓ Pass if icon color matches surrounding text color</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: Icon-Only (No Text)</h2>
+    <p>Icon with no text should still render at correct size.</p>
+    <p>
+      Before
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+      </span>
+      After
+    </p>
+    <p class="pass">✓ Pass if icon renders inline between "Before" and "After"</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: Multiple Icons in Cluster</h2>
+    <p>Icons in a cluster should maintain alignment.</p>
+    <div class="cluster" style="--space: var(--s0)">
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Stars
+      </span>
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-check"></use></svg>
+        Checks
+      </span>
+      <span class="with-icon">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        More Stars
+      </span>
+    </div>
+    <p class="pass">✓ Pass if all icons align consistently with their text in the cluster</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Custom Spacing</h2>
+    <p>--space should control gap between icon and text.</p>
+    <p>
+      <span class="with-icon" style="--space: 0">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Zero space
+      </span>
+    </p>
+    <p>
+      <span class="with-icon" style="--space: 1em">
+        <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg>
+        Large space (1em)
+      </span>
+    </p>
+    <p class="pass">✓ Pass if spacing between icon and text differs between examples</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Icon in Button</h2>
+    <p>Icon inside a button should scale with button font size.</p>
+    <button class="with-icon" style="font-size: 1rem; padding: 0.5em 1em">
+      <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-check"></use></svg>
+      Confirm
+    </button>
+    <button class="with-icon" style="font-size: 1.5rem; padding: 0.5em 1em">
+      <svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-check"></use></svg>
+      Large Button
+    </button>
+    <p class="pass">✓ Pass if icons scale with button font size</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: Many Icons in a Row</h2>
+    <p>Many icons in sequence should remain inline.</p>
+    <p>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      <span class="with-icon"><svg class="icon test-icon" aria-hidden="true" focusable="false"><use href="#test-star"></use></svg></span>
+      (10 stars)
+    </p>
+    <p class="pass">✓ Pass if all 10 icons display inline on one line</p>
+  </section>
+
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anti-pattern: Imposter (ELC_IMPOSTER)</title>
+  <!--
+    EXPECTED AUDIT RESULT: Score 4-8/24 (F)
+    Fixture category: anti-pattern
+    Primitive under test: ELC_IMPOSTER
+    Most relevant rubric dimensions: Logical Properties, Intrinsic Sizing, Accessibility
+  -->
+  <style>
+    :root { --ratio: 1.5; --s0: 1rem; --s-1: calc(var(--s0) / var(--ratio)); --s1: calc(var(--s0) * var(--ratio)); }
+
+    body { margin: 0; font-family: system-ui, sans-serif; color: black; background-color: white; }
+
+    .backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: ButtonFace;
+    }
+
+    /* VIOLATION: ELP_004 (Logical Properties) — physical top/left for centering instead of inset-block-start / inset-inline-start; breaks in RTL and vertical writing modes */
+    .modal {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: var(--s1);
+      background-color: white;
+      border: 1px solid black;
+    }
+
+    /* VIOLATION: ELP_002 (Intrinsic Sizing Over Extrinsic Sizing) — hard-coded width overflows the viewport on narrow screens; a real Imposter uses max-inline-size: min(100%, var(--max)) with a margin so the modal cannot exceed its positioning context */
+    .modal {
+      width: 600px;
+    }
+
+    /* VIOLATION: ELP_002 — no max-block-size or overflow handling, so long content escapes the viewport with no scrollbar; the contain-mode escape hatch is missing */
+    .modal-body {
+      padding-block-start: var(--s-1);
+    }
+
+    /* VIOLATION: ELP_004 — physical margin-right for the close button; should be margin-inline-end */
+    .modal-close {
+      float: right;
+      margin-right: -0.25rem;
+      margin-top: -0.25rem;
+      background: transparent;
+      border: 0;
+      font-size: 1.25rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Archive Search</h1>
+    <p>Results are filtered by roll number and exposure date.</p>
+  </main>
+
+  <div class="backdrop" aria-hidden="true"></div>
+  <div class="modal" role="dialog" aria-labelledby="dlg-title" aria-modal="true">
+    <button class="modal-close" aria-label="Close dialog">&times;</button>
+    <h2 id="dlg-title">Confirm deaccession</h2>
+    <div class="modal-body">
+      <p>This action removes the selected print from the active catalogue. The negative and
+      accession record remain in cold storage. Deaccession notes are retained indefinitely.</p>
+    </div>
+  </div>
+
+  <!--
+    Correct version would use .imposter { position: absolute; inset-block-start: 50%;
+    inset-inline-start: 50%; transform: translate(-50%, -50%); max-inline-size: min(100%,
+    var(--max)); max-block-size: calc(100% - (var(--margin) * 2)); overflow: auto } inside a
+    position: relative ancestor — fully logical, contained, and intrinsically sized.
+  -->
+</body>
+</html>

@@ -1,0 +1,33 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import Card from '../components/Card.astro';
+
+const works = (await getCollection('works'))
+  .sort((a, b) => b.data.year - a.data.year);
+
+const types = [...new Set(works.map(w => w.data.type))];
+---
+
+<Base title="Archive" description="Complete works archive">
+  <h1>Archive</h1>
+
+  {types.map(type => (
+    <section class="stack">
+      <h2>{type}s</h2>
+      <div class="grid" style="--min: 18rem">
+        {works
+          .filter(w => w.data.type === type)
+          .map(work => (
+            <Card
+              title={work.data.title}
+              slug={work.id}
+              year={work.data.year}
+              type={work.data.type}
+              description={work.data.description}
+            />
+          ))}
+      </div>
+    </section>
+  ))}
+</Base>

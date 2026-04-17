@@ -1,0 +1,80 @@
+---
+// FIXTURE: Non-compliant Astro layout for evaluation
+// This layout has multiple violations of the astro-site-architect patterns.
+// Use with eval/prompts/astro_site_architect.md
+
+// Violation 1: No typed Props interface
+const title = Astro.props.title;
+---
+
+<!-- Violation 2: No doctype or lang attribute -->
+<html>
+<head>
+  <title>{title}</title>
+  <!-- Violation 3: No critical CSS inline — all CSS loaded as external file -->
+  <link rel="stylesheet" href="/styles/all.css" />
+  <!-- Violation 4: No viewport meta tag -->
+</head>
+<body>
+  <!-- Violation 5: No skip link -->
+
+  <!-- Violation 6: No Cover > Center > Stack spine -->
+  <div class="wrapper" style="max-width: 1200px; margin: 0 auto; padding: 0 20px;">
+    <!-- Violation 7: Physical properties (max-width, margin, padding with px) -->
+
+    <header>
+      <h1>{title}</h1>
+    </header>
+
+    <!-- Violation 8: No main landmark or id for skip link target -->
+    <div class="content">
+      <slot />
+    </div>
+
+    <footer>
+      <p>Footer</p>
+    </footer>
+  </div>
+
+  <!-- Violation 9: Unnecessary client-side JS for something CSS can handle -->
+  <script>
+    document.querySelectorAll('.accordion-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.nextElementSibling.classList.toggle('open');
+      });
+    });
+  </script>
+</body>
+</html>
+
+<style>
+  /* Violation 10: Arbitrary pixel values */
+  .wrapper {
+    max-width: 1200px;
+    padding: 0 20px;
+  }
+
+  /* Violation 11: Media query for layout */
+  @media (min-width: 768px) {
+    .content {
+      display: grid;
+      grid-template-columns: 250px 1fr;
+    }
+  }
+
+  /* Violation 12: Physical properties */
+  .content {
+    margin-left: 20px;
+    margin-right: 20px;
+  }
+
+  /* Violation 13: No motion safety */
+  .accordion-content {
+    transition: all 0.3s ease;
+  }
+
+  /* Violation 14: Focus ring removed without replacement */
+  a:focus {
+    outline: none;
+  }
+</style>

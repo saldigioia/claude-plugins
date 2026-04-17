@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anti-pattern: Reel (ELC_REEL)</title>
+  <!--
+    EXPECTED AUDIT RESULT: Score 5-9/24 (F)
+    Fixture category: anti-pattern
+    Primitive under test: ELC_REEL
+    Most relevant rubric dimensions: Intrinsic Sizing, Accessibility, Focus Visibility
+  -->
+  <style>
+    :root { --ratio: 1.5; --s0: 1rem; --s-1: calc(var(--s0) / var(--ratio)); --s1: calc(var(--s0) * var(--ratio)); }
+
+    body { margin: 0; font-family: system-ui, sans-serif; color: black; background-color: white; }
+
+    /* VIOLATION: ELP_002 (Intrinsic Sizing Over Extrinsic Sizing) — hard-coded container width forces horizontal overflow on any viewport narrower than 800px instead of sizing to available inline space */
+    .gallery {
+      width: 800px;
+      overflow: auto;
+      white-space: nowrap;
+      padding: var(--s1);
+    }
+
+    /* VIOLATION: ELP_002 — fixed pixel thumb size; a real Reel uses flex: 0 0 var(--item-width) so the item width is an author-tunable token, and uses logical properties for spacing */
+    .gallery .thumb {
+      display: inline-block;
+      width: 240px;
+      height: 160px;
+      margin-right: 12px;
+      background-color: ButtonFace;
+      vertical-align: top;
+    }
+
+    /* VIOLATION: ELP_029 (Focus Visibility) — scrollbar hidden with no :focus-visible fallback or keyboard affordance, so keyboard users cannot tell the region is scrollable and lose the focus indicator too */
+    .gallery::-webkit-scrollbar { display: none; }
+    .gallery { scrollbar-width: none; }
+
+    /* VIOLATION: ELP_009 (Algorithmic Self-Governing Layout) — no scroll-snap-type or scroll-padding, so the carousel drifts to arbitrary offsets instead of aligning items algorithmically */
+    /* (intentionally absent — the absence is the violation) */
+
+    .thumb-caption {
+      display: block;
+      font-size: 0.875rem;
+      padding: var(--s-1);
+      white-space: normal;
+    }
+  </style>
+</head>
+<body>
+  <section>
+    <h2>Contact Sheets, 1972</h2>
+    <div class="gallery">
+      <figure class="thumb">
+        <span class="thumb-caption">Roll 042 — Hale County exteriors</span>
+      </figure>
+      <figure class="thumb">
+        <span class="thumb-caption">Roll 043 — Interior portraits, Burroughs family</span>
+      </figure>
+      <figure class="thumb">
+        <span class="thumb-caption">Roll 044 — Storefronts along Highway 80</span>
+      </figure>
+      <figure class="thumb">
+        <span class="thumb-caption">Roll 045 — Cotton gin, late afternoon</span>
+      </figure>
+      <figure class="thumb">
+        <span class="thumb-caption">Roll 046 — Schoolhouse, vacant classroom</span>
+      </figure>
+    </div>
+  </section>
+
+  <!--
+    Correct version would use .reel { display: flex; overflow-x: auto; overflow-y: hidden;
+    scroll-snap-type: inline mandatory; scroll-padding-inline: var(--s1) } with children
+    { flex: 0 0 var(--item-width, auto); scroll-snap-align: start } and margin-inline-start
+    via the lobotomized-owl selector for gap — no fixed container width, scrollbar visible.
+  -->
+</body>
+</html>

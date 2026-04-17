@@ -1,0 +1,76 @@
+---
+/**
+ * /react-port/ — Integration test for the framework-implementations skill.
+ *
+ * Demonstrates that React layout primitives (Stack, Grid, Sidebar) from the
+ * plugin's port catalog can host static Astro-rendered content as children.
+ * The primitives provide structural layout; Card.astro provides the card markup.
+ *
+ * Hydration: client:visible — the layout primitives are below the fold in a
+ * gallery context, so deferring hydration until the element enters the viewport
+ * avoids paying the React runtime cost on initial load. The primitives carry no
+ * server-rendered state that would break on hydration mismatch because their
+ * only output is inline CSS custom properties and class names — both of which
+ * Astro serialises correctly into the static HTML shell before hydration fires.
+ */
+import { getCollection } from 'astro:content';
+import Base from '../../layouts/Base.astro';
+import Card from '../../components/Card.astro';
+import { Sidebar, Grid, Stack } from '../../components/react-ports/index';
+
+const works = (await getCollection('works'))
+  .sort((a, b) => b.data.year - a.data.year);
+
+const types = [...new Set(works.map(w => w.data.type))];
+---
+
+<Base
+  title="React Port Demo — Every Layout"
+  description="Integration test: React layout primitives hosting Astro Card components"
+>
+  <Stack client:visible space="var(--s2)">
+    <header>
+      <h1>React Port Demo</h1>
+      <p>
+        This page exercises <strong>Stack</strong>, <strong>Sidebar</strong>, and
+        <strong>Grid</strong> from the plugin's React port catalog. The layout
+        primitives are React islands; the cards inside are static Astro components.
+        Hydration directive: <code>client:visible</code>.
+      </p>
+    </header>
+
+    <Sidebar client:visible sideWidth="14rem" contentMin="60%" space="var(--s2)">
+      <nav aria-label="Work types">
+        <Stack space="var(--s-1)">
+          <strong>By type</strong>
+          {types.map(type => (
+            <a href={`#type-${type}`}>{type}</a>
+          ))}
+        </Stack>
+      </nav>
+
+      <div>
+        <Stack space="var(--s2)">
+          {types.map(type => (
+            <section id={`type-${type}`}>
+              <h2>{type}s</h2>
+              <Grid client:visible min="18rem" space="var(--s1)">
+                {works
+                  .filter(w => w.data.type === type)
+                  .map(work => (
+                    <Card
+                      title={work.data.title}
+                      slug={work.id}
+                      year={work.data.year}
+                      type={work.data.type}
+                      description={work.data.description}
+                    />
+                  ))}
+              </Grid>
+            </section>
+          ))}
+        </Stack>
+      </div>
+    </Sidebar>
+  </Stack>
+</Base>

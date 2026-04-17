@@ -1,0 +1,22 @@
+---
+interface Props {
+  title: string;
+  slug: string;
+  year: number;
+  type: string;
+  description?: string | null;
+}
+
+const { title, slug, year, type, description } = Astro.props;
+---
+
+<article class="box stack" style="--space: var(--s-1)">
+  <h3>
+    <a href={`/works/${slug}/`}>{title}</a>
+  </h3>
+  <div class="cluster" style="--space: var(--s-2)">
+    <span>{year}</span>
+    <span>{type}</span>
+  </div>
+  {description && <p>{description}</p>}
+</article>

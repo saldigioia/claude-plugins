@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Artsheet Generator Demo</title>
+  <style>
+    /* ========================================
+       EVERY LAYOUT - Vanilla CSS Toolkit
+       Based on "Every Layout" by Andy Bell
+       and Heydon Pickering (v1.0.0)
+       ======================================== */
+
+    :root {
+      --ratio: 1.5;
+      --s-5: calc(var(--s-4) / var(--ratio));
+      --s-4: calc(var(--s-3) / var(--ratio));
+      --s-3: calc(var(--s-2) / var(--ratio));
+      --s-2: calc(var(--s-1) / var(--ratio));
+      --s-1: calc(var(--s0) / var(--ratio));
+      --s0: 1rem;
+      --s1: calc(var(--s0) * var(--ratio));
+      --s2: calc(var(--s1) * var(--ratio));
+      --s3: calc(var(--s2) * var(--ratio));
+      --s4: calc(var(--s3) * var(--ratio));
+      --s5: calc(var(--s4) * var(--ratio));
+      --measure: 60ch;
+      --color-dark: #000;
+      --color-light: #fff;
+      --border-thin: 1px;
+      --border-thick: 4px;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    *, *::before, *::after {
+      border-style: solid;
+      border-width: 0;
+    }
+    img { max-inline-size: 100%; block-size: auto; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    :focus-visible { outline: 3px solid currentColor; outline-offset: 3px; }
+    :focus:not(:focus-visible) { outline: none; }
+
+    /* Stack (ELC_STACK) */
+    .stack { display: flex; flex-direction: column; justify-content: flex-start; }
+    .stack > * { margin-block: 0; }
+    .stack > * + * { margin-block-start: var(--space, var(--s1)); }
+
+    /* Box (ELC_BOX) */
+    .box {
+      padding: var(--padding, var(--s1));
+      border-width: var(--border-width, var(--border-thin));
+      color: var(--color-dark);
+      background-color: var(--color-light);
+    }
+    .box * { color: inherit; }
+    .box[data-invert] {
+      color: var(--color-light);
+      background-color: var(--color-dark);
+    }
+
+    /* Center (ELC_CENTER) */
+    .center {
+      box-sizing: content-box;
+      max-inline-size: var(--measure);
+      margin-inline: auto;
+      padding-inline: var(--gutter, var(--s1));
+    }
+
+    /* Cluster (ELC_CLUSTER) */
+    .cluster {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space, var(--s1));
+      justify-content: var(--justify, flex-start);
+      align-items: var(--align, center);
+    }
+
+    /* Sidebar (ELC_SIDEBAR) */
+    .with-sidebar { display: flex; flex-wrap: wrap; gap: var(--space, var(--s1)); }
+    .with-sidebar > * { flex-grow: 1; }
+    .with-sidebar > :first-child { flex-basis: var(--side-width, 20rem); }
+    .with-sidebar > :last-child { flex-basis: 0; flex-grow: 999; min-inline-size: var(--content-min, 50%); }
+    .with-sidebar[data-no-stretch] { align-items: flex-start; }
+
+    /* Imposter (ELC_IMPOSTER) */
+    .imposter {
+      position: var(--positioning, absolute);
+      inset-block-start: 50%;
+      inset-inline-start: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    /* ========================================
+       APPLICATION TOKENS
+       ======================================== */
+
+    :root {
+      --color-header: #444;
+      --color-body-bg: #f0f0f0;
+      --color-section-bg: #fff;
+      --color-accent-red: #cc3333;
+      --color-accent-gold: #d4a017;
+      --color-btn-gray: #777;
+      --color-input-border: #ccc;
+      --color-dropzone-border: #aaa;
+    }
+
+    /* ========================================
+       COMPONENT STYLES
+       ======================================== */
+
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.5;
+      background: var(--color-body-bg);
+      padding: var(--s1);
+    }
+
+    /* Section headers */
+    .section-header {
+      background-color: var(--color-header) !important;
+      --padding: var(--s-1) var(--s1);
+      --border-width: 0;
+    }
+    .section-header h2 {
+      font-size: var(--s0);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 700;
+    }
+
+    /* Section body */
+    .section-body {
+      background-color: var(--color-section-bg);
+      border: var(--border-thin) solid var(--color-input-border);
+      border-block-start: none;
+      --border-width: 0;
+    }
+
+    /* Form elements */
+    input[type="text"],
+    input[type="search"],
+    select,
+    textarea {
+      padding: var(--s-2) var(--s-1);
+      border: var(--border-thin) solid var(--color-input-border);
+      font: inherit;
+      font-size: var(--s0);
+      background: #fff;
+      color: #333;
+    }
+    textarea {
+      inline-size: 100%;
+      min-block-size: 6rem;
+      resize: vertical;
+    }
+    select {
+      cursor: pointer;
+      appearance: auto;
+    }
+
+    /* Labels */
+    .form-label {
+      font-weight: 700;
+      text-transform: uppercase;
+      font-size: var(--s-1);
+      white-space: nowrap;
+    }
+
+    /* SEASON dropdown */
+    .season-select {
+      border-inline-start: var(--border-thick) solid var(--color-accent-gold);
+      background-color: var(--color-header);
+      color: #fff;
+      padding: var(--s-2) var(--s1);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    /* + ADD GROUND COLOR button */
+    .btn-add {
+      background-color: var(--color-accent-red);
+      color: #fff;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: var(--s-1) var(--s1);
+      border: none;
+      cursor: pointer;
+      align-self: flex-start;
+      font-size: var(--s-1);
+      letter-spacing: 0.03em;
+    }
+    .btn-add:hover { opacity: 0.85; }
+
+    /* GENERATE ARTSHEET button */
+    .btn-generate {
+      background-color: var(--color-btn-gray);
+      color: #fff;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: var(--s-1) var(--s2);
+      border: none;
+      cursor: pointer;
+      font-size: var(--s0);
+      letter-spacing: 0.03em;
+    }
+    .btn-generate:hover { opacity: 0.85; }
+
+    /* SIZE RANGE trigger button */
+    .btn-size-range {
+      background: #fff;
+      border: var(--border-thin) solid var(--color-input-border);
+      padding: var(--s-2) var(--s-1);
+      cursor: pointer;
+      font: inherit;
+      text-transform: uppercase;
+      font-weight: 700;
+      font-size: var(--s-1);
+      white-space: nowrap;
+    }
+
+    /* Multi-select dropdown panel (Imposter override) */
+    .size-range-wrapper {
+      position: relative;
+    }
+    .size-range-wrapper .imposter {
+      display: none;
+      inset-block-start: 100%;
+      inset-inline-start: 0;
+      transform: none;
+      z-index: 10;
+      min-inline-size: 12rem;
+    }
+    .size-range-wrapper[data-open] .imposter {
+      display: block;
+    }
+    .multiselect-panel {
+      background: #fff;
+      border: var(--border-thin) solid var(--color-input-border);
+      box-shadow: 0 var(--s-2) var(--s1) rgba(0,0,0,0.15);
+      --padding: var(--s-1);
+      --border-width: 0;
+    }
+    .multiselect-panel input[type="search"] {
+      inline-size: 100%;
+      margin-block-end: var(--s-2);
+    }
+    .multiselect-panel label {
+      display: flex;
+      align-items: center;
+      gap: var(--s-2);
+      font-weight: 400;
+      text-transform: none;
+      font-size: var(--s0);
+      cursor: pointer;
+      padding: var(--s-2) 0;
+    }
+    .multiselect-panel label:hover {
+      background: #f5f5f5;
+    }
+    .multiselect-panel input[type="checkbox"] {
+      inline-size: var(--s0);
+      block-size: var(--s0);
+      accent-color: #333;
+    }
+
+    /* Drop zone */
+    .dropzone {
+      border: 2px dashed var(--color-dropzone-border);
+      min-block-size: 10rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: var(--s-1);
+      text-align: center;
+      color: #999;
+      padding: var(--s1);
+      transition: border-color 0.2s, background-color 0.2s;
+    }
+    .dropzone:hover,
+    .dropzone[data-active] {
+      border-color: var(--color-accent-gold);
+      background-color: #fffde7;
+      color: #666;
+    }
+    .dropzone svg {
+      inline-size: var(--s3);
+      block-size: var(--s3);
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.5;
+    }
+
+    /* Color checkbox */
+    .color-checkbox {
+      inline-size: var(--s1);
+      block-size: var(--s1);
+      accent-color: #333;
+      cursor: pointer;
+    }
+
+    /* Dimension inputs */
+    .dim-input {
+      max-inline-size: 5rem;
+    }
+
+    /* No-gap stack helper for binding header to body */
+    .stack-flush > * + * {
+      margin-block-start: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- CENTER (ELC_CENTER): page container -->
+  <div class="center" style="--measure: 80rem">
+
+    <!-- STACK (ELC_STACK): vertical section flow -->
+    <form class="stack" style="--space: var(--s1)" onsubmit="event.preventDefault()">
+
+      <!-- ============================
+           SECTION 1: PRODUCT DETAILS
+           ============================ -->
+      <section class="stack" style="--space: 0">
+        <!-- BOX[data-invert] (ELC_BOX): dark header bar -->
+        <div class="box section-header" data-invert>
+          <h2>Product Details</h2>
+        </div>
+
+        <!-- BOX (ELC_BOX): white content area -->
+        <div class="box section-body">
+          <div class="stack" style="--space: var(--s1)">
+
+            <!-- CLUSTER (ELC_CLUSTER): horizontal controls row -->
+            <div class="cluster" style="--space: var(--s-1); --align: flex-end">
+              <select class="season-select" aria-label="Season">
+                <option>Season</option>
+                <option>Spring</option>
+                <option>Summer</option>
+                <option>Fall</option>
+                <option>Winter</option>
+              </select>
+              <select aria-label="Year">
+                <option>SS'24</option>
+                <option>FW'24</option>
+                <option>SS'25</option>
+                <option>FW'25</option>
+              </select>
+              <select aria-label="Company">
+                <option>Default Co.</option>
+                <option>Brand A</option>
+                <option>Brand B</option>
+              </select>
+
+              <!-- SIZE RANGE multi-select (Imposter ELC_IMPOSTER) -->
+              <div class="size-range-wrapper">
+                <button type="button" class="btn-size-range" onclick="toggleSizeRange(this)" aria-expanded="false" aria-haspopup="listbox">
+                  Size Range: Unise
+                </button>
+                <div class="imposter">
+                  <div class="box multiselect-panel">
+                    <div class="stack" style="--space: var(--s-2)">
+                      <input type="search" placeholder="Select..." aria-label="Filter sizes">
+                      <label><input type="checkbox" checked> 0M-24M</label>
+                      <label><input type="checkbox"> 2T-4T</label>
+                      <label><input type="checkbox"> 4-6X</label>
+                      <label><input type="checkbox"> 4-7</label>
+                      <label><input type="checkbox"> 8-20</label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CLUSTER (ELC_CLUSTER): STYLE NUMBER -->
+            <div class="cluster" style="--space: var(--s-1)">
+              <span class="form-label">Style Number:</span>
+              <input type="text" aria-label="Style number" style="max-inline-size: 10rem">
+            </div>
+
+            <!-- STACK (ELC_STACK): ART DESCRIPTION -->
+            <div class="stack" style="--space: var(--s-2)">
+              <label class="form-label" for="art-desc">Art Description:</label>
+              <textarea id="art-desc" rows="4" placeholder="Enter art description..."></textarea>
+            </div>
+
+            <!-- + ADD GROUND COLOR button -->
+            <button type="button" class="btn-add">+ Add Ground Color</button>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================
+           SECTION 2: GROUND COLORS
+           ============================ -->
+      <section class="stack" style="--space: 0">
+        <!-- BOX[data-invert] (ELC_BOX): dark header bar -->
+        <div class="box section-header" data-invert>
+          <h2>Ground Colors</h2>
+        </div>
+
+        <!-- BOX (ELC_BOX): white content area -->
+        <div class="box section-body">
+          <!-- SIDEBAR (ELC_SIDEBAR): outer layout -->
+          <div class="with-sidebar" data-no-stretch style="--side-width: 18rem; --content-min: 55%; --space: var(--s1)">
+
+            <!-- Left sidebar: color panel -->
+            <div>
+              <div class="stack" style="--space: var(--s-1)">
+                <div class="cluster" style="--space: var(--s-1)">
+                  <input type="checkbox" class="color-checkbox" id="color1-check" checked aria-label="Enable color 1">
+                  <label class="form-label" for="color1">Color 1:</label>
+                  <input type="text" id="color1" aria-label="Color 1 value" style="max-inline-size: 8rem">
+                </div>
+              </div>
+            </div>
+
+            <!-- Right main content: dropzone + dimensions -->
+            <div>
+              <!-- SIDEBAR (ELC_SIDEBAR): inner right-sidebar pattern -->
+              <div class="with-sidebar" data-no-stretch style="--side-width: 12rem; --content-min: 0; --space: var(--s1)">
+
+                <!-- Drop zone (first-child = main content via inline overrides) -->
+                <div style="flex-basis: 0; flex-grow: 999; min-inline-size: 60%">
+                  <div class="dropzone" role="region" aria-label="File upload area">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 16V4m0 0L8 8m4-4l4 4" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M2 17l.621 2.485A2 2 0 004.561 21h14.878a2 2 0 001.94-1.515L22 17" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <p class="dropzone-text">Drag &amp; Drop<br>.AI or .SVG file here</p>
+                  </div>
+                </div>
+
+                <!-- Dimension panel (last-child = sidebar on right) -->
+                <div style="flex-basis: 12rem; flex-grow: 1">
+                  <div class="stack" style="--space: var(--s-1)">
+                    <strong style="font-size: var(--s0); text-transform: uppercase">Size Range: 0M-24M</strong>
+                    <div class="cluster" style="--space: var(--s-1)">
+                      <span class="form-label">Height:</span>
+                      <input type="text" class="dim-input" aria-label="Height">
+                    </div>
+                    <div class="cluster" style="--space: var(--s-1)">
+                      <span class="form-label">Width:</span>
+                      <input type="text" class="dim-input" aria-label="Width">
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================
+           SECTION 3: SIZE & OUTPUT
+           ============================ -->
+      <section class="stack" style="--space: 0">
+        <!-- BOX[data-invert] (ELC_BOX): dark header bar -->
+        <div class="box section-header" data-invert>
+          <h2>Size &amp; Output</h2>
+        </div>
+
+        <!-- BOX (ELC_BOX): white content area -->
+        <div class="box section-body">
+          <!-- CLUSTER (ELC_CLUSTER): right-aligned button -->
+          <div class="cluster" style="--justify: flex-end">
+            <button type="button" class="btn-generate">Generate Artsheet</button>
+          </div>
+        </div>
+      </section>
+
+    </form>
+  </div>
+
+  <script>
+    /* Multi-select toggle */
+    function toggleSizeRange(btn) {
+      var wrapper = btn.closest('.size-range-wrapper');
+      var isOpen = wrapper.hasAttribute('data-open');
+      wrapper.toggleAttribute('data-open');
+      btn.setAttribute('aria-expanded', !isOpen);
+    }
+
+    /* Close multi-select on outside click */
+    document.addEventListener('click', function(e) {
+      document.querySelectorAll('.size-range-wrapper[data-open]').forEach(function(el) {
+        if (!el.contains(e.target)) {
+          el.removeAttribute('data-open');
+          el.querySelector('[aria-expanded]').setAttribute('aria-expanded', 'false');
+        }
+      });
+    });
+
+    /* Drag-and-drop zone */
+    document.querySelectorAll('.dropzone').forEach(function(zone) {
+      zone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        zone.setAttribute('data-active', '');
+      });
+      zone.addEventListener('dragleave', function() {
+        zone.removeAttribute('data-active');
+      });
+      zone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        zone.removeAttribute('data-active');
+        var files = e.dataTransfer.files;
+        if (files.length > 0) {
+          zone.querySelector('.dropzone-text').innerHTML = files[0].name;
+        }
+      });
+    });
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anti-pattern: Icon (ELC_ICON)</title>
+  <!--
+    EXPECTED AUDIT RESULT: Score 6-10/24 (D)
+    Fixture category: anti-pattern
+    Primitive under test: ELC_ICON
+    Most relevant rubric dimensions: Intrinsic Sizing, Composition, Accessibility
+  -->
+  <style>
+    :root { --ratio: 1.5; --s0: 1rem; --s-1: calc(var(--s0) / var(--ratio)); --s1: calc(var(--s0) * var(--ratio)); }
+
+    body { margin: 0; font-family: system-ui, sans-serif; color: black; background-color: white; }
+
+    .cta {
+      font-size: 1.25rem;
+      padding: var(--s-1) var(--s0);
+    }
+
+    /* VIOLATION: ELP_024 (Typography-Relative Icon Sizing → relocated) — hard-coded pixel dimensions do not scale with the surrounding font-size; the icon will look correct at 16 px body text and oversized/undersized everywhere else */
+    .icon {
+      width: 24px;
+      height: 24px;
+      vertical-align: middle;
+    }
+
+    /* VIOLATION: ELP_002 (Intrinsic Sizing Over Extrinsic Sizing) — fixed pixels instead of em/cap units; the icon cannot track user font-size preferences or parent component scale */
+    .icon--large {
+      width: 32px;
+      height: 32px;
+    }
+
+    /* VIOLATION: ELP_024 — using margin-right in pixels for icon-to-text gap instead of deriving from the em scale, and using a physical property while at it */
+    .with-icon .icon {
+      margin-right: 8px;
+    }
+
+    /* VIOLATION: ELP_024 — hard-coded fill colour prevents the icon from inheriting currentColor, so icon colour decouples from text colour and fails theme switches */
+    .icon path {
+      fill: #222222;
+    }
+
+    /* VIOLATION: ELP_004 (Logical Properties) — vertical-align: middle plus float; correct pattern is inline-flex with align-items: baseline on the parent */
+    .with-icon {
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <p class="cta with-icon">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 2 L22 22 L2 22 Z"/>
+    </svg>
+    Report a cataloguing error
+  </p>
+
+  <p style="font-size: 2rem">
+    <svg class="icon icon--large" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 4 H20 V20 H4 Z"/>
+    </svg>
+    Heading-sized context, icon still 32 px regardless
+  </p>
+
+  <!--
+    Correct version would use .icon { height: 0.75em; height: 1cap; width: 0.75em;
+    width: 1cap; fill: currentColor } and .with-icon { display: inline-flex;
+    align-items: baseline; gap: 0.5em } so the icon tracks the surrounding font-size and
+    text colour automatically, and the gap is derived from the em scale.
+  -->
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anti-pattern: Switcher (ELC_SWITCHER)</title>
+  <!--
+    EXPECTED AUDIT RESULT: Score 5-9/24 (F)
+    Fixture category: anti-pattern
+    Primitive under test: ELC_SWITCHER
+    Most relevant rubric dimensions: Responsive Without Breakpoints, Intrinsic Sizing, Composition
+  -->
+  <style>
+    :root { --ratio: 1.5; --s0: 1rem; --s-1: calc(var(--s0) / var(--ratio)); --s1: calc(var(--s0) * var(--ratio)); }
+
+    body { margin: 0; font-family: system-ui, sans-serif; color: black; background-color: white; }
+
+    .two-column {
+      padding: var(--s1);
+    }
+
+    /* VIOLATION: ELP_009 (Algorithmic Self-Governing Layout) — breakpoint-based fold instead of Switcher's flex-basis: calc((var(--threshold) - 100%) * 999) mechanism that self-governs without media queries */
+    @media (min-width: 640px) {
+      .two-column {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--s1);
+      }
+    }
+
+    /* VIOLATION: ELP_002 (Intrinsic Sizing Over Extrinsic Sizing) — fixed min-width on columns forces horizontal scroll below the magic breakpoint instead of letting the threshold formula decide */
+    .two-column > * {
+      min-width: 300px;
+    }
+
+    /* VIOLATION: ELP_002 — arbitrary column tuning with a hard-coded max-width defeats the "equal intrinsic columns" contract of Switcher */
+    .two-column > :first-child {
+      max-width: 420px;
+    }
+
+    /* VIOLATION: ELP_009 — second breakpoint adds another magic number (768px) to "fix" the first one, compounding the anti-pattern */
+    @media (min-width: 768px) {
+      .two-column {
+        grid-template-columns: 1fr 2fr;
+      }
+    }
+
+    .panel {
+      padding: var(--s1);
+      border: 1px solid ButtonFace;
+    }
+  </style>
+</head>
+<body>
+  <section class="two-column">
+    <article class="panel">
+      <h2>Archive Finding Aid</h2>
+      <p>Series I contains correspondence between the editor and contributing photographers
+      dated 1968 through 1979, arranged chronologically within each folder.</p>
+    </article>
+    <article class="panel">
+      <h2>Digitization Notes</h2>
+      <p>Negatives were scanned at 4000 dpi using a Hasselblad Flextight; prints were captured
+      on a copy stand with a 100 mm macro at f/8, shot tethered to Capture One.</p>
+    </article>
+  </section>
+
+  <!--
+    Correct version would use .switcher { display: flex; flex-wrap: wrap; gap: var(--s1) }
+    with children .switcher > * { flex-grow: 1; flex-basis: calc((30rem - 100%) * 999) } —
+    horizontal above threshold, stacked below, no media queries, no magic breakpoints.
+  -->
+</body>
+</html>

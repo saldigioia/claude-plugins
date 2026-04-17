@@ -1,0 +1,242 @@
+/**
+ * Every Layout - Color Theming Patterns
+ * Supplementary CSS for theme-aware layouts
+ *
+ * Based on: A Pragmatic Guide to Modern CSS Colours (Piccalilli)
+ * Principles: ELP_016, ELP_017, ELP_018
+ */
+
+/* ==========================================================================
+   ELP_016: Theme-Aware Color Tokens
+   Define once, adapt everywhere
+   ========================================================================== */
+
+:root {
+  /* Enable automatic theme following */
+  color-scheme: light dark;
+
+  /* Core surface colors */
+  --surface-base: light-dark(#ffffff, #1a1a1a);
+  --surface-raised: light-dark(#f8f8f8, #242424);
+  --surface-overlay: light-dark(#f0f0f0, #2e2e2e);
+
+  /* Text colors */
+  --text-heading: light-dark(#000000, #ffffff);
+  --text-body: light-dark(#212121, #e0e0e0);
+  --text-muted: light-dark(#666666, #999999);
+
+  /* Border colors */
+  --border-default: light-dark(#e0e0e0, #333333);
+  --border-strong: light-dark(#cccccc, #444444);
+}
+
+/* Theme toggle overrides */
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Component-level theme lock (ELP_016 - granular control) */
+.theme-light {
+  color-scheme: light;
+}
+
+.theme-dark {
+  color-scheme: dark;
+}
+
+
+/* ==========================================================================
+   ELP_017: Surface Elevation via Lightness
+   In darkness, rise through light
+   ========================================================================== */
+
+:root {
+  /* Base surfaces for elevation calculation */
+  --surface-base-light: hsl(0 0% 100%);
+  --surface-base-dark: hsl(220 13% 10%);
+
+  /* Lightness increment per elevation level (dark mode only) */
+  --elevation-step: 4;
+}
+
+/* Surface level 1 - Base */
+.surface-1 {
+  background: light-dark(
+    var(--surface-base-light),
+    var(--surface-base-dark)
+  );
+}
+
+/* Surface level 2 - Raised (cards, panels) */
+.surface-2 {
+  background: light-dark(
+    var(--surface-base-light),
+    hsl(from var(--surface-base-dark) h s calc(l + 4))
+  );
+  box-shadow: light-dark(
+    0 1px 3px hsl(0 0% 0% / 0.1),
+    none
+  );
+}
+
+/* Surface level 3 - Elevated (modals, dropdowns) */
+.surface-3 {
+  background: light-dark(
+    var(--surface-base-light),
+    hsl(from var(--surface-base-dark) h s calc(l + 8))
+  );
+  box-shadow: light-dark(
+    0 4px 12px hsl(0 0% 0% / 0.15),
+    none
+  );
+}
+
+/* Surface level 4 - Top layer (tooltips, popovers) */
+.surface-4 {
+  background: light-dark(
+    var(--surface-base-light),
+    hsl(from var(--surface-base-dark) h s calc(l + 12))
+  );
+  box-shadow: light-dark(
+    0 8px 24px hsl(0 0% 0% / 0.2),
+    none
+  );
+}
+
+
+/* ==========================================================================
+   ELP_018: Derived Color Variants
+   One color, infinite variations
+   ========================================================================== */
+
+/* Toast notification pattern using relative colors */
+.toast {
+  --toast-color: hsl(220 70% 50%);
+
+  color: hsl(from var(--toast-color) h s 15%);
+  background: hsl(from var(--toast-color) h s 95%);
+  border: 2px solid var(--toast-color);
+  box-shadow: 0 8px 16px -4px hsl(from var(--toast-color) h s l / 0.25);
+
+  /* Layout (composable with Stack, Box) */
+  padding: var(--s0);
+  border-radius: 0.25rem;
+}
+
+/* Toast semantic variants - only change the base color */
+.toast[data-type="info"] {
+  --toast-color: hsl(210 80% 50%);
+}
+
+.toast[data-type="success"] {
+  --toast-color: hsl(145 65% 40%);
+}
+
+.toast[data-type="warning"] {
+  --toast-color: hsl(45 90% 45%);
+}
+
+.toast[data-type="error"] {
+  --toast-color: hsl(0 70% 50%);
+}
+
+/* Button with derived hover/active states */
+.button-derived {
+  --button-color: hsl(220 70% 50%);
+
+  background: var(--button-color);
+  color: hsl(from var(--button-color) h s 95%);
+  border: none;
+  padding: var(--s-1) var(--s0);
+  cursor: pointer;
+}
+
+.button-derived:hover {
+  background: hsl(from var(--button-color) h s calc(l - 10));
+}
+
+.button-derived:active {
+  background: hsl(from var(--button-color) h s calc(l - 20));
+}
+
+.button-derived:focus-visible {
+  outline: 3px solid hsl(from var(--button-color) h s l / 0.5);
+  outline-offset: 2px;
+}
+
+
+/* ==========================================================================
+   Gradient Optimization (oklch interpolation)
+   ========================================================================== */
+
+/* Vibrant gradients using oklch color space */
+.gradient-vibrant {
+  --gradient-start: hsl(220 80% 50%);
+  --gradient-end: hsl(340 80% 50%);
+
+  /* oklch prevents washed-out midpoints */
+  background: linear-gradient(
+    in oklch 90deg,
+    var(--gradient-start),
+    var(--gradient-end)
+  );
+}
+
+/* Rainbow gradient with longer hue interpolation */
+.gradient-rainbow {
+  background: linear-gradient(
+    in hsl longer hue 90deg,
+    red,
+    red
+  );
+}
+
+
+/* ==========================================================================
+   Browser Support Fallbacks
+   ========================================================================== */
+
+/* Fallback for browsers without light-dark() support */
+@supports not (color: light-dark(black, white)) {
+  :root {
+    --surface-base: #ffffff;
+    --text-heading: #000000;
+    --text-body: #212121;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-base: #1a1a1a;
+      --text-heading: #ffffff;
+      --text-body: #e0e0e0;
+    }
+  }
+}
+
+/* Fallback for browsers without relative color support */
+@supports not (color: hsl(from red h s l)) {
+  .toast {
+    color: #1a1a1a;
+    background: #e8f4fc;
+    border-color: #3b82f6;
+  }
+
+  .toast[data-type="success"] {
+    background: #dcfce7;
+    border-color: #22c55e;
+  }
+
+  .toast[data-type="warning"] {
+    background: #fef3c7;
+    border-color: #f59e0b;
+  }
+
+  .toast[data-type="error"] {
+    background: #fee2e2;
+    border-color: #ef4444;
+  }
+}

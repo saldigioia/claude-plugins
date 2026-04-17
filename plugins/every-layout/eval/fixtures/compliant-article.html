@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Fixture: Compliant Article Layout</title>
+  <style>
+    /*
+     * COMPLIANT EXAMPLE
+     * This CSS follows Every Layout principles throughout.
+     * Used for baseline testing — auditor should score 21-24/24 (A/B grade).
+     */
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    :root {
+      --ratio: 1.5;
+      --s-2: 0.444rem;
+      --s-1: 0.667rem;
+      --s0: 1rem;
+      --s1: 1.5rem;
+      --s2: 2.25rem;
+      --s3: 3.375rem;
+      --s4: 5.063rem;
+      --s5: 7.594rem;
+      --measure: 65ch;
+      --color-dark: #1a1a1a;
+      --color-light: #fafafa;
+      --color-accent: #7a2e1f;
+      --font-body: Georgia, serif;
+    }
+
+    /* Motion safety — ELP_028 */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    body {
+      font-family: var(--font-body);
+      color: var(--color-dark);
+      background-color: var(--color-light);
+    }
+
+    /* Focus visibility — ELP_029 */
+    :focus-visible {
+      outline: 3px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+
+    :focus:not(:focus-visible) {
+      outline: none;
+    }
+
+    /* Skip link */
+    .skip-link {
+      position: absolute;
+      inset-block-start: 0;
+      inset-inline-start: 0;
+      padding: var(--s-1);
+      background: var(--color-dark);
+      color: var(--color-light);
+      transform: translateY(-100%);
+      z-index: 999;
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    /* Cover — ELC_COVER */
+    .cover {
+      display: flex;
+      flex-direction: column;
+      min-block-size: 100vh;
+      padding: var(--s1);
+    }
+
+    .cover > * {
+      margin-block: var(--s1);
+    }
+
+    .cover > :first-child:not(.principal) {
+      margin-block-start: 0;
+    }
+
+    .cover > :last-child:not(.principal) {
+      margin-block-end: 0;
+    }
+
+    .cover > .principal {
+      margin-block: auto;
+    }
+
+    /* Center — ELC_CENTER */
+    .center {
+      box-sizing: content-box;
+      max-inline-size: var(--measure);
+      margin-inline: auto;
+      padding-inline: var(--s1);
+    }
+
+    /* Stack — ELC_STACK */
+    .stack {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+    }
+
+    .stack > * {
+      margin-block: 0;
+    }
+
+    .stack > * + * {
+      margin-block-start: var(--s1);
+    }
+
+    /* Grid — ELC_GRID */
+    .grid {
+      display: grid;
+      gap: var(--s1);
+      grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+    }
+
+    /* Box — ELC_BOX */
+    .box {
+      padding: var(--s1);
+      border: 1px solid;
+      outline: 1px transparent;
+      outline-offset: -1px;
+    }
+
+    .box * {
+      color: inherit;
+    }
+
+    /* Frame — ELC_FRAME */
+    .frame {
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .frame > img,
+    .frame > video {
+      inline-size: 100%;
+      block-size: 100%;
+      object-fit: cover;
+    }
+
+    /* Cluster — ELC_CLUSTER */
+    .cluster {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--s-1);
+      justify-content: flex-start;
+      align-items: center;
+    }
+
+    /* Typography */
+    h1 {
+      font-size: var(--s3);
+      text-wrap: balance;
+    }
+
+    h2 {
+      font-size: var(--s2);
+      text-wrap: balance;
+    }
+
+    p {
+      max-inline-size: var(--measure);
+    }
+  </style>
+</head>
+<body>
+  <!--
+    EXPECTED AUDIT RESULT:
+    - Score: 21-24/24 (A grade)
+    - Violations: 0-1
+    - Positive findings: modular scale, logical properties, motion safety,
+      focus visibility, skip link, intrinsic grid, measure constraint
+  -->
+
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div class="cover">
+    <header>
+      <nav class="center">
+        <ul class="cluster" role="list">
+          <li><a href="/">Home</a></li>
+          <li><a href="/archive">Archive</a></li>
+          <li><a href="/about">About</a></li>
+        </ul>
+      </nav>
+    </header>
+
+    <main id="main" class="principal">
+      <article class="center stack">
+        <h1>Article Title</h1>
+        <p>First paragraph of the article, demonstrating measure-constrained
+           text within a Stack for vertical rhythm and a Center for horizontal
+           constraint.</p>
+
+        <div class="grid">
+          <div class="box">
+            <div class="frame">
+              <img src="placeholder.jpg" alt="Descriptive alt text for image 1" loading="lazy">
+            </div>
+            <h2>Card One</h2>
+            <p>Card description using Stack spacing.</p>
+          </div>
+          <div class="box">
+            <div class="frame">
+              <img src="placeholder.jpg" alt="Descriptive alt text for image 2" loading="lazy">
+            </div>
+            <h2>Card Two</h2>
+            <p>Card description using Stack spacing.</p>
+          </div>
+          <div class="box">
+            <div class="frame">
+              <img src="placeholder.jpg" alt="Descriptive alt text for image 3" loading="lazy">
+            </div>
+            <h2>Card Three</h2>
+            <p>Card description using Stack spacing.</p>
+          </div>
+        </div>
+
+        <p>Closing paragraph demonstrating that the layout remains intrinsic
+           and responsive without any media queries.</p>
+      </article>
+    </main>
+
+    <footer>
+      <div class="center">
+        <p><small>Footer content</small></p>
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

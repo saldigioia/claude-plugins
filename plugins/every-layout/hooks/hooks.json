@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | xargs -I{} ${CLAUDE_PLUGIN_ROOT}/bin/css-lint-hook.sh {}"
+          }
+        ]
+      }
+    ]
+  }
+}
