@@ -109,25 +109,48 @@ def _normalize_product_ref(raw_url: str) -> tuple[str, str, str] | None:
 
 
 def _iter_atom_refs(body: bytes) -> Iterable[str]:
-    """Yield raw href strings from <link> and <entry>/<id> tags."""
-    # Prefer proper XML parse if possible — it's exact.
+    """Yield product href strings from <entry>/<link rel="alternate" type="text/html">.
+
+    Shopify atoms put the human-readable handle URL in <link rel="alternate"
+    type="text/html"> and a machine-ID URL (e.g. /products/8402798929) in
+    <id>. Both point to the same product, but /products/<id> and
+    /products/<handle> would register as distinct entities in the ledger.
+    Extract ONLY the handle form to avoid phantom-twin entries.
+
+    Feed-level <link> tags (not inside <entry>) point to the collection
+    landing page or the feed's self-URL — filtered out because they don't
+    match the /products/<slug> path pattern downstream, but also skipped
+    here for clarity.
+    """
     try:
         root = ET.fromstring(body.decode("utf-8", errors="replace"))
     except ET.ParseError:
         root = None
     if root is not None:
-        ns = {
-            "atom": "http://www.w3.org/2005/Atom",
-            "ns1": "http://purl.org/atom/ns#",   # rarely, old Atom 0.3
-        }
-        for link in root.iter():
-            tag = link.tag.split("}", 1)[-1]  # strip namespace
-            if tag == "link" and link.get("href"):
-                yield link.get("href")
-            elif tag == "id" and link.text:
-                yield link.text.strip()
+        for entry in root.iter():
+            if entry.tag.split("}", 1)[-1] != "entry":
+                continue
+            # Scan direct children only — don't recurse into nested elements.
+            for child in entry:
+                if child.tag.split("}", 1)[-1] != "link":
+                    continue
+                href = child.get("href")
+                if not href:
+                    continue
+                rel = child.get("rel", "")
+                ctype = child.get("type", "")
+                # rel="self" / rel="enclosure" / rel="edit" / rel="related"
+                # aren't canonical product URLs; keep only rel="alternate"
+                # (the default when rel is absent) pointing at HTML.
+                if rel and rel != "alternate":
+                    continue
+                if ctype and "html" not in ctype.lower():
+                    continue
+                yield href
         return
-    # Regex fallback for malformed feeds (Wayback replay sometimes mangles them).
+    # Regex fallback for malformed feeds (Wayback replay sometimes mangles XML).
+    # We can't distinguish <entry> scope vs feed scope here — the downstream
+    # /products/<slug> path filter catches non-product hrefs.
     for m in _ATOM_LINK_RE.finditer(body):
         yield m.group(1).decode("utf-8", errors="replace")
 

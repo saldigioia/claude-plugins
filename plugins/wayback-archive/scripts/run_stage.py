@@ -1488,18 +1488,36 @@ def _run_with_progress(stage_name, stage_fn, config, progress_path, **kwargs):
 
 
 def _run_audit(config_path: Path, progress_path: Path) -> int:
-    """Invoke audit.py as a subprocess; return its exit code. Emits progress events."""
+    """Run the audit in-process; return its exit code. Emits progress events.
+
+    NOT a subprocess: on macOS, fork() after aiohttp/SSL initialization can
+    segfault (exit -11). The audit is pure Python + SQLite; running it in
+    the parent process avoids the fork hazard entirely and is faster.
+    """
     _emit_progress(progress_path, "audit", "start")
     t0 = time.time()
-    audit_script = Path(__file__).resolve().parent / "audit.py"
-    result = subprocess.run(
-        [sys.executable, str(audit_script), "--config", str(config_path)],
-    )
+    import importlib.util
+    audit_path = Path(__file__).resolve().parent / "audit.py"
+    spec = importlib.util.spec_from_file_location("_audit_mod", audit_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        _, exit_code = mod.audit(config_path)
+        # audit(...) already writes the JSON and prints a human summary;
+        # our job here is purely to emit the progress end-event.
+    except BaseException as e:
+        log.error("audit failed (in-process): %s", e)
+        _emit_progress(progress_path, "audit", "end",
+                       wall_sec=round(time.time() - t0, 1),
+                       status="error",
+                       error=f"{type(e).__name__}: {e}")
+        raise
     _emit_progress(progress_path, "audit", "end",
                    wall_sec=round(time.time() - t0, 1),
-                   status="pass" if result.returncode == 0 else "residual",
-                   exit_code=result.returncode)
-    return result.returncode
+                   status="pass" if exit_code == 0 else "residual",
+                   exit_code=exit_code)
+    return exit_code
 
 
 def _pick_resume_stage(config, bucket_override: str | None = None) -> tuple[str, dict, dict]:
@@ -1554,18 +1572,34 @@ def _pick_resume_stage(config, bucket_override: str | None = None) -> tuple[str,
 
 
 def _run_preflight(config_path: Path, progress_path: Path) -> int:
-    """Invoke preflight.py as a subprocess. Returns exit code (0/1)."""
+    """Run preflight in-process; return its exit code. Emits progress events.
+
+    In-process for the same reason as _run_audit — fork()-after-SSL on
+    macOS can segfault. Preflight is pure Python + requests; no subprocess
+    needed.
+    """
     _emit_progress(progress_path, "preflight", "start")
     t0 = time.time()
-    preflight_script = Path(__file__).resolve().parent / "preflight.py"
-    result = subprocess.run(
-        [sys.executable, str(preflight_script), "--config", str(config_path)],
-    )
+    import importlib.util
+    pre_path = Path(__file__).resolve().parent / "preflight.py"
+    spec = importlib.util.spec_from_file_location("_preflight_mod", pre_path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        _, exit_code = mod.preflight(config_path)
+    except BaseException as e:
+        log.error("preflight failed (in-process): %s", e)
+        _emit_progress(progress_path, "preflight", "end",
+                       wall_sec=round(time.time() - t0, 1),
+                       status="error",
+                       error=f"{type(e).__name__}: {e}")
+        raise
     _emit_progress(progress_path, "preflight", "end",
                    wall_sec=round(time.time() - t0, 1),
-                   status="ok" if result.returncode == 0 else "blocking_error",
-                   exit_code=result.returncode)
-    return result.returncode
+                   status="ok" if exit_code == 0 else "blocking_error",
+                   exit_code=exit_code)
+    return exit_code
 
 
 def main():
