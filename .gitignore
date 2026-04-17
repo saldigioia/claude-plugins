@@ -4,3 +4,12 @@ __pycache__/
 node_modules/
 .env
 .env.local
+
+# Personal / machine-local Claude Code state
+.claude/settings.local.json
+.full-review/
+
+# Demo build artifacts
+demos/**/node_modules/
+demos/**/dist/
+demos/**/.astro/
