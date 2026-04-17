@@ -6,13 +6,12 @@
   },
   "metadata": {
     "description": "Rare Data Club's Claude Code plugins: CSS layout primitives and web-archive recovery.",
-    "version": "1.0.0",
-    "pluginRoot": "./plugins"
+    "version": "1.0.0"
   },
   "plugins": [
     {
       "name": "every-layout",
-      "source": "./every-layout",
+      "source": "./plugins/every-layout",
       "description": "Axiom-enforced CSS layout primitives, Astro 5 site architecture, archival data patterns, and design system tokens. 13 composable primitives, 32 numbered principles, 6 axioms enforced by CI-grade strict-check and JS-budget gates. Zero-JS-by-default, media-query-free, modular-scale spacing.",
       "category": "design-system",
       "keywords": [
@@ -30,7 +29,7 @@
     },
     {
       "name": "wayback-archive",
-      "source": "./wayback-archive",
+      "source": "./plugins/wayback-archive",
       "description": "Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline: CDX dump, filter, fetch, Shopify CDN discovery, match, download, normalize, build. Supports Shopify, Swell Commerce, Fourthwall, and custom platforms.",
       "category": "data-recovery",
       "keywords": [
