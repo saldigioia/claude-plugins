@@ -724,11 +724,29 @@ def run_fetch(config, dry_run=False, proxy_type="isp", workers=5, max_retries=3,
 
     processed = 0
     skipped = 0
+    surfaces_parsed = 0
+    surface_outlinks = 0
 
     try:
         for i, html_path in enumerate(html_files, 1):
+            # Protocol II: route discovery surfaces to the outlink parser
+            # and skip entity creation entirely. This replaces the old
+            # atom-becomes-product bug where feeds were treated as slugs.
+            if _is_discovery_surface_filename(html_path.name):
+                try:
+                    from wayback_archiver.surface_parser import parse_surface_file
+                    n = parse_surface_file(html_path, config)
+                    surfaces_parsed += 1
+                    surface_outlinks += n
+                    if n:
+                        log.debug("  Surface %s → %d outlinks", html_path.name, n)
+                except Exception as e:  # noqa: BLE001
+                    log.debug("  Surface parse failed for %s: %s", html_path.name, e)
+                continue
+
             slug = _slug_from_html_filename(html_path.name)
             if not slug:
+                log.debug("  Skipping (no slug, not a surface): %s", html_path.name)
                 continue
 
             if ckpt.is_done(slug):
@@ -824,9 +842,14 @@ def run_fetch(config, dry_run=False, proxy_type="isp", workers=5, max_retries=3,
         "metadata_entries": len(metadata),
         "new_entries": processed,
         "skipped_entries": skipped,
+        "surfaces_parsed": surfaces_parsed,
+        "surface_outlinks": surface_outlinks,
     }
     config.fetch_stats_file.write_text(json.dumps(stats, indent=2))
     log.info("Fetch stats written to %s", config.fetch_stats_file)
+    if surfaces_parsed:
+        log.info("Discovery surfaces: %d parsed, %d outlinks referenced",
+                 surfaces_parsed, surface_outlinks)
 
     timer.log_summary()
     log.info("  Metadata: %d entries (%d new, %d skipped)",
@@ -900,12 +923,53 @@ def _domain_from_filename(filename: str) -> str | None:
     return None
 
 
+def _is_discovery_surface_filename(filename: str) -> bool:
+    """True if the file is a Protocol II discovery surface (feed / sitemap /
+    oembed / collection landing) rather than a single-product entity.
+
+    Surfaces are gateways to MANY products — parsing them should yield
+    entity references, not become an entity themselves. This is the fix for
+    the pablosupply bug where `_collections_saint-pablo-tour.atom.html`
+    became a product dir with 20 images of actual products attributed to
+    the feed itself.
+    """
+    name = filename[:-5] if filename.endswith(".html") else filename
+    lower = name.lower()
+    # Sitemap wins unconditionally: Shopify's sitemap_products_N.xml contains
+    # `_products_` but is a gateway, not a product.
+    if re.search(r"_sitemap[_.-].*\.xml$|_sitemap\.xml$", lower):
+        return True
+    # Per-product atoms/oembeds (e.g. _products_<slug>.atom) ARE entity-scoped
+    # — they enrich a specific product. Only FLAG them as surfaces if there's
+    # no _products_ path segment at all (i.e. collection-scoped feeds,
+    # products.json root, collection landing pages).
+    if "_products_" in lower:
+        return False
+    if re.search(r"\.atom$|\.oembed$", lower):
+        return True
+    if re.search(r"_products\.json$", lower):
+        return True
+    # Collection landing (e.g. _collections_saint-pablo-tour) or root
+    # homepage shapes — no _products_ follow, so they're gateways, not entities.
+    if re.search(r"_collections?_[^_]+$", lower):
+        return True
+    return False
+
+
 def _slug_from_html_filename(filename: str) -> str | None:
     """Extract a product slug from a fetch_archive.py output filename.
 
     Filenames look like: www.yeezygap.com_products_dove-hoodie.html
     We need to extract: dove-hoodie
+
+    Returns None for discovery surfaces (atom feeds, sitemaps, collection
+    landings, products.json) — those are not entities and must never become
+    product directories. Caller should route surfaces to the outlink parser
+    (surface_parser.extract_outlinks) instead.
     """
+    if _is_discovery_surface_filename(filename):
+        return None
+
     name = filename.removesuffix(".html")
     # Try to find /products/{slug} pattern
     m = re.search(r"_products_(.+?)(?:\.json|\.oembed|\.atom)?$", name)
@@ -920,10 +984,10 @@ def _slug_from_html_filename(filename: str) -> str | None:
     if m:
         return m.group(1)
 
-    # Fallback: use the whole name if it looks reasonable
-    if len(name) > 5 and not name.startswith("http"):
-        return name
-
+    # No fallback to "use the whole name" — that was the source of the
+    # atom-feed-becomes-product bug. If neither regex matches AND the file
+    # isn't a known discovery-surface shape, it's an unknown artifact; let
+    # the caller log it rather than silently inventing a fake slug.
     return None
 
 
