@@ -117,6 +117,16 @@ class SiteConfig:
     def checkpoint_path(self, stage: str) -> Path:
         return self.project_path / f".checkpoint_{stage}.json"
 
+    def ensure_project_dirs(self) -> None:
+        """Create every directory the pipeline writes into. Idempotent.
+
+        Call at the top of any stage that produces files. Prevents the
+        "stage fails because products/ dir doesn't exist yet" quirk that
+        surfaced on the pablosupply end-to-end.
+        """
+        for d in (self.project_path, self.fetch_output_dir, self.links_dir, self.products_dir):
+            d.mkdir(parents=True, exist_ok=True)
+
 
 def load_config(config_path: Path) -> SiteConfig:
     """Load a site configuration from a YAML file.

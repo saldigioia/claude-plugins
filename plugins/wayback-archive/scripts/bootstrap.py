@@ -372,6 +372,14 @@ def bootstrap(raw_input: str, name_override: str | None = None, dry_run: bool = 
         config_path.write_text(config_yaml)
         plan_path.write_text(json.dumps(plan, indent=2))
 
+        # Create every directory the pipeline will eventually write into, so
+        # late stages (download especially) can't fail on a missing products/.
+        try:
+            from wayback_archiver.site_config import load_config as _load
+            _load(config_path).ensure_project_dirs()
+        except Exception as e:  # noqa: BLE001
+            plan["ensure_dirs_error"] = f"{type(e).__name__}: {e}"
+
         # Protocol III prerequisite: seed the ledger with every host we've
         # identified so the `unenumerated_hosts` count has a baseline to
         # shrink against as CDX dumps complete. Ledger write failures are

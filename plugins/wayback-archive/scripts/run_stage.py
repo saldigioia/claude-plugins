@@ -254,8 +254,21 @@ def run_index(config, dry_run=False, **_kw):
     """Stage 1: Parse CDX → product index, then run CommonCrawl discovery."""
     from wayback_archiver.cdx import parse_cdx
 
+    # Resolve the CDX file list. config.cdx_files comes from the YAML, but
+    # run_cdx_dump mutates it in memory only — on a separate invocation the
+    # YAML is empty and dumps on disk get missed. Glob the project_dir as a
+    # fallback/supplement so any `*_wayback.txt` file gets picked up.
+    cdx_paths = list(config.cdx_paths)
+    seen = {p.resolve() for p in cdx_paths if p.exists()}
+    if config.project_path.exists():
+        for p in sorted(config.project_path.glob("*_wayback.txt")):
+            if p.resolve() not in seen and p.is_file() and p.stat().st_size > 0:
+                cdx_paths.append(p)
+                seen.add(p.resolve())
+                log.info("  Auto-discovered CDX file: %s", p)
+
     products = {}
-    for cdx_path in config.cdx_paths:
+    for cdx_path in cdx_paths:
         log.info("Parsing CDX: %s", cdx_path)
         file_products = parse_cdx(
             cdx_path,
@@ -301,10 +314,19 @@ def run_index(config, dry_run=False, **_kw):
         lambda c, prods=products, src=str(config.index_file): _import_entities_from_products(c, prods, src, config.domains),
     )
 
-    # ── Pass 2: CommonCrawl discovery ──────────────────────────────────
-    log.info("")
-    log.info("Running CommonCrawl discovery...")
-    cc_results = asyncio.run(_cc_discovery(config))
+    # ── Pass 2: CommonCrawl discovery (opt-out via config or CLI) ──────
+    cc_enabled = config._raw.get("commoncrawl", {}).get("enabled", True)
+    skip_cc = bool(_kw.get("skip_cc"))
+    if skip_cc or not cc_enabled:
+        reason = "CLI --skip-cc" if skip_cc else "commoncrawl.enabled=false"
+        log.info("")
+        log.info("Skipping CommonCrawl discovery (%s)", reason)
+        cc_results = {}
+    else:
+        log.info("")
+        log.info("Running CommonCrawl discovery...")
+        progress_path = config.project_path / ".progress.jsonl"
+        cc_results = asyncio.run(_cc_discovery(config, progress_path))
     if cc_results:
         # Merge CC discoveries into the product index (dedup against existing)
         before_count = len(products)
@@ -332,14 +354,20 @@ def run_index(config, dry_run=False, **_kw):
         log.info("CC index saved to %s", config.cc_index_file)
 
 
-async def _cc_discovery(config) -> dict:
+CC_DOMAIN_BUDGET_SEC = 120.0  # Hard cap per-domain so a single stuck endpoint can't hang the pipeline.
+
+
+async def _cc_discovery(config, progress_path: Path | None = None) -> dict:
     """Query CommonCrawl indices for product pages across all configured domains.
 
     Returns a dict of {handle: {original_url, url_type, warc_coords, crawl}} for
     each discovered product URL not already in the local index.
 
     Uses CC_CRAWLS from fetch_archive.py to avoid duplicating the crawl list.
-    Rate-limits to 1 req/s against the CC index API.
+    Rate-limits to 1 req/s against the CC index API. Enforces a
+    CC_DOMAIN_BUDGET_SEC budget per domain — after which the domain is
+    abandoned (the 24-crawl × 3-pattern fan-out can otherwise stall a pipeline
+    for 10+ minutes on unresponsive CC index endpoints).
     """
     import aiohttp
     from fetch_archive import CC_CRAWLS
@@ -354,15 +382,28 @@ async def _cc_discovery(config) -> dict:
     results = {}
     total_queries = 0
     total_hits = 0
+    stopwatch = time.time
 
     async with aiohttp.ClientSession(headers=AIOHTTP_HEADERS) as session:
         for domain in config.domains:
             log.info("  CC discovery: %s", domain)
+            domain_t0 = stopwatch()
+            if progress_path is not None:
+                _emit_progress(progress_path, "cc_discovery", "domain_start", domain=domain)
+            domain_hits_before = len(results)
+            abandoned = False
 
             for pattern in PATH_PATTERNS:
+                if abandoned:
+                    break
                 query_url_prefix = f"https://{domain}{pattern}"
 
                 for crawl_id in CC_CRAWLS:
+                    if stopwatch() - domain_t0 > CC_DOMAIN_BUDGET_SEC:
+                        log.warning("  CC: abandoning %s after %.0fs budget",
+                                    domain, CC_DOMAIN_BUDGET_SEC)
+                        abandoned = True
+                        break
                     api_url = (
                         f"https://index.commoncrawl.org/{crawl_id}-index"
                         f"?url={query_url_prefix}&output=json&limit=500"
@@ -371,7 +412,7 @@ async def _cc_discovery(config) -> dict:
                     try:
                         async with session.get(
                             api_url,
-                            timeout=aiohttp.ClientTimeout(total=30),
+                            timeout=aiohttp.ClientTimeout(total=30, connect=10),
                         ) as resp:
                             total_queries += 1
 
@@ -439,6 +480,16 @@ async def _cc_discovery(config) -> dict:
                     finally:
                         # Rate limit: 1 req/s against CC index
                         await asyncio.sleep(1.0)
+
+            # Per-domain accounting for the progress stream
+            if progress_path is not None:
+                _emit_progress(
+                    progress_path, "cc_discovery", "domain_end",
+                    domain=domain,
+                    wall_sec=round(stopwatch() - domain_t0, 1),
+                    new_hits=len(results) - domain_hits_before,
+                    abandoned=abandoned,
+                )
 
     log.info("  CC discovery: %d queries, %d unique handles found", total_queries, len(results))
     return results
@@ -1468,6 +1519,10 @@ def main():
                              "before stage 0, runs audit at end.")
     parser.add_argument("--skip-preflight", action="store_true",
                         help="Skip the pre-flight check under --auto (for CI).")
+    parser.add_argument("--skip-cc", action="store_true",
+                        help="Skip CommonCrawl discovery inside the index stage. "
+                             "Useful when CC is slow or the target is too recent / "
+                             "too ephemeral for CC to have captured (pop-ups, private stores).")
     # fetch-specific options
     parser.add_argument("--proxy", choices=["isp", "dc"], default="isp",
                         help="Proxy type for fetch stage (default: isp)")
@@ -1488,6 +1543,7 @@ def main():
         args.yes = True
 
     config = load_config(Path(args.config))
+    config.ensure_project_dirs()
     progress_path = config.project_path / ".progress.jsonl"
 
     # Also check config for alternative_archives setting
@@ -1516,6 +1572,7 @@ def main():
         max_retries=args.max_retries,
         backoff_factor=args.backoff_factor,
         fallback_archives=fallback_archives,
+        skip_cc=args.skip_cc,
     )
 
     # `resume` reads audit.json and picks the stage that shrinks the largest
