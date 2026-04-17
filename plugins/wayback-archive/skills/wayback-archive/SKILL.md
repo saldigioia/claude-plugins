@@ -29,7 +29,9 @@ The bootstrap script above has already:
 2. Queried Wayback CDX for `*.{apex}` to enumerate captured subdomains (sample ≤ 5000).
 3. Probed the live site (and Wayback most-recent fallback) for platform signatures — Shopify, Swell, Fourthwall, Adidas.
 4. Detected any `.myshopify.com` alias embedded in the HTML.
-5. Rendered the matching platform template into `projects/<name>/config.yaml` and saved the plan to `projects/<name>/plan.json`.
+5. Rendered the matching platform template into `<projects-root>/<name>/config.yaml` and saved the plan to `<projects-root>/<name>/plan.json`.
+
+**Where projects land.** The plan JSON has `project_dir` and `config_path` as **absolute paths** — use those verbatim when running downstream stages. Default `projects-root` is `~/wayback-archive/`; override via `$WAYBACK_ARCHIVE_ROOT` env var or `--project-root <path>` on bootstrap. Projects intentionally live outside the plugin cache so they survive plugin updates.
 
 ## Your task
 

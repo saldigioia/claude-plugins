@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -44,7 +45,25 @@ from wayback_archiver.env import load_env  # noqa: E402
 load_env()
 
 TEMPLATE_DIR = REPO_ROOT / "skills" / "wayback-archive" / "configs"
-PROJECTS_DIR = REPO_ROOT / "projects"
+
+
+def _default_projects_root() -> Path:
+    """Resolve the default projects root.
+
+    Precedence:
+      1. $WAYBACK_ARCHIVE_ROOT environment variable (for CI / per-user override)
+      2. ~/wayback-archive/  (user-home default, persists across plugin updates)
+
+    Intentionally NOT under REPO_ROOT — when bootstrap.py is invoked from a
+    plugin install dir (e.g. ~/.claude/plugins/cache/rare-data-club/
+    wayback-archive/<version>/), placing projects there means a plugin update
+    wipes every recovered catalog. The user's home directory is the only
+    durable default.
+    """
+    env = os.environ.get("WAYBACK_ARCHIVE_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+    return (Path.home() / "wayback-archive").resolve()
 
 # ── Input parsing ─────────────────────────────────────────────────────────────
 
@@ -290,7 +309,14 @@ def render_config(platform: str, name: str, display_name: str, apex: str, hosts:
 
 # ── Orchestration ─────────────────────────────────────────────────────────────
 
-def bootstrap(raw_input: str, name_override: str | None = None, dry_run: bool = False) -> dict:
+def bootstrap(
+    raw_input: str,
+    name_override: str | None = None,
+    dry_run: bool = False,
+    projects_root: Path | None = None,
+) -> dict:
+    projects_root = (projects_root or _default_projects_root()).resolve()
+
     # 1. Parse input into seed hosts
     seeds: list[str] = []
     for token in re.split(r"[,\s]+", raw_input):
@@ -335,7 +361,7 @@ def bootstrap(raw_input: str, name_override: str | None = None, dry_run: bool = 
         print(json.dumps({"error": str(e)}), file=sys.stdout)
         sys.exit(3)
 
-    project_dir = PROJECTS_DIR / name
+    project_dir = (projects_root / name).resolve()
     config_path = project_dir / "config.yaml"
     plan_path = project_dir / "plan.json"
 
@@ -360,8 +386,10 @@ def bootstrap(raw_input: str, name_override: str | None = None, dry_run: bool = 
         "probe_source": probe.sample_source,
         "probe_host": probe.sample_host,
         "myshopify_domain": probe.myshopify_domain,
-        "config_path": str(config_path.relative_to(REPO_ROOT)) if not dry_run else None,
-        "plan_path": str(plan_path.relative_to(REPO_ROOT)) if not dry_run else None,
+        "project_dir": str(project_dir),
+        "projects_root": str(projects_root),
+        "config_path": str(config_path) if not dry_run else None,
+        "plan_path": str(plan_path) if not dry_run else None,
         "template_used": TEMPLATE_FILES.get(platform_key, "_template_generic.yaml"),
         "dry_run": dry_run,
         "notes": _build_notes(probe, platform_key, len(confirmed)),
@@ -388,7 +416,7 @@ def bootstrap(raw_input: str, name_override: str | None = None, dry_run: bool = 
             ledger_mod.init(project_dir)
             with ledger_mod.connect(project_dir) as conn:
                 ledger_mod.upsert_hosts(conn, hosts)
-            plan["ledger_path"] = str((project_dir / "ledger.db").relative_to(REPO_ROOT))
+            plan["ledger_path"] = str(project_dir / "ledger.db")
             plan["ledger_hosts_seeded"] = len(hosts)
             plan_path.write_text(json.dumps(plan, indent=2))
         except Exception as e:  # noqa: BLE001
@@ -418,9 +446,21 @@ def main():
     parser.add_argument("--input", required=True, help="URL or comma-separated host list")
     parser.add_argument("--name", default=None, help="Override project short name (default: derived from apex)")
     parser.add_argument("--dry-run", action="store_true", help="Emit plan JSON only; do not write files")
+    parser.add_argument(
+        "--project-root", default=None,
+        help="Root directory for the project tree (default: $WAYBACK_ARCHIVE_ROOT or ~/wayback-archive/). "
+             "Projects land at <project-root>/<name>/. Use this when you want catalogs kept alongside "
+             "other work — they must not live under the plugin cache, which is wiped on every update.",
+    )
     args = parser.parse_args()
 
-    plan = bootstrap(args.input, name_override=args.name, dry_run=args.dry_run)
+    projects_root = Path(args.project_root).expanduser() if args.project_root else None
+    plan = bootstrap(
+        args.input,
+        name_override=args.name,
+        dry_run=args.dry_run,
+        projects_root=projects_root,
+    )
     print(json.dumps(plan, indent=2))
 
 
