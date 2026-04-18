@@ -107,12 +107,17 @@ def canonicalize_image_url(url: str) -> str:
     that ``image_400x.jpg``, ``image_1200x.jpg``, and ``image.jpg?width=600``
     all map to the same canonical key.  This prevents downloading every size
     variant of the same image — another hard lesson from early pipeline runs.
+
+    Shopify re-UUIDs the same image bytes per variant re-upload
+    (``jacket_03_<uuid>.jpg``); stripping the UUID collapses all such
+    variants to one canonical key so the ``seen_canonical`` set dedups them.
     """
     # Strip query params
     canon = url.split('?')[0]
     # Strip size suffixes
     canon = SIZE_SUFFIX.sub('', canon)
     canon = NAMED_SIZE.sub('', canon)
+    canon = UUID_SUFFIX.sub('', canon)
     # Normalize protocol
     if canon.startswith('http://'):
         canon = 'https://' + canon[7:]
@@ -121,11 +126,12 @@ def canonicalize_image_url(url: str) -> str:
 
 
 def clean_filename(url: str) -> str:
-    """Extract a clean filename from a URL, stripping size suffixes."""
+    """Extract a clean filename from a URL, stripping size and UUID suffixes."""
     path = unquote(urlparse(url).path)
     fname = path.split("/")[-1]
     fname = SIZE_SUFFIX.sub("", fname)
     fname = NAMED_SIZE.sub("", fname)
+    fname = UUID_SUFFIX.sub("", fname)
     return re.sub(r'[/:*?"<>|]', '_', fname)
 
 
@@ -159,7 +165,9 @@ def download_via_cdn_tool(
             text=True,
             timeout=timeout,
         )
-    except (subprocess.TimeoutExpired, Exception) as e:
+    except subprocess.TimeoutExpired:
+        log.warning("CDN tool timed out after %ds", timeout)
+    except (OSError, subprocess.SubprocessError) as e:
         log.warning("CDN tool error: %s", e)
     finally:
         os.unlink(url_file)
@@ -186,8 +194,10 @@ def download_direct(
         ):
             dest.write_bytes(resp.content)
             return True
-    except Exception:
-        pass
+    except requests.RequestException as e:
+        log.debug("direct download failed for %s: %s", url, e)
+    except OSError as e:
+        log.warning("direct download write failed for %s: %s", dest, e)
     return False
 
 
@@ -240,8 +250,10 @@ def find_best_wayback_url(
         if best_url and best_ts:
             # id_ suffix is critical — without it, Wayback injects toolbar HTML
             return f"https://web.archive.org/web/{best_ts}id_/{best_url}"
-    except Exception:
-        pass
+    except requests.RequestException as e:
+        log.debug("Wayback CDX best-size lookup failed for %s: %s", base_url, e)
+    except (ValueError, KeyError) as e:
+        log.debug("Wayback CDX response parse failed for %s: %s", base_url, e)
     return None
 
 
@@ -260,8 +272,9 @@ def download_wayback_image(
             ):
                 dest.write_bytes(resp.content)
                 return True
-        except requests.RequestException:
-            pass
+        except requests.RequestException as e:
+            log.debug("wayback fetch attempt %d failed for %s: %s",
+                      attempt + 1, wb_url, e)
         time.sleep(1.5 * (attempt + 1))
     return False
 

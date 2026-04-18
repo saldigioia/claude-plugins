@@ -7,8 +7,31 @@ multiple strategies.
 """
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
+from urllib.parse import urlparse, unquote
+
+# Shopify-style UUID suffix (e.g. ``_a1b2c3d4-e5f6-...`` just before ``.jpg``).
+# Shared with download.canonicalize_image_url; duplicated here so match.py
+# stays importable without pulling download.py's requests dependency.
+_UUID_SUFFIX_RE = re.compile(
+    r'_[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?=\.\w+)?'
+)
+# Generic size suffixes: _800x, _800x800, _800x@2x.
+_SIZE_SUFFIX_RE = re.compile(r'_(?:\d+|\{width\})x\d*(?:@\dx)?(?=\.\w+|$)')
+_NAMED_SIZE_RE = re.compile(
+    r'_(?:grande|medium|small|large|compact|master|pico|icon|thumb)(?=\.\w+|$)'
+)
+# First alphanumeric token as a SKU candidate.  Matches Adidas-style style
+# codes (``GX9662``), Yeezy-style (``YZ6U1055``), and Kanye merch
+# (``KW5M5001``) — 6-to-12 chars of uppercase letters and digits.
+_SKU_PREFIX_RE = re.compile(r'^([A-Z0-9]{6,12})[_\-.]')
+
+# Minimum difflib ratio for the fuzzy fallback to accept a slug match.
+# Below this the risk of cross-attribution is too high to justify the match.
+_FUZZY_SLUG_THRESHOLD = 0.85
 
 
 def normalize_for_match(text: str) -> str:
@@ -122,3 +145,108 @@ def match_products(
     ]
 
     return result
+
+
+def build_sku_to_slug_map(metadata: dict) -> dict[str, str]:
+    """Return {SKU (upper) -> slug} for every metadata entry with a SKU.
+
+    Entries that share a SKU collapse to a single slug (the first seen); that's
+    the correct behavior for CDN attribution, where two slugs + one SKU means
+    either a duplicate handle or a re-issue of the same physical product.
+    """
+    out: dict[str, str] = {}
+    for slug, meta in metadata.items():
+        sku = meta.get("sku") or meta.get("matched_sku")
+        if not sku:
+            continue
+        key = str(sku).strip().upper()
+        if key and key not in out:
+            out[key] = slug
+    return out
+
+
+def _image_basename(url_or_filename: str) -> str:
+    """Extract just the bare filename from a URL or path, lowercased."""
+    s = url_or_filename.strip()
+    if "://" in s:
+        try:
+            s = unquote(urlparse(s).path)
+        except ValueError:
+            pass
+    return PurePosixPath(s).name.lower()
+
+
+def _canonical_image_stem(url_or_filename: str) -> str:
+    """Strip size/named/UUID suffixes and the extension from an image filename."""
+    name = _image_basename(url_or_filename)
+    name = _UUID_SUFFIX_RE.sub("", name)
+    name = _SIZE_SUFFIX_RE.sub("", name)
+    name = _NAMED_SIZE_RE.sub("", name)
+    name = re.sub(r"\.\w+$", "", name)
+    return name
+
+
+def resolve_image_to_slug(
+    url_or_filename: str,
+    slug_set: set[str] | list[str],
+    sku_map: dict[str, str] | None = None,
+    strategy: str = "aggressive",
+) -> str | None:
+    """Best-effort attribution of a CDN image URL/filename to a product slug.
+
+    Cascade:
+      1. Strip UUID / size / named-size suffixes, lowercase, drop extension.
+      2. Exact slug hit against ``slug_set``.
+      3. ``{slug}__…`` prefix split — the existing pipeline convention.
+      4. SKU prefix extraction → ``sku_map`` lookup (e.g. ``KW5M5001``).
+      5. ``strategy == "aggressive"`` only: difflib fuzzy match with a 0.85
+         floor against the full slug set. Strict mode returns None here.
+
+    ``strategy`` values:
+      - ``"strict"``: exact + prefix + SKU map only. No fuzzy fallback.
+      - ``"aggressive"``: adds the difflib fallback. Higher recall, ~3–5%
+        false-attribution risk in practice on noisy Shopify catalogs.
+    """
+    if not url_or_filename:
+        return None
+
+    slugs = slug_set if isinstance(slug_set, set) else set(slug_set)
+    canon = _canonical_image_stem(url_or_filename)
+    if not canon:
+        return None
+
+    # 1. Direct hit.
+    if canon in slugs:
+        return canon
+
+    # 2. products__<slug>__<tail> or slug__tail split convention.
+    parts = canon.split("__")
+    if len(parts) >= 2:
+        for cand in (parts[-1], parts[-2]):
+            if cand in slugs:
+                return cand
+
+    # 3. SKU prefix extraction.
+    if sku_map:
+        raw = _image_basename(url_or_filename)
+        m = _SKU_PREFIX_RE.match(raw.upper())
+        if m:
+            hit = sku_map.get(m.group(1))
+            if hit:
+                return hit
+
+    # 4. Substring containment — narrow but cheap.
+    candidate = parts[-1] if parts else canon
+    for slug in slugs:
+        if candidate and (slug.startswith(candidate) or candidate in slug):
+            return slug
+
+    # 5. Fuzzy fallback (aggressive only).
+    if strategy == "aggressive":
+        best = difflib.get_close_matches(
+            candidate, slugs, n=1, cutoff=_FUZZY_SLUG_THRESHOLD
+        )
+        if best:
+            return best[0]
+
+    return None

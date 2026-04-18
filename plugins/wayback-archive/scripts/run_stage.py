@@ -179,6 +179,72 @@ def _import_entities_from_products(conn, products: dict, source: str, fallback_d
         ledger_mod.upsert_hosts(conn, hosts_seen)
 
 
+def _promote_ledger_entities(config, products: dict) -> int:
+    """Merge ledger entities that are not in the CDX-derived `products` back
+    into the index.
+
+    Protocol II: the surface parser discovers entities (atom feeds, sitemaps,
+    products.json) and writes them to the ledger's `entities` table with a
+    canonical_url and first_seen_in. When those entities were never captured
+    by any CDX row — common on surfaces that list items the Wayback Machine
+    never crawled — they silently drop out of the fetch queue.
+
+    This helper reads ledger entities that are absent from `products`, builds
+    a minimal index row (empty `wayback_url`; fetch stage will resolve closest
+    snapshot at run time), and mutates `products` in place. Returns the number
+    of entities promoted.
+
+    Silent no-op if the ledger doesn't exist. url_type classification reuses
+    `cdx.classify_url` so entries inherit the same type-priority semantics as
+    CDX-sourced rows.
+    """
+    if not ledger_mod.exists(config.project_path):
+        return 0
+
+    from urllib.parse import urlparse as _urlparse, unquote as _unquote
+    from wayback_archiver.cdx import classify_url
+
+    try:
+        with ledger_mod.connect(config.project_path) as conn:
+            rows = conn.execute(
+                "SELECT slug, host, canonical_url, first_seen_in "
+                "FROM entities WHERE canonical_url IS NOT NULL"
+            ).fetchall()
+    except Exception as e:  # noqa: BLE001
+        log.warning("ledger read failed during promotion (ignored): %s", e)
+        return 0
+
+    known_slugs = set(products.keys())
+    promoted = 0
+    for row in rows:
+        slug = row["slug"]
+        if slug in known_slugs:
+            continue
+        canonical = row["canonical_url"]
+        try:
+            parsed = _urlparse(canonical)
+            path = _unquote(parsed.path).rstrip("/")
+        except ValueError:
+            continue
+
+        classified_slug, url_type = classify_url(path, config.url_rules)
+        if not url_type:
+            url_type = "slug"
+
+        products[slug] = {
+            "slug": slug,
+            "url_type": url_type,
+            "era": "unknown",
+            "wayback_url": "",
+            "original_url": canonical,
+            "source": f"ledger:{row['first_seen_in'] or 'unknown'}",
+        }
+        known_slugs.add(slug)
+        promoted += 1
+
+    return promoted
+
+
 def run_cdx_dump(config, dry_run=False, **_kw):
     """Stage 0: Run wayback_cdx_v2 to produce CDX dump files for each domain.
 
@@ -208,6 +274,13 @@ def run_cdx_dump(config, dry_run=False, **_kw):
             age_days = (time.time() - cdx_path.stat().st_mtime) / 86400
             if age_days < max_age_days:
                 log.info("CDX dump is fresh (%.1f days old): %s", age_days, cdx_path)
+                # Register fresh dumps too — run_index's disk-glob fallback
+                # covers most cases, but parity with the stale-rebuild branch
+                # keeps config.cdx_files authoritative for the in-memory pass.
+                cdx_str = str(cdx_path)
+                if cdx_str not in config.cdx_files:
+                    config.cdx_files.append(cdx_str)
+                    log.info("  Registered fresh CDX file: %s", cdx_path)
                 continue
             log.info("CDX dump is stale (%.1f days old), re-dumping: %s", age_days, cdx_path)
 
@@ -255,7 +328,13 @@ def run_cdx_dump(config, dry_run=False, **_kw):
 
 
 def run_index(config, dry_run=False, **_kw):
-    """Stage 1: Parse CDX → product index, then run CommonCrawl discovery."""
+    """Stage 1: Parse CDX → product index, then run CommonCrawl discovery.
+
+    Accepts `include_ledger=True` (via kwargs) to promote ledger entities
+    that aren't represented in any CDX dump. This is critical on surfaces
+    like atom feeds or JSON product endpoints that list products the Wayback
+    Machine never independently crawled.
+    """
     from wayback_archiver.cdx import parse_cdx
 
     # Resolve the CDX file list. config.cdx_files comes from the YAML, but
@@ -318,11 +397,31 @@ def run_index(config, dry_run=False, **_kw):
         lambda c, prods=products, src=str(config.index_file): _import_entities_from_products(c, prods, src, config.domains),
     )
 
-    # ── Pass 2: CommonCrawl discovery (opt-out via config or CLI) ──────
+    # Protocol II reverse-sync: ledger entities that are not in CDX-derived
+    # products get promoted back into index.json so they reach the fetch
+    # queue. Observed gap on the pablosupply rerun: ~800 atom-feed entities
+    # never materialized because every CDX dump came back empty for them.
+    if _kw.get("include_ledger"):
+        promoted = _promote_ledger_entities(config, products)
+        if promoted:
+            log.info("Ledger promotion: +%d entities (total index: %d)",
+                     promoted, len(products))
+            config.index_file.write_text(
+                json.dumps(products, indent=2, sort_keys=False)
+            )
+
+    # ── Pass 2: CommonCrawl discovery (opt-out via config, CLI, or env) ──────
     cc_enabled = config._raw.get("commoncrawl", {}).get("enabled", True)
-    skip_cc = bool(_kw.get("skip_cc"))
+    skip_cc_cli = bool(_kw.get("skip_cc"))
+    skip_cc_env = os.environ.get("WAYBACK_SKIP_CC") == "1"
+    skip_cc = skip_cc_cli or skip_cc_env
     if skip_cc or not cc_enabled:
-        reason = "CLI --skip-cc" if skip_cc else "commoncrawl.enabled=false"
+        if skip_cc_cli:
+            reason = "CLI --skip-cc"
+        elif skip_cc_env:
+            reason = "env WAYBACK_SKIP_CC=1"
+        else:
+            reason = "commoncrawl.enabled=false"
         log.info("")
         log.info("Skipping CommonCrawl discovery (%s)", reason)
         cc_results = {}
@@ -359,6 +458,7 @@ def run_index(config, dry_run=False, **_kw):
 
 
 CC_DOMAIN_BUDGET_SEC = 120.0  # Hard cap per-domain so a single stuck endpoint can't hang the pipeline.
+CC_DOMAIN_MISS_THRESHOLD = 3  # Abandon a domain after N consecutive empty/error crawl responses.
 
 
 async def _cc_discovery(config, progress_path: Path | None = None) -> dict:
@@ -396,6 +496,11 @@ async def _cc_discovery(config, progress_path: Path | None = None) -> dict:
                 _emit_progress(progress_path, "cc_discovery", "domain_start", domain=domain)
             domain_hits_before = len(results)
             abandoned = False
+            # Per-domain consecutive-miss counter. Empty responses, non-200s,
+            # and network errors all increment; a hit resets it. Past the
+            # threshold we abandon the domain for the rest of this run.
+            consecutive_misses = 0
+            abandoned_reason: str | None = None
 
             for pattern in PATH_PATTERNS:
                 if abandoned:
@@ -407,12 +512,20 @@ async def _cc_discovery(config, progress_path: Path | None = None) -> dict:
                         log.warning("  CC: abandoning %s after %.0fs budget",
                                     domain, CC_DOMAIN_BUDGET_SEC)
                         abandoned = True
+                        abandoned_reason = "budget"
+                        break
+                    if consecutive_misses >= CC_DOMAIN_MISS_THRESHOLD:
+                        log.info("  CC: abandoning %s after %d consecutive misses",
+                                 domain, consecutive_misses)
+                        abandoned = True
+                        abandoned_reason = "misses"
                         break
                     api_url = (
                         f"https://index.commoncrawl.org/{crawl_id}-index"
                         f"?url={query_url_prefix}&output=json&limit=500"
                     )
 
+                    hit_this_query = False
                     try:
                         async with session.get(
                             api_url,
@@ -478,12 +591,18 @@ async def _cc_discovery(config, progress_path: Path | None = None) -> dict:
                                         "warc_coords": warc_coords,
                                     }
                                     total_hits += 1
+                                    hit_this_query = True
 
                     except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                         log.debug("    CC error %s %s: %s", crawl_id, pattern, e)
                     finally:
                         # Rate limit: 1 req/s against CC index
                         await asyncio.sleep(1.0)
+
+                    if hit_this_query:
+                        consecutive_misses = 0
+                    else:
+                        consecutive_misses += 1
 
             # Per-domain accounting for the progress stream
             if progress_path is not None:
@@ -493,6 +612,7 @@ async def _cc_discovery(config, progress_path: Path | None = None) -> dict:
                     wall_sec=round(stopwatch() - domain_t0, 1),
                     new_hits=len(results) - domain_hits_before,
                     abandoned=abandoned,
+                    abandoned_reason=abandoned_reason,
                 )
 
     log.info("  CC discovery: %d queries, %d unique handles found", total_queries, len(results))
@@ -1004,6 +1124,7 @@ def run_cdn_discover(config, dry_run=False, **_kw):
 
     No-op if shopify_cdn.enabled is not set in the config.
     """
+    config.ensure_project_dirs()
     shopify_cfg = config._raw.get("shopify_cdn", {})
     if not shopify_cfg.get("enabled"):
         log.info("shopify_cdn not enabled — skipping CDN discovery")
@@ -1141,35 +1262,25 @@ def run_cdn_discover(config, dry_run=False, **_kw):
     if config.metadata_file.exists():
         metadata = json.loads(config.metadata_file.read_text())
 
-    # Build a lookup: CDN filename fragment → product slug
+    from wayback_archiver.match import (
+        build_sku_to_slug_map,
+        resolve_image_to_slug,
+    )
+
+    slug_set = set(metadata.keys())
+    sku_map = build_sku_to_slug_map(metadata)
+    strategy = _kw.get("match_strategy", "aggressive")
+    log.info("  CDN attribution: strategy=%s, slugs=%d, SKUs=%d",
+             strategy, len(slug_set), len(sku_map))
+
     merged_count = 0
     unmatched_urls: list[str] = []
 
     for url in sorted(downloadable_urls):
         filename = sd.cdn_url_to_filename(url)
-
-        # Try to match against known product slugs
-        matched_slug = None
-        # Extract the product-relevant part from the CDN filename
-        # e.g. "products__dove-hoodie_800x.jpg" → "dove-hoodie"
-        parts = filename.split("__")
-        if len(parts) >= 2:
-            # Take the last part, strip extension and size suffix
-            candidate = parts[-1]
-            candidate = re.sub(r'\.\w+$', '', candidate)  # strip extension
-            candidate = re.sub(r'_\d+x\d*$', '', candidate)  # strip size suffix
-            candidate = re.sub(r'_(?:grande|medium|small|large|compact|master|pico|icon|thumb)$', '', candidate)
-            candidate = candidate.lower()
-
-            # Direct match
-            if candidate in metadata:
-                matched_slug = candidate
-            else:
-                # Try partial match: does any slug start with or contain this candidate?
-                for slug in metadata:
-                    if candidate and (slug.startswith(candidate) or candidate in slug):
-                        matched_slug = slug
-                        break
+        matched_slug = resolve_image_to_slug(
+            filename, slug_set, sku_map=sku_map, strategy=strategy
+        )
 
         if matched_slug:
             links_file = config.links_dir / f"{matched_slug}.txt"
@@ -1226,6 +1337,10 @@ def run_match(config, dry_run=False, **_kw):
     from wayback_archiver.match import match_products
     from wayback_archiver.util import find_empty_dirs, build_dir_to_slug_map
 
+    # Idempotent; covers the case where this stage runs before products/ has
+    # been created by an earlier fetch (e.g. when resuming from a fresh clone).
+    config.ensure_project_dirs()
+
     metadata = json.loads(config.metadata_file.read_text())
 
     dir_map = build_dir_to_slug_map(metadata)
@@ -1261,6 +1376,7 @@ def run_download(config, dry_run=False, **_kw):
     from wayback_archiver.util import build_dirname
     import requests
 
+    config.ensure_project_dirs()
     metadata = json.loads(config.metadata_file.read_text())
     ckpt = StageCheckpoint(config.checkpoint_path("download"), "download")
     ckpt.load()
@@ -1295,6 +1411,7 @@ def run_download(config, dry_run=False, **_kw):
             dir_name = build_dirname(
                 meta.get("name", slug.replace("-", " ").title()),
                 meta.get("date") or None,
+                slug,
             )
             dest_dir = config.products_dir / dir_name
 
@@ -1377,7 +1494,7 @@ def run_build(config, dry_run=False, **_kw):
     for slug, meta in sorted(metadata.items()):
         name = meta.get("name", slug.replace("-", " ").title())
         from wayback_archiver.util import build_dirname
-        dir_name = build_dirname(name, meta.get("date") or None)
+        dir_name = build_dirname(name, meta.get("date") or None, slug)
         d = config.products_dir / dir_name
 
         images = sorted(f.name for f in list_images(d)) if d.exists() else []
@@ -1625,6 +1742,11 @@ def main():
                         help="Skip CommonCrawl discovery inside the index stage. "
                              "Useful when CC is slow or the target is too recent / "
                              "too ephemeral for CC to have captured (pop-ups, private stores).")
+    parser.add_argument("--include-ledger", action="store_true",
+                        help="During index stage, promote ledger entities that are "
+                             "not represented in any CDX dump back into the product "
+                             "index. Recovers atom/sitemap-only products. Default "
+                             "off for `index`, on for `resume` and `--auto`.")
     # fetch-specific options
     parser.add_argument("--proxy", choices=["isp", "dc"], default="isp",
                         help="Proxy type for fetch stage (default: isp)")
@@ -1638,6 +1760,11 @@ def main():
                         choices=["archive_today", "memento"],
                         help="Try alternative archives for failed URLs after primary cascade "
                              "(e.g., --fallback-archives archive_today memento)")
+    parser.add_argument("--match-strategy", choices=["strict", "aggressive"],
+                        default="aggressive",
+                        help="Image-to-slug attribution strategy for cdn_discover. "
+                             "'aggressive' (default) adds SKU-prefix lookup and a "
+                             "difflib fuzzy fallback; 'strict' is exact-prefix only.")
     args = parser.parse_args()
 
     # --auto implies --yes (no interactive prompts) and enables progress streaming.
@@ -1667,6 +1794,9 @@ def main():
         "build": run_build,
     }
 
+    # --auto defaults include-ledger on (turn-key mode prefers max coverage).
+    include_ledger = args.include_ledger or args.auto
+
     kwargs = dict(
         dry_run=args.dry_run,
         proxy_type=args.proxy,
@@ -1675,6 +1805,8 @@ def main():
         backoff_factor=args.backoff_factor,
         fallback_archives=fallback_archives,
         skip_cc=args.skip_cc,
+        include_ledger=include_ledger,
+        match_strategy=args.match_strategy,
     )
 
     # `resume` reads audit.json and picks the stage that shrinks the largest
@@ -1689,6 +1821,10 @@ def main():
         log.info("=" * 60)
         args.stage = stage_name
         kwargs.update(extra_kwargs)
+        # Resume is the "catch everything you missed" mode — always promote
+        # ledger entities during any index run selected by resume.
+        if stage_name == "index":
+            kwargs["include_ledger"] = True
 
     if args.stage == "all":
         log.info("=" * 60)

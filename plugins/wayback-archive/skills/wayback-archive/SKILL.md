@@ -1,6 +1,6 @@
 ---
 name: wayback-archive
-description: Recover a complete product catalog (data + images) from a defunct e-commerce site by URL. Use when the user gives a URL, domain, or comma-separated host list for a dead store and wants the full catalog recovered automatically. Also triggers on mentions of Wayback Machine catalog recovery, CommonCrawl WARC extraction, Shopify CDN archaeology, or rebuilding a product database from a dead website.
+description: Recover a complete product catalog (data + images) from a defunct e-commerce site via Wayback, CommonCrawl, and Shopify CDN archaeology. Use when a URL, domain, or host list points at a dead store and the full catalog should be rebuilt end-to-end.
 argument-hint: "<url-or-domain> [--dry-run]"
 allowed-tools:
   - Bash(python3 *)

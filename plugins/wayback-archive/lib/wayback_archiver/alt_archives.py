@@ -6,16 +6,76 @@ Wayback Machine + CommonCrawl cascade is exhausted.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 import time
+from dataclasses import dataclass, field
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 
 from .http_client import AIOHTTP_HEADERS, parse_retry_after
 
 log = logging.getLogger(__name__)
+
+
+# Per-host circuit breaker. Without this, enabling alternative_archives on a
+# dead site spends ~15s × 2 archives × N products on timeouts (observed on
+# pablosupply: 228 lookups × 30s ≈ 114 minutes for zero hits).
+_ALT_BREAKER_MISS_THRESHOLD = 3
+_ALT_BREAKER_COOLDOWN_SEC = 600.0  # 10 minutes
+
+
+@dataclass
+class _AltBreaker:
+    """(archive_name, host) → consecutive-miss tracker with time-based cooldown.
+
+    A lookup is a "hit" if it returned >=1 snapshot or fetched bytes. Three
+    consecutive misses on the same (archive, host) tuple trip the breaker for
+    10 minutes, after which the count resets and lookups resume. Hits reset
+    the counter immediately.
+    """
+    _misses: dict[tuple[str, str], int] = field(default_factory=dict, repr=False)
+    _tripped_at: dict[tuple[str, str], float] = field(default_factory=dict, repr=False)
+
+    def should_skip(self, archive: str, host: str) -> bool:
+        key = (archive, host)
+        tripped = self._tripped_at.get(key)
+        if tripped is None:
+            return False
+        if time.time() - tripped >= _ALT_BREAKER_COOLDOWN_SEC:
+            self._tripped_at.pop(key, None)
+            self._misses[key] = 0
+            log.info("  alt_archives breaker cooldown elapsed for %s/%s", archive, host)
+            return False
+        return True
+
+    def record_hit(self, archive: str, host: str) -> None:
+        self._misses[(archive, host)] = 0
+
+    def record_miss(self, archive: str, host: str) -> None:
+        key = (archive, host)
+        self._misses[key] = self._misses.get(key, 0) + 1
+        if self._misses[key] >= _ALT_BREAKER_MISS_THRESHOLD and key not in self._tripped_at:
+            self._tripped_at[key] = time.time()
+            log.warning(
+                "  alt_archives breaker tripped for %s/%s (%d misses) — cooldown %.0fs",
+                archive, host, self._misses[key], _ALT_BREAKER_COOLDOWN_SEC,
+            )
+
+
+_breaker = _AltBreaker()
+
+
+def _host_of(url: str) -> str:
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return ""
+    return host.lower().rstrip(".")
 
 
 async def archive_today_lookup(
@@ -30,6 +90,10 @@ async def archive_today_lookup(
 
     API: https://archive.ph/timemap/json/{url}
     """
+    host = _host_of(url)
+    if host and _breaker.should_skip("archive_today", host):
+        return []
+
     api_url = f"https://archive.ph/timemap/json/{url}"
 
     try:
@@ -45,17 +109,24 @@ async def archive_today_lookup(
                     retry_after = parse_retry_after(resp.headers.get("Retry-After"))
                     if retry_after:
                         log.warning("  429 rate-limited; Retry-After=%.0fs", retry_after)
+                if host:
+                    _breaker.record_miss("archive_today", host)
                 return []
 
             text = await resp.text()
             if not text.strip():
+                if host:
+                    _breaker.record_miss("archive_today", host)
                 return []
 
             # Response is a JSON array of [rel, url, datetime] tuples
             # or a JSON object with memento links
             try:
                 data = json.loads(text)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                log.debug("  archive.today JSON decode failed for %s: %s", url[:60], e)
+                if host:
+                    _breaker.record_miss("archive_today", host)
                 return []
 
             snapshots = []
@@ -87,10 +158,17 @@ async def archive_today_lookup(
                                 })
 
             log.debug("  archive.today found %d snapshots for %s", len(snapshots), url[:60])
+            if host:
+                if snapshots:
+                    _breaker.record_hit("archive_today", host)
+                else:
+                    _breaker.record_miss("archive_today", host)
             return snapshots
 
     except (aiohttp.ClientError, TimeoutError) as e:
         log.debug("  archive.today error for %s: %s", url[:60], e)
+        if host:
+            _breaker.record_miss("archive_today", host)
         return []
 
 
@@ -109,6 +187,10 @@ async def memento_lookup(
 
     API: https://timetravel.mementoweb.org/timemap/json/{url}
     """
+    host = _host_of(url)
+    if host and _breaker.should_skip("memento", host):
+        return []
+
     api_url = f"https://timetravel.mementoweb.org/timemap/json/{url}"
 
     try:
@@ -124,15 +206,22 @@ async def memento_lookup(
                     retry_after = parse_retry_after(resp.headers.get("Retry-After"))
                     if retry_after:
                         log.warning("  429 rate-limited; Retry-After=%.0fs", retry_after)
+                if host:
+                    _breaker.record_miss("memento", host)
                 return []
 
             text = await resp.text()
             if not text.strip():
+                if host:
+                    _breaker.record_miss("memento", host)
                 return []
 
             try:
                 data = json.loads(text)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                log.debug("  memento JSON decode failed for %s: %s", url[:60], e)
+                if host:
+                    _breaker.record_miss("memento", host)
                 return []
 
             snapshots = []
@@ -163,8 +252,6 @@ async def memento_lookup(
                     elif "webcitation.org" in archive_url:
                         archive_name = "webcitation"
                     else:
-                        # Try to extract domain as archive name
-                        import re
                         dm = re.match(r"https?://([^/]+)", archive_url)
                         if dm:
                             archive_name = dm.group(1)
@@ -179,10 +266,17 @@ async def memento_lookup(
             log.debug("  memento found %d snapshots for %s across %d archives",
                       len(snapshots), url[:60],
                       len(set(s["archive_name"] for s in snapshots)))
+            if host:
+                if snapshots:
+                    _breaker.record_hit("memento", host)
+                else:
+                    _breaker.record_miss("memento", host)
             return snapshots
 
     except (aiohttp.ClientError, TimeoutError) as e:
         log.debug("  memento error for %s: %s", url[:60], e)
+        if host:
+            _breaker.record_miss("memento", host)
         return []
 
 
@@ -274,7 +368,3 @@ async def fallback_fetch(
                 await asyncio.sleep(1.0)
 
     return None
-
-
-# Need asyncio for fallback_fetch
-import asyncio

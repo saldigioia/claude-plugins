@@ -18,11 +18,42 @@ def sanitize_dirname(name: str) -> str:
     return _SANITIZE_RE.sub('', name).strip()
 
 
-def build_dirname(name: str, date: str | None = None) -> str:
-    """Build a product directory name from name and optional date prefix."""
-    if date:
-        return sanitize_dirname(f"{date} {name}")
-    return sanitize_dirname(name)
+def _slug_suffix(name: str, slug: str) -> str:
+    """Return the unique tail of ``slug`` not covered by ``name``.
+
+    Normalizes ``name`` to a lowercase-dashed form. If ``slug`` starts with
+    it, returns the remainder (joining dash stripped). Otherwise returns
+    the full slug — preserving uniqueness when the name→slug mapping isn't
+    a prefix relationship.
+    """
+    if not slug:
+        return ""
+    name_slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip("-")
+    if name_slug and slug.startswith(name_slug):
+        return slug[len(name_slug):].lstrip("-")
+    return slug
+
+
+def build_dirname(
+    name: str,
+    date: str | None = None,
+    slug: str | None = None,
+) -> str:
+    """Build a product directory name from name, optional date, and slug.
+
+    When ``slug`` is supplied, a `[suffix]` disambiguator is appended so
+    variants sharing the same ``name`` + ``date`` (e.g. per-city reissues
+    of the same T-shirt) don't collide into one directory. Without the
+    disambiguator, the download stage would pour every variant's link
+    file into a single folder — the source of the pablosupply
+    cross-contamination bug.
+    """
+    base = f"{date} {name}" if date else name
+    if slug:
+        suffix = _slug_suffix(name, slug)
+        if suffix:
+            base = f"{base} [{suffix}]"
+    return sanitize_dirname(base)
 
 
 def build_dir_to_slug_map(metadata: dict) -> dict[str, str]:
@@ -34,7 +65,7 @@ def build_dir_to_slug_map(metadata: dict) -> dict[str, str]:
     for slug, meta in metadata.items():
         product_name = meta.get("name", slug.replace("-", " ").title())
         date_str = meta.get("date", "")
-        dir_name = build_dirname(product_name, date_str if date_str else None)
+        dir_name = build_dirname(product_name, date_str if date_str else None, slug)
         dir_to_slug[dir_name] = slug
     return dir_to_slug
 
@@ -64,7 +95,7 @@ def find_product_dir(
     meta = metadata.get(slug, {})
     name = meta.get("name", slug.replace("-", " ").title())
     date = meta.get("date", "")
-    dir_name = build_dirname(name, date if date else None)
+    dir_name = build_dirname(name, date if date else None, slug)
     d = products_dir / dir_name
     if d.exists():
         return d
@@ -74,7 +105,7 @@ def find_product_dir(
         if m.get("sku") == slug:
             name = m.get("name", s)
             date = m.get("date", "")
-            dir_name = build_dirname(name, date if date else None)
+            dir_name = build_dirname(name, date if date else None, s)
             d = products_dir / dir_name
             if d.exists():
                 return d

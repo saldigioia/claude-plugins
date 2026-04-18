@@ -266,7 +266,8 @@ async def fetch_cc_warc(
             import gzip
             try:
                 decompressed = gzip.decompress(raw)
-            except Exception:
+            except (OSError, EOFError) as e:
+                log.debug("gzip decompress failed for %s: %s", url, e)
                 return None
 
             # WARC record = WARC headers + HTTP headers + body

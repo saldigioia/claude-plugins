@@ -39,22 +39,46 @@ def extract_shopify_metadata(page: str, slug: str) -> dict:
     }
 
 
-def extract_api_metadata(data: dict) -> dict:
-    """Extract metadata from an Adidas API JSON response."""
-    attrs = data.get("attribute_list", {})
-    pricing = data.get("pricing_information", {})
-    desc = data.get("product_description", {})
+def extract_api_metadata(data) -> dict:
+    """Extract metadata from an Adidas API JSON response.
+
+    Adidas endpoints occasionally return a single-element list instead of a
+    bare object. Unwrap that shape and guard the sub-dicts — the fetch stage
+    used to crash with AttributeError when any of these were unexpectedly a
+    list or None.
+    """
+    if isinstance(data, list):
+        data = data[0] if data and isinstance(data[0], dict) else {}
+    if not isinstance(data, dict):
+        return {}
+
+    attrs = data.get("attribute_list") or {}
+    pricing = data.get("pricing_information") or {}
+    desc = data.get("product_description") or {}
+    if not isinstance(attrs, dict):
+        attrs = {}
+    if not isinstance(pricing, dict):
+        pricing = {}
+    if not isinstance(desc, dict):
+        desc = {}
 
     image_urls = []
-    for view in data.get("view_list", []):
-        url = view.get("image_url", "")
-        if url:
-            m = re.search(r'https?://(?:web\.archive\.org/web/\d+/)?(.+)', url)
-            if m:
-                clean = m.group(1)
-                if not clean.startswith("http"):
-                    clean = "https://" + clean
-                image_urls.append(clean)
+    view_list = data.get("view_list") or []
+    if isinstance(view_list, list):
+        for view in view_list:
+            if not isinstance(view, dict):
+                continue
+            url = view.get("image_url", "")
+            if url:
+                m = re.search(r'https?://(?:web\.archive\.org/web/\d+/)?(.+)', url)
+                if m:
+                    clean = m.group(1)
+                    if not clean.startswith("http"):
+                        clean = "https://" + clean
+                    image_urls.append(clean)
+
+    sport = attrs.get("sport")
+    sport_str = ", ".join(sport) if isinstance(sport, list) and sport else None
 
     return {
         "name": data.get("name") or desc.get("title"),
@@ -66,13 +90,16 @@ def extract_api_metadata(data: dict) -> dict:
         "color": attrs.get("color") or attrs.get("search_color_raw"),
         "gender": attrs.get("gender"),
         "description": desc.get("text"),
-        "sport": ", ".join(attrs.get("sport", [])) if attrs.get("sport") else None,
+        "sport": sport_str,
         "image_urls": image_urls,
     }
 
 
-def extract_catalog_product(product: dict) -> dict:
+def extract_catalog_product(product) -> dict:
     """Extract metadata from a catalog API product entry (bloom/archive)."""
+    if not isinstance(product, dict):
+        return {}
+
     sku = product.get("product_id")
     name = product.get("product_name", "")
     price = product.get("price")

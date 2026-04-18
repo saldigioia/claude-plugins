@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/saldigioia/claude-plugins/main/inst
 | Plugin | Version | What it does |
 | --- | --- | --- |
 | [`every-layout`](plugins/every-layout/README.md) | 4.2.0 | Axiom-enforced CSS layout primitives, Astro 5 site architecture, archival data patterns, and design system tokens. 13 composable primitives, 32 numbered principles, 6 axioms enforced by CI-grade strict-check and JS-budget gates. Zero-JS-by-default, media-query-free, modular-scale spacing. |
-| [`wayback-archive`](plugins/wayback-archive/README.md) | 1.0.1 | Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline supporting Shopify, Swell Commerce, Fourthwall, and custom platforms. |
+| [`wayback-archive`](plugins/wayback-archive/README.md) | 1.2.0 | Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline supporting Shopify, Swell Commerce, Fourthwall, and custom platforms. |
 
 ## Update
 
