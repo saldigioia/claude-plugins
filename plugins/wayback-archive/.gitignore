@@ -1,0 +1,19 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# In-repo project outputs (bootstrap default when run from a plugin checkout)
+projects/
+
+# Stale CDX checkpoints — these used to leak into tools/ before checkpoints
+# were anchored to the project dir. Never commit them.
+tools/.*_wayback.ckpt.json
+tools/.*_wayback.ckpt.json.tmp
+
+# Local env
+tools/.env
+.env
+
+# macOS
+.DS_Store

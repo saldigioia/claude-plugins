@@ -31,7 +31,7 @@ The bootstrap script above has already:
 4. Detected any `.myshopify.com` alias embedded in the HTML.
 5. Rendered the matching platform template into `<projects-root>/<name>/config.yaml` and saved the plan to `<projects-root>/<name>/plan.json`.
 
-**Where projects land.** The plan JSON has `project_dir` and `config_path` as **absolute paths** — use those verbatim when running downstream stages. Default `projects-root` is `~/wayback-archive/`; override via `$WAYBACK_ARCHIVE_ROOT` env var or `--project-root <path>` on bootstrap. Projects intentionally live outside the plugin cache so they survive plugin updates.
+**Where projects land.** The plan JSON has `project_dir` and `config_path` as **absolute paths** — use those verbatim when running downstream stages. Default `projects-root` precedence: `$WAYBACK_ARCHIVE_ROOT` → `<repo>/projects/` when invoked from a plugin checkout (the common case — outputs stay alongside the codebase the plugin was summoned from) → `~/wayback-archive/` only as a fallback when no plugin sentinel is found (e.g. pip-cache install). Override with `--project-root <path>` on bootstrap.
 
 ## Your task
 
@@ -115,7 +115,7 @@ Drain highest-value surfaces first: `json_api > sitemap > feed > collection > ho
   Bucket → stage mapping: `unenumerated_hosts` → `cdx_dump`, `unresolved_slugs` → `fetch`, `retry_queue_depth` → `fetch --proxy dc --fallback-archives archive_today memento`, `index_missing` → `download`. Override auto-pick with `--bucket <name>`.
 - **Preflight blocked the run.** Read `projects/<name>/preflight.json`. Missing Oxylabs creds: copy `tools/.env.example` → `tools/.env` and fill in (auto-sourced, no `export` needed). Missing deps: `pip install -r requirements.txt`. Low disk: free space or change `project_dir`. Archive.org unreachable: retry or check VPN/DNS.
 - **Platform misdetected.** Inspect `projects/<name>/config.yaml`, pick a different template from `skills/wayback-archive/configs/_template_*.yaml`, swap the `cdn_patterns` / `url_rules` blocks, re-run `resume` or the specific stages from `filter` onward.
-- **CDX tool hangs.** Checkpoint files live at `tools/.<domain>_wayback.ckpt.json`. Resume: `cd tools && python -m wayback_cdx --domain <d> --output ../projects/<name>/<d>_wayback.txt --resume`.
+- **CDX tool hangs.** Checkpoint files live at `<project_dir>/.cdx_ckpt/<safe_domain>.ckpt.json`. Resume by re-running `run_stage.py cdx_dump` — `--resume --checkpoint-file` is already wired. To wipe all checkpoint/audit state and start clean: `python3 scripts/run_stage.py reset --config <cfg>` (add `--hard` to also clear `html/`, `products/`, `links/`). Never touches `config.yaml` or `ledger.db`.
 - **Low fetch success (<20%).** Let `resume` pick it up via the `retry_queue_depth` bucket, or run `fetch` directly with `--proxy dc --fallback-archives archive_today memento`.
 - **Anti-bot / CAPTCHA blocks.** Fall back to HAR-based recovery — see `references/playwright-wayback.md`.
 

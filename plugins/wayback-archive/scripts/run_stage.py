@@ -264,10 +264,17 @@ def run_cdx_dump(config, dry_run=False, **_kw):
     from_ts = config._raw.get("cdx_dump_from", "")
     to_ts = config._raw.get("cdx_dump_to", "")
 
+    # Anchor CDX checkpoints to the project dir so resume-state travels with
+    # the catalog and can't leak into the plugin tree (tools/) on the next
+    # run. Create the directory up front — the subprocess won't.
+    ckpt_dir = config.project_path / ".cdx_ckpt"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
     for domain in config.domains:
         # Derive output path: same directory as existing cdx_files, or project_dir
         safe_domain = domain.replace(".", "_").replace("/", "_")
         cdx_path = config.project_path / f"{safe_domain}_wayback.txt"
+        ckpt_path = ckpt_dir / f"{safe_domain}.ckpt.json"
 
         # Check staleness
         if cdx_path.exists():
@@ -289,6 +296,7 @@ def run_cdx_dump(config, dry_run=False, **_kw):
             "--domain", domain,
             "--output", str(cdx_path),
             "--resume",
+            "--checkpoint-file", str(ckpt_path),
             "--proxy-mode", proxy_mode,
         ]
         if from_ts:
@@ -298,14 +306,19 @@ def run_cdx_dump(config, dry_run=False, **_kw):
 
         if dry_run:
             log.info("[DRY RUN] Would run: %s", " ".join(cmd))
-            log.info("[DRY RUN]   cwd=%s", cdx_tool_path)
+            log.info("[DRY RUN]   cwd=%s", REPO_ROOT)
             continue
 
         log.info("Running CDX dump for %s ...", domain)
         log.info("  Command: %s", " ".join(cmd))
         log.info("  Output: %s", cdx_path)
 
-        result = subprocess.run(cmd, cwd=str(cdx_tool_path))
+        # Run from REPO_ROOT (not tools/) so no relative paths the subprocess
+        # might write resolve into the plugin tree. `python3 -m wayback_cdx`
+        # finds the module via sys.path regardless of cwd.
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(cdx_tool_path) + os.pathsep + env.get("PYTHONPATH", "")
+        result = subprocess.run(cmd, cwd=str(REPO_ROOT), env=env)
         if result.returncode != 0:
             log.error("CDX dump failed for %s (exit code %d)", domain, result.returncode)
         else:
@@ -1688,6 +1701,62 @@ def _pick_resume_stage(config, bucket_override: str | None = None) -> tuple[str,
     }
 
 
+def _run_reset(config, hard: bool = False, dry_run: bool = False) -> None:
+    """Clear project-local checkpoint/audit state.
+
+    By default removes: `.cdx_ckpt/`, `.checkpoint_*.json`, `audit.json`,
+    `.progress.jsonl`, `.new_hosts.txt`, and any stale `_wayback.txt` CDX
+    dumps. With ``hard=True``, also clears the contents of `html/`,
+    `products/`, and `links/` — downloaded bodies and per-slug image URL
+    lists. Never touches `config.yaml` or `ledger.db`.
+    """
+    import shutil
+
+    project = config.project_path
+    targets: list[Path] = [
+        project / ".cdx_ckpt",
+        project / "audit.json",
+        project / ".progress.jsonl",
+        project / ".new_hosts.txt",
+        project / "preflight.json",
+    ]
+    for p in sorted(project.glob(".checkpoint_*.json")):
+        targets.append(p)
+    for p in sorted(project.glob("*_wayback.txt")):
+        targets.append(p)
+    if hard:
+        for name in ("html", "products", "links"):
+            targets.append(project / name)
+
+    log.info("Reset targets under %s:", project)
+    for t in targets:
+        if not t.exists():
+            continue
+        if dry_run:
+            log.info("  [DRY RUN] would remove %s", t)
+            continue
+        try:
+            if t.is_dir():
+                if hard and t.name in ("html", "products", "links"):
+                    # Clear contents, keep the directory itself so
+                    # ensure_project_dirs() downstream doesn't have to re-mkdir.
+                    for child in t.iterdir():
+                        if child.is_dir():
+                            shutil.rmtree(child, ignore_errors=True)
+                        else:
+                            child.unlink(missing_ok=True)
+                    log.info("  cleared contents of %s", t)
+                else:
+                    shutil.rmtree(t, ignore_errors=True)
+                    log.info("  removed %s", t)
+            else:
+                t.unlink(missing_ok=True)
+                log.info("  removed %s", t)
+        except OSError as e:
+            log.warning("  failed to remove %s: %s", t, e)
+    log.info("Reset complete (hard=%s).", hard)
+
+
 def _run_preflight(config_path: Path, progress_path: Path) -> int:
     """Run preflight in-process; return its exit code. Emits progress events.
 
@@ -1721,10 +1790,17 @@ def _run_preflight(config_path: Path, progress_path: Path) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description="Wayback Archive Pipeline")
-    parser.add_argument("stage", choices=STAGE_ORDER + ["all", "resume"],
+    parser.add_argument("stage", choices=STAGE_ORDER + ["all", "resume", "reset"],
                         help="Stage to run. `all` runs the full pipeline; "
                              "`resume` reads audit.json and runs the stage that "
-                             "shrinks the largest residual bucket.")
+                             "shrinks the largest residual bucket; "
+                             "`reset` clears project-local checkpoint/audit "
+                             "state so the next run starts clean.")
+    parser.add_argument("--hard", action="store_true",
+                        help="With `reset`: also delete html/, products/, and "
+                             "links/ contents (downloaded bodies and image URLs). "
+                             "Without --hard, only CDX checkpoints, audit.json, "
+                             "and .progress.jsonl are cleared.")
     parser.add_argument("--bucket", default=None,
                         choices=[b for b, _, _ in BUCKET_TO_STAGE],
                         help="Override `resume`'s bucket selection.")
@@ -1746,7 +1822,8 @@ def main():
                         help="During index stage, promote ledger entities that are "
                              "not represented in any CDX dump back into the product "
                              "index. Recovers atom/sitemap-only products. Default "
-                             "off for `index`, on for `resume` and `--auto`.")
+                             "off for a bare `index` stage, on for `all`, `resume`, "
+                             "and `--auto`.")
     # fetch-specific options
     parser.add_argument("--proxy", choices=["isp", "dc"], default="isp",
                         help="Proxy type for fetch stage (default: isp)")
@@ -1775,6 +1852,10 @@ def main():
     config.ensure_project_dirs()
     progress_path = config.project_path / ".progress.jsonl"
 
+    if args.stage == "reset":
+        _run_reset(config, hard=args.hard, dry_run=args.dry_run)
+        return
+
     # Also check config for alternative_archives setting
     fallback_archives = args.fallback_archives
     if fallback_archives is None and config.alternative_archives.get("enabled"):
@@ -1794,8 +1875,18 @@ def main():
         "build": run_build,
     }
 
-    # --auto defaults include-ledger on (turn-key mode prefers max coverage).
-    include_ledger = args.include_ledger or args.auto
+    # Protocol II: surfaces (atom/sitemap/collection) reference products whose
+    # /products/<slug> URL may never have been crawled by Wayback independently.
+    # Those slugs land in the ledger's entities table but not in any CDX dump,
+    # so without ledger promotion they'd never reach `fetch`. Default
+    # include-ledger on for any full-pipeline run (`all`, `resume`, `--auto`);
+    # leave it off for a bare `index` stage so single-stage invocations stay
+    # deterministic unless the user explicitly asks.
+    include_ledger = (
+        args.include_ledger
+        or args.auto
+        or args.stage in ("all", "resume")
+    )
 
     kwargs = dict(
         dry_run=args.dry_run,

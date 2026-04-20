@@ -52,17 +52,19 @@ def _default_projects_root() -> Path:
 
     Precedence:
       1. $WAYBACK_ARCHIVE_ROOT environment variable (for CI / per-user override)
-      2. ~/wayback-archive/  (user-home default, persists across plugin updates)
-
-    Intentionally NOT under REPO_ROOT — when bootstrap.py is invoked from a
-    plugin install dir (e.g. ~/.claude/plugins/cache/rare-data-club/
-    wayback-archive/<version>/), placing projects there means a plugin update
-    wipes every recovered catalog. The user's home directory is the only
-    durable default.
+      2. <repo-root>/projects/ when invoked from inside a checkout of the
+         plugin (detected via the `.claude-plugin/plugin.json` sentinel).
+         This keeps outputs where the user "summoned" the plugin from and
+         avoids writing into ephemeral home dirs inside sandboxed sessions.
+      3. ~/wayback-archive/  — only when REPO_ROOT has no plugin sentinel
+         (e.g. plugin installed into a pip/plugin cache where writing to
+         the install tree would be wiped on update).
     """
     env = os.environ.get("WAYBACK_ARCHIVE_ROOT")
     if env:
         return Path(env).expanduser().resolve()
+    if (REPO_ROOT / ".claude-plugin" / "plugin.json").exists():
+        return (REPO_ROOT / "projects").resolve()
     return (Path.home() / "wayback-archive").resolve()
 
 # ── Input parsing ─────────────────────────────────────────────────────────────
@@ -314,7 +316,22 @@ def bootstrap(
     name_override: str | None = None,
     dry_run: bool = False,
     projects_root: Path | None = None,
+    reuse_existing: bool = True,
 ) -> dict:
+    """Scaffold a project from an input URL.
+
+    ``reuse_existing`` (default ``True``) preserves any pre-existing
+    ``config.yaml``, ``ledger.db``, ``audit.json``, ``products/``,
+    ``links/``, and ``html/`` in the target project dir. The plan JSON is
+    still rewritten (it's a snapshot of the probe), and missing
+    directories are created, but nothing authored by a prior run is
+    overwritten. This is the safe default: re-running bootstrap on an
+    existing project is a no-op for state, so the pipeline can resume.
+
+    Pass ``reuse_existing=False`` (``--fresh`` on the CLI) to regenerate
+    ``config.yaml`` from the current platform probe — destructive for any
+    hand-tuned config.
+    """
     projects_root = (projects_root or _default_projects_root()).resolve()
 
     # 1. Parse input into seed hosts
@@ -397,8 +414,21 @@ def bootstrap(
 
     if not dry_run:
         project_dir.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(config_yaml)
+        preserved: list[str] = []
+        if reuse_existing and config_path.exists():
+            preserved.append("config.yaml")
+        else:
+            config_path.write_text(config_yaml)
+        # Plan snapshot is always rewritten — it's a record of the current probe.
         plan_path.write_text(json.dumps(plan, indent=2))
+        # Note any other pre-existing stateful artifacts we are deliberately
+        # leaving alone so downstream stages can pick up where they stopped.
+        if reuse_existing:
+            for sibling in ("ledger.db", "audit.json", "products", "links", "html"):
+                if (project_dir / sibling).exists():
+                    preserved.append(sibling)
+            if preserved:
+                plan["reused_existing"] = preserved
 
         # Create every directory the pipeline will eventually write into, so
         # late stages (download especially) can't fail on a missing products/.
@@ -448,9 +478,23 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Emit plan JSON only; do not write files")
     parser.add_argument(
         "--project-root", default=None,
-        help="Root directory for the project tree (default: $WAYBACK_ARCHIVE_ROOT or ~/wayback-archive/). "
-             "Projects land at <project-root>/<name>/. Use this when you want catalogs kept alongside "
-             "other work — they must not live under the plugin cache, which is wiped on every update.",
+        help="Root directory for the project tree. Default precedence: "
+             "$WAYBACK_ARCHIVE_ROOT → <repo>/projects/ (when invoked from a "
+             "plugin checkout) → ~/wayback-archive/. Projects land at "
+             "<project-root>/<name>/.",
+    )
+    reuse_group = parser.add_mutually_exclusive_group()
+    reuse_group.add_argument(
+        "--reuse-existing", dest="reuse_existing", action="store_true", default=True,
+        help="(default) Preserve pre-existing config.yaml, ledger.db, audit.json, "
+             "and the products/links/html directories if present. Safe to re-run "
+             "on an existing project — prior state drives downstream stages.",
+    )
+    reuse_group.add_argument(
+        "--fresh", dest="reuse_existing", action="store_false",
+        help="Destructively regenerate config.yaml from the current platform "
+             "probe, overwriting any hand-tuned config. State files (ledger, "
+             "audit) are still left in place.",
     )
     args = parser.parse_args()
 
@@ -460,6 +504,7 @@ def main():
         name_override=args.name,
         dry_run=args.dry_run,
         projects_root=projects_root,
+        reuse_existing=args.reuse_existing,
     )
     print(json.dumps(plan, indent=2))
 

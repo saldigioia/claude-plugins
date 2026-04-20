@@ -52,23 +52,40 @@ log = logging.getLogger(__name__)
 # ── Surface class detection (mirrors run_stage._is_discovery_surface_filename) ─
 
 def classify_filename(filename: str) -> str:
-    """Return surface class: atom | sitemap | json_api | collection | home | unknown."""
+    """Return surface class: atom | sitemap | json_api | collection | home | unknown.
+
+    Discrimination rules (surface = many products; entity = one product):
+      - ``products_<N>.atom`` / ``products_page-N.atom`` — paginated feed →
+        gateway surface (atom). Each page lists up to 20 handles + images.
+      - ``products_<slug>.atom`` / ``products_<slug>.oembed`` — per-product
+        feed → entity-scoped, NOT a surface (return ``unknown``).
+      - ``sitemap_products_N.xml`` always matches the sitemap rule first.
+    """
     name = filename[:-5] if filename.endswith(".html") else filename
     lower = name.lower()
     # Sitemap first — Shopify's `sitemap_products_N.xml` contains `_products_`.
     if re.search(r"_sitemap[_.-].*\.xml$|_sitemap\.xml$", lower):
         return "sitemap"
-    # Per-product atoms/oembeds live at /products/<slug>.atom — those are
-    # entity-scoped and shouldn't be treated as gateway surfaces here.
-    if "_products_" in lower:
-        return "unknown"
+    # Per-product atoms/oembeds (e.g. `host_products_my-tee.atom`) are entity
+    # scoped. Paginated feeds — `products_1.atom`, `products_page-2.atom`,
+    # `products_page_3.oembed` — stay in-class as gateway surfaces.
+    _atom_tail = re.search(r"_products_([^/]+?)\.(atom|oembed)$", lower)
+    if _atom_tail:
+        tail = _atom_tail.group(1)
+        _is_paginated = bool(re.fullmatch(r"(\d+|page[-_]?\d+)", tail))
+        if not _is_paginated:
+            return "unknown"
     if lower.endswith(".atom"):
         return "atom"
     if lower.endswith(".oembed"):
         return "oembed"
     if lower.endswith("_products.json"):
         return "json_api"
-    if re.search(r"_collections?_[^_]+$", lower):
+    # Collection landings: host_collections_<anything-non-empty>. Allow
+    # underscores in the tail so paginated / nested / seasonal pages
+    # (collections_all_page-2, collections_men_tops, collections_sale_2024)
+    # are still recognized as collection surfaces.
+    if re.search(r"_collections?_.+$", lower):
         return "collection"
     # Bare hostname + nothing = homepage
     if "_" not in name.split("/")[-1]:
@@ -83,19 +100,34 @@ _ATOM_LINK_RE = re.compile(rb'<link[^>]*\bhref=["\']([^"\']+)["\']', re.IGNORECA
 _SITEMAP_LOC_RE = re.compile(rb"<loc>([^<]+)</loc>", re.IGNORECASE)
 
 
-def _normalize_product_ref(raw_url: str) -> tuple[str, str, str] | None:
+def _normalize_product_ref(raw_url: str, base_host: str = "") -> tuple[str, str, str] | None:
     """Strip Wayback wrappers, extract (canonical_url, host, slug) if this is a
     /products/<slug> URL, else None.
+
+    ``base_host`` is used when the raw URL is host-less (relative, e.g.
+    ``/products/foo`` inside a collection page) — the surface's own host
+    becomes the base. Without this, every relative product link on a
+    collection page gets silently dropped.
     """
-    # Strip web.archive.org wrapper if present
+    # Strip web.archive.org wrapper if present (including path-prefix form
+    # injected by the Wayback toolbar on HTML replays, e.g.
+    # `/web/20230101id_/https://shop.example.com/products/foo`).
     raw = re.sub(r"^https?://web\.archive\.org/web/\d+(?:id_|im_|if_)?/", "", raw_url)
+    raw = re.sub(r"^/web/\d+(?:id_|im_|if_)?/", "", raw)
     try:
         parts = urlparse(raw)
     except ValueError:
         return None
-    if not parts.hostname:
-        return None
-    m = _PRODUCT_PATH_RE.search(parts.path or "")
+    host = (parts.hostname or "").lower().rstrip(".")
+    path = parts.path or ""
+    if not host:
+        # Accept host-less (relative) refs when the caller knows the surface host.
+        if not base_host:
+            return None
+        host = base_host
+        # urlparse of "/products/foo" gives path="/products/foo"; of a bare
+        # "products/foo" with no leading slash, path="products/foo" — still fine.
+    m = _PRODUCT_PATH_RE.search(path)
     if not m:
         return None
     slug = m.group(1).lower()
@@ -103,9 +135,26 @@ def _normalize_product_ref(raw_url: str) -> tuple[str, str, str] | None:
     for ext in (".atom", ".oembed", ".json"):
         if slug.endswith(ext):
             slug = slug[: -len(ext)]
-    host = parts.hostname.lower().rstrip(".")
-    canonical = f"{parts.scheme or 'https'}://{host}{parts.path or ''}"
+    scheme = parts.scheme or "https"
+    if not path.startswith("/"):
+        path = "/" + path
+    canonical = f"{scheme}://{host}{path}"
     return canonical, host, slug
+
+
+def _strip_wayback_prefix(body: bytes) -> bytes:
+    """Drop any Wayback-toolbar HTML/JS prefix before the <?xml?> or <feed>.
+
+    Wayback sometimes wraps atom responses with a toolbar snippet on HTML
+    replay. ET's parser is lenient enough to succeed on the wrapped body
+    but then reports zero entries because the toolbar isn't an atom feed.
+    Slicing to the first XML/atom landmark gives ET real XML to parse.
+    """
+    for marker in (b"<?xml", b"<feed", b"<rss"):
+        idx = body.find(marker)
+        if idx > 0:
+            return body[idx:]
+    return body
 
 
 def _iter_atom_refs(body: bytes) -> Iterable[str]:
@@ -121,12 +170,18 @@ def _iter_atom_refs(body: bytes) -> Iterable[str]:
     landing page or the feed's self-URL — filtered out because they don't
     match the /products/<slug> path pattern downstream, but also skipped
     here for clarity.
+
+    Falls back to regex when the structured parse either raises or returns
+    zero entries (the latter catches Wayback-toolbar-wrapped bodies where
+    ET succeeds on garbage).
     """
+    stripped = _strip_wayback_prefix(body)
     try:
-        root = ET.fromstring(body.decode("utf-8", errors="replace"))
+        root = ET.fromstring(stripped.decode("utf-8", errors="replace"))
     except ET.ParseError:
         root = None
     if root is not None:
+        found = False
         for entry in root.iter():
             if entry.tag.split("}", 1)[-1] != "entry":
                 continue
@@ -146,12 +201,14 @@ def _iter_atom_refs(body: bytes) -> Iterable[str]:
                     continue
                 if ctype and "html" not in ctype.lower():
                     continue
+                found = True
                 yield href
-        return
-    # Regex fallback for malformed feeds (Wayback replay sometimes mangles XML).
+        if found:
+            return
+    # Regex fallback for malformed feeds OR structured-parse-yielded-nothing.
     # We can't distinguish <entry> scope vs feed scope here — the downstream
     # /products/<slug> path filter catches non-product hrefs.
-    for m in _ATOM_LINK_RE.finditer(body):
+    for m in _ATOM_LINK_RE.finditer(stripped):
         yield m.group(1).decode("utf-8", errors="replace")
 
 
@@ -160,11 +217,26 @@ def _iter_sitemap_refs(body: bytes) -> Iterable[str]:
         yield m.group(1).decode("utf-8", errors="replace").strip()
 
 
+_HTML_LINK_ATTRS_RE = re.compile(
+    r'(?:href|data-href|data-url|data-product-url|data-product-handle-url)'
+    r'=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+
 def _iter_html_product_refs(body: bytes) -> Iterable[str]:
-    # Fast path: every <a href="..."> whose path contains /products/<slug>.
-    # Regex is deliberately loose (accepts relative URLs too).
+    """Yield candidate product URLs from HTML.
+
+    Matches `href` plus common lazy-link data attributes used by Shopify
+    themes (Dawn, Debut, Narrative, custom themes) — without these,
+    collection pages whose tiles don't carry a plain `<a href>` look empty.
+
+    Filters on `/products/` substring so downstream normalization only
+    sees candidates. Wayback-toolbar-wrapped hrefs (``/web/<ts>/.../products/..``)
+    survive the substring check and are un-wrapped in ``_normalize_product_ref``.
+    """
     text = body.decode("utf-8", errors="replace")
-    for m in re.finditer(r'href=["\']([^"\']+)["\']', text, re.IGNORECASE):
+    for m in _HTML_LINK_ATTRS_RE.finditer(text):
         href = m.group(1)
         if "/products/" in href.lower():
             yield href
@@ -215,11 +287,14 @@ def parse_products_json(body: bytes, host_hint: str = "") -> tuple[list[tuple[st
 
 # ── Top-level parser ────────────────────────────────────────────────────────
 
-def extract_outlinks(surface_class: str, body: bytes) -> list[tuple[str, str, str]]:
+def extract_outlinks(
+    surface_class: str, body: bytes, base_host: str = ""
+) -> list[tuple[str, str, str]]:
     """Parse a surface body, return list of (canonical_url, host, slug).
 
-    Deduped per surface call. Any relative URLs that don't have a host after
-    normalization are dropped — the ledger needs a host to key the entity.
+    Deduped per surface call. ``base_host`` resolves relative hrefs (common
+    inside collection HTML); without it, every host-less ``/products/foo``
+    link is silently dropped.
     """
     if surface_class == "atom" or surface_class == "oembed":
         raw_refs = list(_iter_atom_refs(body))
@@ -238,7 +313,7 @@ def extract_outlinks(surface_class: str, body: bytes) -> list[tuple[str, str, st
     seen: set[tuple[str, str]] = set()
     out: list[tuple[str, str, str]] = []
     for raw in raw_refs:
-        norm = _normalize_product_ref(raw)
+        norm = _normalize_product_ref(raw, base_host=base_host)
         if norm is None:
             continue
         canonical, host, slug = norm
@@ -287,7 +362,7 @@ def parse_surface_file(path: Path, config) -> int:
     if surface_class == "json_api":
         refs, images_by_slug = parse_products_json(body, host_hint=surface_host)
     else:
-        refs = extract_outlinks(surface_class, body)
+        refs = extract_outlinks(surface_class, body, base_host=surface_host)
 
     if not surface_host and refs:
         surface_host = refs[0][1]
