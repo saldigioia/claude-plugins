@@ -1,0 +1,25 @@
+---
+// FIXTURE: Inline style primitive-parameter (positive case).
+//
+// EXPECTED AUDIT RESULT: 0 ELA_002 violations.
+//   Every style="..." declaration uses a documented primitive-parameter
+//   custom property (--space for ELC_STACK, --threshold for ELC_SWITCHER,
+//   --min for ELC_GRID, --ratio for ELC_FRAME). These are the public API
+//   of the primitive and are legitimate to carry inline as parameterization.
+---
+<section class="stack" style="--space: var(--s1)">
+  <h2>Stack with custom spacing</h2>
+  <p>Inline <code>--space</code> parameterizes ELC_STACK; not bespoke CSS.</p>
+</section>
+
+<section class="switcher" style="--threshold: 30rem">
+  <div>A</div><div>B</div>
+</section>
+
+<section class="grid" style="--min: 20ch">
+  <div>one</div><div>two</div><div>three</div>
+</section>
+
+<figure class="frame" style="--ratio: 16/9">
+  <img src="/cover.jpg" alt="" />
+</figure>

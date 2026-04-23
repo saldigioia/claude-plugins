@@ -7,6 +7,20 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.2.2] - 2026-04-23
+
+### Fixed
+
+- `bin/css-lint-hook.sh` — the PostToolUse lint hook now scans framework template inline styles (`.astro`, `.tsx`, `.jsx`, `.vue`, `.svelte`). Previously bespoke declarations inside `style="..."` attributes bypassed the pre-commit hook because the hook only handled `.css` files — a whole `chronological.astro` page in a downstream site shipped with 20+ inline-style attributes that should have been rejected. Primitive-parameter custom properties (`--space`, `--threshold`, `--min`, `--max`, `--sidebar-min`, `--ratio`, `--measure`, `--min-height`, `--gutter`, `--with-sidebar`) remain allowed as legitimate component parameterization; all other properties fail `ELA_002`.
+
+### Added
+
+- `eval/fixtures/inline-style-primitive-param.astro` — positive case: four `style="..."` attributes, each carrying a single primitive-parameter custom property. 0 violations expected.
+- `eval/fixtures/inline-style-bespoke.astro` — negative case: two lines with `style="color: red; margin: 10px"`. 4 `ELA_002` violations expected (per-declaration, across 2 lines).
+- `eval/fixtures/inline-style-mixed.astro` — hybrid case: three `style="..."` attributes each combining one primitive-parameter custom property with one bespoke declaration. 3 `ELA_002` violations expected (bespoke half only).
+
+---
+
 ## [4.2.1] - 2026-04-23
 
 ### Fixed

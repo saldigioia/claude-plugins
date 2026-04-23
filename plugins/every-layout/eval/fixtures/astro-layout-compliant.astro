@@ -1,7 +1,10 @@
 ---
 // FIXTURE: Compliant Astro layout for evaluation
 // This layout follows all astro-site-architect patterns.
-// Should score 9-10/10 on the architecture eval.
+//
+// EXPECTED AUDIT RESULT: Score 20-24/24 (A)
+//   Full Cover > Center > Stack spine, tokens inlined, zero layout media
+//   queries, logical properties, modular-scale spacing throughout.
 
 interface Props {
   title: string;

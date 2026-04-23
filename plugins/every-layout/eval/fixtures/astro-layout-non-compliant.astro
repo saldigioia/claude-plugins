@@ -2,6 +2,11 @@
 // FIXTURE: Non-compliant Astro layout for evaluation
 // This layout has multiple violations of the astro-site-architect patterns.
 // Use with eval/prompts/astro_site_architect.md
+//
+// EXPECTED AUDIT RESULT: Score 4-8/24 (F)
+//   Missing typed Props, no doctype/lang, no critical CSS, bespoke
+//   inline styles, layout media queries, physical properties, and
+//   unreset motion transitions. See numbered "Violation" markers below.
 
 // Violation 1: No typed Props interface
 const title = Astro.props.title;

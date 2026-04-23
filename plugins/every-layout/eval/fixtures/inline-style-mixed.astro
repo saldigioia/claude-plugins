@@ -1,0 +1,23 @@
+---
+// FIXTURE: Inline style mixed (hybrid case).
+//
+// EXPECTED AUDIT RESULT: 3 ELA_002 violations.
+//   Each style="..." below combines a legitimate primitive-parameter custom
+//   property with a bespoke declaration. Only the bespoke half fails:
+//     line with --space + color:red            → 1 violation (color)
+//     line with --threshold + background:#eee  → 1 violation (background)
+//     line with --min + font-weight:bold       → 1 violation (font-weight)
+//   The primitive-parameter half of each attribute is silently accepted.
+---
+<section class="stack" style="--space: var(--s2); color: red">
+  <p>Mixed: legitimate --space plus a bespoke color override.</p>
+</section>
+
+<section class="switcher" style="--threshold: 40rem; background: #eee">
+  <div>left</div><div>right</div>
+</section>
+
+<section class="grid" style="--min: 18ch; font-weight: bold">
+  <article>one</article>
+  <article>two</article>
+</section>

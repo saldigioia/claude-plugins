@@ -1,0 +1,12 @@
+---
+// FIXTURE: Inline style bespoke (negative case).
+//
+// EXPECTED AUDIT RESULT: 4 ELA_002 violations across 2 lines.
+//   Both style="..." attributes carry two bespoke declarations each
+//   (color + margin). Every declaration should live in @layer components,
+//   not inline on a template element — so each declaration is an ELA_002
+//   independently, and the hook reports them with clear line numbers.
+---
+<div style="color: red; margin: 10px">Bespoke styling on a div</div>
+
+<p style="color: red; margin: 10px">Duplicate bespoke styling on a paragraph</p>
