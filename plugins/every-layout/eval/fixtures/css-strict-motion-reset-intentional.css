@@ -1,0 +1,29 @@
+/*
+ * Fixture: WCAG 2.2 motion reset inside the canonical reduce block
+ * should be whitelisted; the escalation keyword outside the block must
+ * still fail ELA_003.
+ *
+ * Expected: 2 ELA_003 violations, 2 whitelisted.
+ */
+
+.brand {
+  color: rebeccapurple;
+  font-weight: 700;
+}
+
+/* Outside the block — still a violation. */
+.brand-title {
+  color: rebeccapurple !important;
+}
+
+/* Canonical WCAG 2.2 motion reset. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+.hero-title {
+  background-color: canvas !important;
+}

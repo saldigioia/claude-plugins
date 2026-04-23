@@ -7,6 +7,30 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.2.1] - 2026-04-23
+
+### Fixed
+
+- `bin/css-strict.sh` — ELA_003 `!important` check produced false positives for the canonical WCAG 2.2 motion reset inside `@media (prefers-reduced-motion: reduce)`. The awk pattern that built the whitelist used `\s` (unsupported in POSIX awk), so the whitelist was always empty and the downstream `is_whitelisted_line` call never matched. Replaced with `[[:space:]]` so the whitelist actually populates.
+
+### Added
+
+- `bin/css-strict.sh` — consumes `escapes.md` at the root of the scanned directory. Registered `ESC_<CATEGORY>_<NAME>` entries matching `(axiom, file[, line])` suppress the corresponding violation while unexpired. Expired entries (past `Expiry:` date) still count as violations and emit an "Expired escape" diagnostic per offending line. Entries with `Expiry: none` are permanent. Escape consumption applies uniformly across ELA_001–006.
+- Trailing summary diagnostics:
+  - `ELA_003: N line(s) whitelisted via @media (prefers-reduced-motion: reduce)`
+  - `Registered escapes consumed: N (from escapes.md: ESC_NAME, ...)`
+  - `Expired escapes still counted as violations: N`
+- `bin/css-strict.sh` — accepts a single CSS file as a positional argument in addition to a directory, for targeted fixture testing.
+- `eval/fixtures/css-strict-motion-reset-intentional.css` — positive case: 2 `!important` lines inside `@media (prefers-reduced-motion: reduce)` (whitelisted), 2 outside (fail).
+- `eval/fixtures/escapes-registered/{escapes.md,css-strict-escapes-registered.css}` — active `ESC_MUX_PLAYER_STYLING` entry; 2 registered lines suppressed, 2 unregistered lines still fail.
+- `eval/fixtures/escapes-expired/{escapes.md,css-strict-expired-escape.css}` — `ESC_LEGACY_NAV_OVERRIDE` with `Expiry: 2025-01-01`; both lines fail with expired-escape diagnostic.
+
+### Notes
+
+- v4.2.0 shipped without a CHANGELOG entry; not reconstructed here to avoid inventing history. The 4.1.0 → 4.2.1 span represents the intermediate 4.2.0 plus this patch.
+
+---
+
 ## [4.1.0] - 2026-04-15
 
 ### Added

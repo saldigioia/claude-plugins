@@ -1,6 +1,6 @@
 {
   "name": "every-layout",
-  "version": "4.2.0",
+  "version": "4.2.1",
   "description": "Axiom-enforced CSS layout primitives, Astro 5 site architecture, archival data patterns, and design system tokens. 13 composable primitives, 32 numbered principles, 6 axioms enforced by CI-grade strict-check and JS-budget gates. Zero-JS-by-default, media-query-free, modular-scale spacing.",
   "author": {
     "name": "Rare Data Club"

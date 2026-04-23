@@ -1,0 +1,12 @@
+/*
+ * Fixture: escape registered with an expiry date in the past must NOT be
+ * honored. The registered lines still fail ELA_003, with an "Expired escape"
+ * diagnostic on each.
+ *
+ * Expected: 2 violations, each annotated with expired-escape diagnostic.
+ */
+
+.legacy-nav .item {
+  color: oldlace !important;
+  background-color: midnightblue !important;
+}

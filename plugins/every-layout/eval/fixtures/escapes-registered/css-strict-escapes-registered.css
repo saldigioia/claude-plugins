@@ -1,0 +1,19 @@
+/*
+ * Fixture: two lines registered under ESC_MUX_PLAYER_STYLING should be
+ * suppressed; two unregistered lines must still fail ELA_003.
+ *
+ * Expected: 2 violations, 2 escapes consumed (ESC_MUX_PLAYER_STYLING).
+ */
+
+.mux-player .mux-controls {
+  color: white !important;
+  background-color: black !important;
+}
+
+.brand-title {
+  color: rebeccapurple !important;
+}
+
+.hero-title {
+  background-color: canvas !important;
+}
