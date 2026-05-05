@@ -1,0 +1,6 @@
+# stems.manifest.yaml — opts into the reference-bundle deliverable (Cmd 19).
+project: with-master
+source:
+  master_reference:
+    path: ./song_master.flac
+    duration_tolerance_samples: 1

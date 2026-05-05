@@ -8,6 +8,8 @@ MARKETPLACE_NAME="rare-data-club"
 PLUGINS=(
   "every-layout"
   "wayback-archive"
+  "stems-to-mixdown"
+  "stems-from-mix"
 )
 
 if ! command -v claude >/dev/null 2>&1; then

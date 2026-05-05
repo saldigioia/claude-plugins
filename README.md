@@ -11,6 +11,8 @@ claude plugin marketplace add saldigioia/claude-plugins
 # Install the plugins you want
 claude plugin install every-layout@rare-data-club
 claude plugin install wayback-archive@rare-data-club
+claude plugin install stems-to-mixdown@rare-data-club
+claude plugin install stems-from-mix@rare-data-club
 ```
 
 Or from inside an interactive Claude Code session:
@@ -19,6 +21,8 @@ Or from inside an interactive Claude Code session:
 /plugin marketplace add saldigioia/claude-plugins
 /plugin install every-layout@rare-data-club
 /plugin install wayback-archive@rare-data-club
+/plugin install stems-to-mixdown@rare-data-club
+/plugin install stems-from-mix@rare-data-club
 ```
 
 To install everything in one shot:
@@ -33,6 +37,8 @@ curl -fsSL https://raw.githubusercontent.com/saldigioia/claude-plugins/main/inst
 | --- | --- | --- |
 | [`every-layout`](plugins/every-layout/README.md) | 4.2.0 | Axiom-enforced CSS layout primitives, Astro 5 site architecture, archival data patterns, and design system tokens. 13 composable primitives, 32 numbered principles, 6 axioms enforced by CI-grade strict-check and JS-budget gates. Zero-JS-by-default, media-query-free, modular-scale spacing. |
 | [`wayback-archive`](plugins/wayback-archive/README.md) | 1.2.0 | Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline supporting Shopify, Swell Commerce, Fourthwall, and custom platforms. |
+| [`stems-to-mixdown`](plugins/stems-to-mixdown/README.md) | 1.1.0 | Sum a folder of multitrack stems into stereo mixdowns at the highest fidelity the source supports. Six-pass pipeline with SHA-anchored idempotency, sidecar provenance per output, declared pan law, true-peak headroom, dither when reducing depth. Optional master-reference produces a three-synced-versions reference-bundle and runs a recombine-null verification battery. Eighteen commandments, every refusal cites its rule. |
+| [`stems-from-mix`](plugins/stems-from-mix/README.md) | 1.0.0 | Extract stems from a finished mix using Demucs htdemucs_ft, write a hand-off manifest, then pair with `stems-to-mixdown` for the bouncing step. Honest about separation's limits: bleed is real, separated stems are sketches not deliverables. |
 
 ## Update
 
@@ -50,7 +56,9 @@ claude-plugins/
 │   └── marketplace.json        # Marketplace catalog
 ├── plugins/
 │   ├── every-layout/           # Self-contained plugin with its own plugin.json
-│   └── wayback-archive/        # Self-contained plugin with its own plugin.json
+│   ├── wayback-archive/        # Self-contained plugin with its own plugin.json
+│   ├── stems-to-mixdown/       # Self-contained plugin with its own plugin.json
+│   └── stems-from-mix/         # Self-contained plugin with its own plugin.json
 ├── install.sh                  # One-command bootstrap
 ├── LICENSE
 └── README.md

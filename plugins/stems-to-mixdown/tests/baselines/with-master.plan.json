@@ -1,0 +1,152 @@
+{
+  "schema_version": "3",
+  "directory": "TESTROOT/tests/fixtures/with-master",
+  "output_directory": "TESTROOT/tests/fixtures/with-master-mixdowns",
+  "project": "with-master",
+  "manifest": {
+    "project": "with-master",
+    "source": {
+      "master_reference": {
+        "path": "./song_master.flac",
+        "duration_tolerance_samples": 1
+      }
+    }
+  },
+  "groups": [
+    {
+      "name": "acapella",
+      "stem_files": [
+        "vox_lead.wav"
+      ],
+      "stem_shas": {
+        "vox_lead.wav": "d76993147b50668157b2f4304e194b2368b80d689638bf4006d6bc78ae015d0f"
+      },
+      "format": {
+        "format": "flac",
+        "codec": "flac",
+        "container": "flac",
+        "rate": 48000,
+        "depth": 24,
+        "channels": 2,
+        "dither_required": false,
+        "lie": false,
+        "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1)",
+        "compression_level": 8
+      },
+      "filter_graph": "[0:a]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "scout_filter_graph": "[0:a]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "measured_peak_dbtp": -21.1,
+      "measured_lufs": -21.8,
+      "pre_attenuation_db": 0,
+      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "per_stem_gains": {
+        "vox_lead.wav": 0
+      },
+      "pan_law_db": -3,
+      "pan_law_coefficient": 0.7079457843841379,
+      "pan_law_was_default": true,
+      "has_mono_stems": false,
+      "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_acapella.flac"
+    },
+    {
+      "name": "instrumental",
+      "stem_files": [
+        "bass.wav",
+        "drums.wav"
+      ],
+      "stem_shas": {
+        "bass.wav": "11760515f9b6b70dfdc849e8d57004d88674e8f07da151e31f45286a696c545d",
+        "drums.wav": "515fb85d3e8261eed6cb51b626a4ed0f997dec8d03f3373921476f03e0cbc397"
+      },
+      "format": {
+        "format": "flac",
+        "codec": "flac",
+        "container": "flac",
+        "rate": 48000,
+        "depth": 24,
+        "channels": 2,
+        "dither_required": false,
+        "lie": false,
+        "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1)",
+        "compression_level": 8
+      },
+      "filter_graph": "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0:weights=1 1[mix]",
+      "scout_filter_graph": "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0:weights=1 1[mix]",
+      "measured_peak_dbtp": -16.6,
+      "measured_lufs": -21.5,
+      "pre_attenuation_db": 0,
+      "pre_attenuation_rationale": "Peak -16.60 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "per_stem_gains": {
+        "bass.wav": 0,
+        "drums.wav": 0
+      },
+      "pan_law_db": -3,
+      "pan_law_coefficient": 0.7079457843841379,
+      "pan_law_was_default": true,
+      "has_mono_stems": false,
+      "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_instrumental.flac"
+    }
+  ],
+  "any_lie": false,
+  "reference_bundle": {
+    "directory": "TESTROOT/tests/fixtures/with-master-mixdowns/reference-bundle",
+    "format": {
+      "format": "flac",
+      "codec": "flac",
+      "container": "flac",
+      "rate": 48000,
+      "depth": 24,
+      "channels": 2,
+      "dither_required": false,
+      "lie": false,
+      "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1)",
+      "compression_level": 8
+    },
+    "master_reference": {
+      "path": "TESTROOT/tests/fixtures/with-master/song_master.flac",
+      "sha256": "70f9ca7204784dbe514a8471b9e9089fe8f90ac782e66ca3e3a5c46a50aadc27",
+      "codec": "flac",
+      "container": "flac",
+      "is_lossy": false,
+      "sample_rate": 48000,
+      "bit_depth": 24,
+      "bit_depth_source": "ffprobe_bits_per_raw_sample",
+      "sample_fmt": "s32",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "duration_sec": 2,
+      "duration_samples": 96000,
+      "true_peak_dbtp": -12.9,
+      "integrated_lufs": -18.6,
+      "loudness_range": 0,
+      "source": "manifest",
+      "duration_tolerance_samples": 1
+    },
+    "members": [
+      {
+        "role": "master",
+        "source": "TESTROOT/tests/fixtures/with-master/song_master.flac",
+        "source_sha256": "70f9ca7204784dbe514a8471b9e9089fe8f90ac782e66ca3e3a5c46a50aadc27",
+        "source_codec": "flac",
+        "source_container": "flac",
+        "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/reference-bundle/with-master_master.flac",
+        "needs_reencode": false
+      },
+      {
+        "role": "acapella",
+        "source": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_acapella.flac",
+        "source_sha256": null,
+        "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/reference-bundle/with-master_acapella.flac",
+        "needs_reencode": false
+      },
+      {
+        "role": "instrumental",
+        "source": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_instrumental.flac",
+        "source_sha256": null,
+        "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/reference-bundle/with-master_instrumental.flac",
+        "needs_reencode": false
+      }
+    ],
+    "rationale": "Three perfectly synchronized versions: master + instrumental + acapella, all at flac 48000 Hz / 24-bit / 2ch. The master is the witness, not the source (Cmd 19). Verify will null-test (instrumental + acapella) against the master and report the residual."
+  }
+}

@@ -1,0 +1,84 @@
+{
+  "schema_version": "3",
+  "directory": "TESTROOT/tests/fixtures/mono-stems",
+  "output_directory": "TESTROOT/tests/fixtures/mono-stems-mixdowns",
+  "project": "mono-stems",
+  "manifest": {},
+  "groups": [
+    {
+      "name": "acapella",
+      "stem_files": [
+        "vox_lead.wav"
+      ],
+      "stem_shas": {
+        "vox_lead.wav": "92b7c7f12f4d3501b93e1435cbb269c3f59939fe946380b5f492dc0154e7019b"
+      },
+      "format": {
+        "format": "flac",
+        "codec": "flac",
+        "container": "flac",
+        "rate": 48000,
+        "depth": 24,
+        "channels": 2,
+        "dither_required": false,
+        "lie": false,
+        "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1) Pan law: -3.0 dB (K=0.7079 per channel on mono→stereo) [default; set output.pan_law to declare]. (Cmd 16)",
+        "compression_level": 8
+      },
+      "filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[a0]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "scout_filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[a0]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "measured_peak_dbtp": -21.1,
+      "measured_lufs": -21.3,
+      "pre_attenuation_db": 0,
+      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "per_stem_gains": {
+        "vox_lead.wav": 0
+      },
+      "pan_law_db": -3,
+      "pan_law_coefficient": 0.7079457843841379,
+      "pan_law_was_default": true,
+      "has_mono_stems": true,
+      "output_path": "TESTROOT/tests/fixtures/mono-stems-mixdowns/mono-stems_acapella.flac"
+    },
+    {
+      "name": "instrumental",
+      "stem_files": [
+        "kick.wav",
+        "snare.wav"
+      ],
+      "stem_shas": {
+        "kick.wav": "d312a95f3ebc22ee67e111742d67b1c98102fb91c0e984b7c0f44008ef66ade6",
+        "snare.wav": "9222c4ff51dd533a2a7b76aef0edcdc9e4da09357baab0ce8cf151b2ea79235e"
+      },
+      "format": {
+        "format": "flac",
+        "codec": "flac",
+        "container": "flac",
+        "rate": 48000,
+        "depth": 24,
+        "channels": 2,
+        "dither_required": false,
+        "lie": false,
+        "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1) Pan law: -3.0 dB (K=0.7079 per channel on mono→stereo) [default; set output.pan_law to declare]. (Cmd 16)",
+        "compression_level": 8
+      },
+      "filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[1:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0:weights=1 1[mix]",
+      "scout_filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[1:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0:weights=1 1[mix]",
+      "measured_peak_dbtp": -16.2,
+      "measured_lufs": -18.9,
+      "pre_attenuation_db": 0,
+      "pre_attenuation_rationale": "Peak -16.20 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "per_stem_gains": {
+        "kick.wav": 0,
+        "snare.wav": 0
+      },
+      "pan_law_db": -3,
+      "pan_law_coefficient": 0.7079457843841379,
+      "pan_law_was_default": true,
+      "has_mono_stems": true,
+      "output_path": "TESTROOT/tests/fixtures/mono-stems-mixdowns/mono-stems_instrumental.flac"
+    }
+  ],
+  "any_lie": false,
+  "reference_bundle": null
+}

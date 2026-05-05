@@ -5,8 +5,8 @@
     "email": "salthecowboy@proton.me"
   },
   "metadata": {
-    "description": "Rare Data Club's Claude Code plugins: CSS layout primitives and web-archive recovery.",
-    "version": "1.0.0"
+    "description": "Rare Data Club's Claude Code plugins: CSS layout primitives, web-archive recovery, archival-grade audio mixdown, and source separation.",
+    "version": "1.1.0"
   },
   "plugins": [
     {
@@ -43,6 +43,55 @@
         "product-catalog",
         "data-recovery",
         "internet-archive"
+      ]
+    },
+    {
+      "name": "stems-to-mixdown",
+      "source": "./plugins/stems-to-mixdown",
+      "description": "Sum a directory of multitrack audio stems into stereo mixdowns (acapella, instrumental, custom groupings) at the highest quality the source material honestly supports. Six-pass pipeline (identify → optional Pro Tools track-name borrow → analyze → plan → mix → verify) with full provenance: SHA-anchored idempotency, sidecar logs per output, declared pan law, ITU-R BS.1770 true-peak headroom, dither when reducing depth, and refusal-by-default for upsampling, normalization, and writing into the source folder. Optional master-reference pipeline (Cmd 19) produces a three-synced-versions reference-bundle and runs a recombine-null + inverse-stems-null verification battery against the released master. Eighteen commandments, all cited by error messages and plan rationale.",
+      "category": "audio-production",
+      "keywords": [
+        "audio",
+        "mixdown",
+        "stems",
+        "acapella",
+        "instrumental",
+        "ffmpeg",
+        "flac",
+        "true-peak",
+        "ebur128",
+        "lufs",
+        "dither",
+        "pan-law",
+        "pro-tools",
+        "archival-audio",
+        "music-production",
+        "remix",
+        "unity-sum",
+        "provenance",
+        "reference-bundle",
+        "null-test"
+      ]
+    },
+    {
+      "name": "stems-from-mix",
+      "source": "./plugins/stems-from-mix",
+      "description": "Extract stems (vocals, drums, bass, other) from a finished stereo mix using Demucs htdemucs_ft, then hand off to stems-to-mixdown for unity-sum mixdowns. Honest framing: separation is approximation, bleed is real, separated stems are sketches that read as deliverables only after a human listens. Writes a stems.manifest.yaml with classifications already filled in (no guessing — the model knows what it produced) so the downstream skill doesn't re-classify.",
+      "category": "audio-production",
+      "keywords": [
+        "audio",
+        "source-separation",
+        "demucs",
+        "htdemucs",
+        "vocal-isolation",
+        "acapella",
+        "instrumental",
+        "stems",
+        "music-production",
+        "remix",
+        "ai-audio",
+        "deep-learning",
+        "torch"
       ]
     }
   ]

@@ -1,0 +1,46 @@
+{
+  "schema_version": "3",
+  "directory": "TESTROOT/tests/fixtures/24-in-32",
+  "output_directory": "TESTROOT/tests/fixtures/24-in-32-mixdowns",
+  "project": "24-in-32",
+  "manifest": {},
+  "groups": [
+    {
+      "name": "acapella",
+      "stem_files": [
+        "lead_24in32.wav"
+      ],
+      "stem_shas": {
+        "lead_24in32.wav": "aa4017f40fd7f5e084a94dc3f54601010337e004e559ed00b1a8c7393ceb17d0"
+      },
+      "format": {
+        "format": "flac",
+        "codec": "flac",
+        "container": "flac",
+        "rate": 48000,
+        "depth": 24,
+        "channels": 2,
+        "dither_required": false,
+        "lie": false,
+        "rationale": "Uniform lossless: 48000 Hz / 32-bit FLAC. (Cmd 1) FLAC clamps to 24-bit (stable encoder ceiling); the dropped precision is below any real-signal noise floor. For genuine 32-bit out, set output.format to wav or aiff. (Cmd 1) Pan law: -3.0 dB (K=0.7079 per channel on mono→stereo) [default; set output.pan_law to declare]. (Cmd 16)",
+        "compression_level": 8
+      },
+      "filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[a0]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "scout_filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[a0]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "measured_peak_dbtp": -21.1,
+      "measured_lufs": -21.8,
+      "pre_attenuation_db": 0,
+      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "per_stem_gains": {
+        "lead_24in32.wav": 0
+      },
+      "pan_law_db": -3,
+      "pan_law_coefficient": 0.7079457843841379,
+      "pan_law_was_default": true,
+      "has_mono_stems": true,
+      "output_path": "TESTROOT/tests/fixtures/24-in-32-mixdowns/24-in-32_acapella.flac"
+    }
+  ],
+  "any_lie": false,
+  "reference_bundle": null
+}

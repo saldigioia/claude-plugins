@@ -1,0 +1,109 @@
+{
+  "schema_version": "3",
+  "directory": "TESTROOT/tests/fixtures/mono-stems",
+  "manifest_present": false,
+  "manifest": {},
+  "stems": [
+    {
+      "path": "tests/fixtures/mono-stems/kick.wav",
+      "filename": "kick.wav",
+      "size_bytes": 72102,
+      "sha256": "d312a95f3ebc22ee67e111742d67b1c98102fb91c0e984b7c0f44008ef66ade6",
+      "codec": "pcm_s24le",
+      "container": "wav",
+      "is_lossy": false,
+      "sample_rate": 48000,
+      "bit_depth": 24,
+      "bit_depth_source": "ffprobe_bits_per_raw_sample",
+      "sample_fmt": "s32",
+      "channels": 1,
+      "channel_layout": "mono",
+      "duration_sec": 0.5,
+      "duration_samples": 24000,
+      "classification": "drums",
+      "classification_source": "regex",
+      "true_peak_dbtp": -18.1,
+      "integrated_lufs": -22,
+      "loudness_range": 0,
+      "dc_offset_max": 0,
+      "silent_channels": [],
+      "fully_silent": false,
+      "tags": {
+        "encoder": "Lavf62.12.100"
+      },
+      "production_metadata": {}
+    },
+    {
+      "path": "tests/fixtures/mono-stems/snare.wav",
+      "filename": "snare.wav",
+      "size_bytes": 72102,
+      "sha256": "9222c4ff51dd533a2a7b76aef0edcdc9e4da09357baab0ce8cf151b2ea79235e",
+      "codec": "pcm_s24le",
+      "container": "wav",
+      "is_lossy": false,
+      "sample_rate": 48000,
+      "bit_depth": 24,
+      "bit_depth_source": "ffprobe_bits_per_raw_sample",
+      "sample_fmt": "s32",
+      "channels": 1,
+      "channel_layout": "mono",
+      "duration_sec": 0.5,
+      "duration_samples": 24000,
+      "classification": "drums",
+      "classification_source": "regex",
+      "true_peak_dbtp": -18.1,
+      "integrated_lufs": -21.8,
+      "loudness_range": 0,
+      "dc_offset_max": 0,
+      "silent_channels": [],
+      "fully_silent": false,
+      "tags": {
+        "encoder": "Lavf62.12.100"
+      },
+      "production_metadata": {}
+    },
+    {
+      "path": "tests/fixtures/mono-stems/vox_lead.wav",
+      "filename": "vox_lead.wav",
+      "size_bytes": 72102,
+      "sha256": "92b7c7f12f4d3501b93e1435cbb269c3f59939fe946380b5f492dc0154e7019b",
+      "codec": "pcm_s24le",
+      "container": "wav",
+      "is_lossy": false,
+      "sample_rate": 48000,
+      "bit_depth": 24,
+      "bit_depth_source": "ffprobe_bits_per_raw_sample",
+      "sample_fmt": "s32",
+      "channels": 1,
+      "channel_layout": "mono",
+      "duration_sec": 0.5,
+      "duration_samples": 24000,
+      "classification": "vocal",
+      "classification_source": "regex",
+      "true_peak_dbtp": -18.1,
+      "integrated_lufs": -21.3,
+      "loudness_range": 0,
+      "dc_offset_max": 0,
+      "silent_channels": [],
+      "fully_silent": false,
+      "tags": {
+        "encoder": "Lavf62.12.100"
+      },
+      "production_metadata": {}
+    }
+  ],
+  "master_reference": null,
+  "red_flags": [
+    {
+      "severity": "warn",
+      "code": "pan_law_default_assumed",
+      "message": "Mono stems present and manifest output.pan_law is unset. Defaulting to -3.0 dB pan law (Logic / Cubase convention; Pro Tools default is -2.5 dB; legacy 0 dB is +3 dB hotter than any DAW-equivalent center sum). Set output.pan_law in the manifest to declare it explicitly. See references/format-decisions.md.",
+      "affected": [
+        "kick.wav",
+        "snare.wav",
+        "vox_lead.wav"
+      ]
+    }
+  ],
+  "has_errors": false
+}

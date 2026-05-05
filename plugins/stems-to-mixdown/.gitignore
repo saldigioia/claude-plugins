@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.DS_Store
+/tmp/
+*-mixdowns/
+mixdowns/
+.s2m/
+# Stray dir created when an earlier debug invocation of mix.py interpreted
+# the TESTROOT placeholder path as literal — empty, but lingers on disk.
+/TESTROOT/
+# Stray analysis/plan JSON from local exploration
+/analysis.json
+/plan.json
+/identify.json
+

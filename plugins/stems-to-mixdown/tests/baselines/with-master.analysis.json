@@ -1,0 +1,125 @@
+{
+  "schema_version": "3",
+  "directory": "TESTROOT/tests/fixtures/with-master",
+  "manifest_present": true,
+  "manifest": {
+    "project": "with-master",
+    "source": {
+      "master_reference": {
+        "path": "./song_master.flac",
+        "duration_tolerance_samples": 1
+      }
+    }
+  },
+  "stems": [
+    {
+      "path": "tests/fixtures/with-master/bass.wav",
+      "filename": "bass.wav",
+      "size_bytes": 576102,
+      "sha256": "11760515f9b6b70dfdc849e8d57004d88674e8f07da151e31f45286a696c545d",
+      "codec": "pcm_s24le",
+      "container": "wav",
+      "is_lossy": false,
+      "sample_rate": 48000,
+      "bit_depth": 24,
+      "bit_depth_source": "ffprobe_bits_per_raw_sample",
+      "sample_fmt": "s32",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "duration_sec": 2,
+      "duration_samples": 96000,
+      "classification": "bass",
+      "classification_source": "regex",
+      "true_peak_dbtp": -21.1,
+      "integrated_lufs": -22.7,
+      "loudness_range": 0,
+      "dc_offset_max": 0,
+      "silent_channels": [],
+      "fully_silent": false,
+      "tags": {
+        "encoder": "Lavf58.76.100"
+      },
+      "production_metadata": {}
+    },
+    {
+      "path": "tests/fixtures/with-master/drums.wav",
+      "filename": "drums.wav",
+      "size_bytes": 576102,
+      "sha256": "515fb85d3e8261eed6cb51b626a4ed0f997dec8d03f3373921476f03e0cbc397",
+      "codec": "pcm_s24le",
+      "container": "wav",
+      "is_lossy": false,
+      "sample_rate": 48000,
+      "bit_depth": 24,
+      "bit_depth_source": "ffprobe_bits_per_raw_sample",
+      "sample_fmt": "s32",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "duration_sec": 2,
+      "duration_samples": 96000,
+      "classification": "other",
+      "classification_source": "default",
+      "true_peak_dbtp": -23.6,
+      "integrated_lufs": -27.7,
+      "loudness_range": 0,
+      "dc_offset_max": 4.6e-05,
+      "silent_channels": [],
+      "fully_silent": false,
+      "tags": {
+        "encoder": "Lavf58.76.100"
+      },
+      "production_metadata": {}
+    },
+    {
+      "path": "tests/fixtures/with-master/vox_lead.wav",
+      "filename": "vox_lead.wav",
+      "size_bytes": 576102,
+      "sha256": "d76993147b50668157b2f4304e194b2368b80d689638bf4006d6bc78ae015d0f",
+      "codec": "pcm_s24le",
+      "container": "wav",
+      "is_lossy": false,
+      "sample_rate": 48000,
+      "bit_depth": 24,
+      "bit_depth_source": "ffprobe_bits_per_raw_sample",
+      "sample_fmt": "s32",
+      "channels": 2,
+      "channel_layout": "stereo",
+      "duration_sec": 2,
+      "duration_samples": 96000,
+      "classification": "vocal",
+      "classification_source": "regex",
+      "true_peak_dbtp": -21.1,
+      "integrated_lufs": -21.8,
+      "loudness_range": 0,
+      "dc_offset_max": 0,
+      "silent_channels": [],
+      "fully_silent": false,
+      "tags": {
+        "encoder": "Lavf58.76.100"
+      },
+      "production_metadata": {}
+    }
+  ],
+  "master_reference": {
+    "path": "TESTROOT/tests/fixtures/with-master/song_master.flac",
+    "sha256": "70f9ca7204784dbe514a8471b9e9089fe8f90ac782e66ca3e3a5c46a50aadc27",
+    "codec": "flac",
+    "container": "flac",
+    "is_lossy": false,
+    "sample_rate": 48000,
+    "bit_depth": 24,
+    "bit_depth_source": "ffprobe_bits_per_raw_sample",
+    "sample_fmt": "s32",
+    "channels": 2,
+    "channel_layout": "stereo",
+    "duration_sec": 2,
+    "duration_samples": 96000,
+    "true_peak_dbtp": -12.9,
+    "integrated_lufs": -18.6,
+    "loudness_range": 0,
+    "source": "manifest",
+    "duration_tolerance_samples": 1
+  },
+  "red_flags": [],
+  "has_errors": false
+}

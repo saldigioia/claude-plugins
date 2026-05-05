@@ -1,0 +1,81 @@
+{
+  "schema_version": "3",
+  "directory": "TESTROOT/tests/fixtures/mixed-rates",
+  "output_directory": "TESTROOT/tests/fixtures/mixed-rates-mixdowns",
+  "project": "mixed-rates",
+  "manifest": {},
+  "groups": [
+    {
+      "name": "acapella",
+      "stem_files": [
+        "synth_lead.wav"
+      ],
+      "stem_shas": {
+        "synth_lead.wav": "bf9b34e92352d7fd075aa3920ce8c9dcb35d405e0a488db83749adb9f2ef4670"
+      },
+      "format": {
+        "format": "flac",
+        "codec": "flac",
+        "container": "flac",
+        "rate": 96000,
+        "depth": 24,
+        "channels": 2,
+        "dither_required": false,
+        "lie": false,
+        "rationale": "Uniform lossless: 96000 Hz / 24-bit FLAC. (Cmd 1)",
+        "compression_level": 8
+      },
+      "filter_graph": "[0:a]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "scout_filter_graph": "[0:a]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "measured_peak_dbtp": -21.1,
+      "measured_lufs": -21.8,
+      "pre_attenuation_db": 0,
+      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "per_stem_gains": {
+        "synth_lead.wav": 0
+      },
+      "pan_law_db": -3,
+      "pan_law_coefficient": 0.7079457843841379,
+      "pan_law_was_default": true,
+      "has_mono_stems": false,
+      "output_path": "TESTROOT/tests/fixtures/mixed-rates-mixdowns/mixed-rates_acapella.flac"
+    },
+    {
+      "name": "instrumental",
+      "stem_files": [
+        "bass.mp3"
+      ],
+      "stem_shas": {
+        "bass.mp3": "bd8b8c3995af3a4b5a9062876953492bc0fab153e0698d253928f7a868b137fa"
+      },
+      "format": {
+        "format": "flac",
+        "codec": "flac",
+        "container": "flac",
+        "rate": 44100,
+        "depth": 16,
+        "channels": 2,
+        "dither_required": true,
+        "lie": false,
+        "rationale": "Lossy in chain → output capped at 16/44.1 FLAC. (Cmd 1, Cmd 8)",
+        "compression_level": 8
+      },
+      "filter_graph": "[0:a]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "scout_filter_graph": "[0:a]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
+      "measured_peak_dbtp": -21.1,
+      "measured_lufs": -22,
+      "pre_attenuation_db": 0,
+      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "per_stem_gains": {
+        "bass.mp3": 0
+      },
+      "pan_law_db": -3,
+      "pan_law_coefficient": 0.7079457843841379,
+      "pan_law_was_default": true,
+      "has_mono_stems": false,
+      "output_path": "TESTROOT/tests/fixtures/mixed-rates-mixdowns/mixed-rates_instrumental.flac"
+    }
+  ],
+  "any_lie": false,
+  "reference_bundle": null
+}
