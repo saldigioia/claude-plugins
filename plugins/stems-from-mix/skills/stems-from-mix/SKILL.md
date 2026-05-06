@@ -86,7 +86,7 @@ When invoked from a Claude Code session with both plugins installed:
 Then, after the separation finishes:
 
 ```
-/stems-to-mixdown:stems-to-mixdown finished-mix-stems/
+/stems-to-mixdown:mixdown finished-mix-stems/
 ```
 
 Or invoke the underlying scripts directly via their plugin install paths:

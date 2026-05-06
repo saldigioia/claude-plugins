@@ -1,7 +1,7 @@
 {
   "name": "stems-to-mixdown",
-  "version": "1.1.0",
-  "description": "Sum a directory of multitrack audio stems into stereo mixdowns (acapella, instrumental, custom groupings) at the highest quality the source material honestly supports. Six-pass pipeline (identify → optional Pro Tools track-name borrow → analyze → plan → mix → verify) with full provenance: SHA-anchored idempotency, sidecar logs per output, declared pan law, ITU-R BS.1770 true-peak headroom, dither when reducing depth, and refusal-by-default for upsampling, normalization, and writing into the source folder. Optional master-reference pipeline (Cmd 19) produces a three-synced-versions reference-bundle and runs a recombine-null + inverse-stems-null verification battery against the released master. Eighteen commandments, all cited by error messages and plan rationale. Use whenever a folder of per-instrument audio files needs a combined stereo output, including phrasings like 'sum these stems,' 'bounce an instrumental,' 'make an acapella,' or pointing at a stems folder.",
+  "version": "1.2.0",
+  "description": "Sum a folder of multitrack stems into stereo mixdowns (acapella, instrumental, custom groupings) at the highest quality the source honestly supports. One-shot run.py orchestrator chains identify → analyze → plan → mix → verify with auto-decisions for the common case; per-pass scripts remain for power users. Codec-driven lossy detection (ALAC-in-m4a stays lossless). Master file in the stems folder is auto-detected and used as the reference bundle's witness. Eighteen commandments cited by every refusal.",
   "author": {
     "name": "Rare Data Club"
   },

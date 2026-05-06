@@ -33,13 +33,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _manifest  # noqa: E402
 from _version import __version__  # noqa: E402
 from discover import (  # noqa: E402,F401
-    StemInfo, MasterReferenceInfo, discover_stems,
+    AUDIO_EXTS, StemInfo, MasterReferenceInfo, discover_stems,
     probe_master_reference, require_tools,
 )
 from sanity import RedFlag, sanity_check  # noqa: E402,F401
 from _enrichment import WavInfoReader  # noqa: E402  -- soft-imported; None if missing
 # Re-export for back-compat with anything that imports these symbols here:
-from _classification import CLASSIFICATION_RULES, classify_by_filename  # noqa: E402,F401
+from _classification import (  # noqa: E402,F401
+    CLASSIFICATION_RULES, classify_by_filename, looks_like_master,
+)
 
 load_manifest = _manifest.load_manifest
 
@@ -90,6 +92,15 @@ def main() -> int:
               "tolerance of the longest stem; mismatch fires Pass 2 errors and "
               "the run refuses until the master matches or is omitted."),
     )
+    parser.add_argument(
+        "--no-auto-master", action="store_true",
+        help=("Disable auto-detection of a master file alongside the stems. "
+              "By default, when neither --master nor manifest.source."
+              "master_reference.path is set, analyze looks for a single file "
+              "whose name matches a master pattern (master / final / released "
+              "/ reference / bounce_final) and uses it as the reference. Use "
+              "this flag if you want the file summed as a regular stem."),
+    )
     args = parser.parse_args()
 
     require_tools()
@@ -121,6 +132,39 @@ def main() -> int:
     master_path = _manifest.resolve_master_reference_path(
         manifest, args.dir, cli_override=args.master,
     )
+    master_source_label = (
+        "cli" if args.master is not None
+        else "manifest" if master_path is not None
+        else None
+    )
+
+    # Auto-detection: when neither CLI nor manifest set the master, scan the
+    # directory for a single obvious candidate. One match → use it. Multiple
+    # → refuse and let the operator pick (silently summing one as a stem and
+    # using another as the witness would be the worst of both worlds).
+    if master_path is None and not args.no_auto_master:
+        candidates = sorted(
+            p for p in args.dir.iterdir()
+            if p.is_file() and p.suffix.lower() in AUDIO_EXTS
+            and looks_like_master(p.name)
+        )
+        if len(candidates) == 1:
+            master_path = candidates[0].resolve()
+            master_source_label = "auto"
+            sys.stderr.write(
+                f"[info] auto-detected master reference: {candidates[0].name} "
+                f"(--no-auto-master to disable; --master to override)\n"
+            )
+        elif len(candidates) > 1:
+            names = ", ".join(p.name for p in candidates)
+            sys.stderr.write(
+                f"[fatal] {len(candidates)} files look like the released master "
+                f"({names}). Auto-detection refuses to guess. Pass --master <path> "
+                f"to pick one, declare source.master_reference.path in the "
+                f"manifest, or rename the unwanted files. (Cmd 19)\n"
+            )
+            return 2
+
     exclude = set()
     if master_path is not None:
         try:
@@ -135,9 +179,10 @@ def main() -> int:
     master_info: MasterReferenceInfo | None = None
     master_missing_path: str | None = None
     if master_path is not None:
-        master_source = "cli" if args.master is not None else "manifest"
         master_tol = _manifest.resolve_master_duration_tolerance(manifest)
-        master_info = probe_master_reference(master_path, master_source, master_tol)
+        master_info = probe_master_reference(
+            master_path, master_source_label or "manifest", master_tol,
+        )
         if master_info is None:
             # File missing or unprobeable. Surface as Pass 2 error.
             master_missing_path = str(master_path)

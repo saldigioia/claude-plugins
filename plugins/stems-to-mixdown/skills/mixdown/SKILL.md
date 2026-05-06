@@ -1,6 +1,6 @@
 ---
-name: stems-to-mixdown
-description: Sum a directory of multitrack audio stems into stereo mixdowns (acapella, instrumental, custom groupings) at the highest quality the source material honestly supports. Use this skill whenever the user has a folder of per-instrument audio files and wants a combined stereo output — including phrasings like "sum these stems," "bounce an instrumental," "make an acapella from this folder," "combine these tracks," "mix these stems down," "give me a stereo mix from this multitrack," or simply pointing at a directory of audio files and asking for a combined version. Optional master-reference (the released version of the song) opts in a three-synced-versions bundle and a recombine-null verification battery. Trigger this even if the user does not say the word "skill" or "mixdown" — if there's a folder of stems and they want a stereo result, this is the tool.
+name: mixdown
+description: Sum a directory of multitrack audio stems into stereo mixdowns (acapella, instrumental, custom groupings) at the highest quality the source material honestly supports. Triggers on phrases like "sum these stems," "bounce an instrumental," "make an acapella," "mix these stems down," or pointing at a folder of audio files and asking for a combined version. When a released master sits alongside the stems, the skill auto-detects it and produces a three-synced-versions reference bundle plus a recombine-null verification battery.
 argument-hint: "<stems-folder> [--master <path>] [--preview] [--solo] [--yes]"
 allowed-tools:
   - Bash(python3 *)
@@ -17,9 +17,19 @@ allowed-tools:
   - Glob
 ---
 
-# stems-to-mixdown
+# mixdown
 
 A conservative mixdown engineer in script form. Reads a directory of stems, refuses to invent fidelity that wasn't captured, produces stereo sums with full provenance.
+
+## TL;DR — the obvious case
+
+When the directory is unambiguous (well-named stems, optional master alongside, no Pro Tools artifacts), one command does the whole pipeline:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../../scripts/run.py" --dir <stems-folder>
+```
+
+`run.py` surveys first, then chains identify → analyze → plan → mix → verify with auto-decisions. It auto-detects a master file in the folder (any file named `master`, `final`, `released`, `reference`, or `bounce_final`), uses it for the reference bundle, and excludes it from the stem walk. Pass `--yes` to skip the plan-approval prompt; `--preview` and `--solo` add the listening-copy and per-stem-QC bounces. The per-pass scripts below remain available for power users who want intermediate JSON or to re-run a single step.
 
 ## What you're getting (three tiers)
 
@@ -31,9 +41,15 @@ A conservative mixdown engineer in script form. Reads a directory of stems, refu
 
 The skill produces the first two tiers. It refuses to produce the third — `--preview` exists for headphone listening, not delivery (Cmd 17).
 
-## With a master reference (optional, opt-in)
+## With a master reference (auto-detected, or opt-in)
 
-When the released version of the song is available — the master, as it appears on streaming or the physical release — declare it via `source.master_reference.path` in the manifest (or `--master <path>` on the CLI). The skill then produces a **`reference-bundle/`** alongside the canonical mixdowns containing three perfectly synchronized files: `<project>_master.<ext>`, `<project>_instrumental.<ext>`, `<project>_acapella.<ext>`, all at identical rate / depth / channels / duration.
+When the released version of the song is available — the master, as it appears on streaming or the physical release — three things happen automatically:
+
+1. **Auto-detection.** If a single file in the stems folder matches a master pattern (`master`, `final`, `released`, `reference`, `bounce_final`) and does not classify as a stem, `analyze.py` (and `run.py`) treats it as the master reference and excludes it from the stem walk. Pass `--no-auto-master` to disable this. Multiple matches → refusal; the operator picks via `--master <path>` or by renaming.
+2. **Manifest opt-in.** `source.master_reference.path` in `stems.manifest.yaml` works exactly as before and overrides auto-detection.
+3. **CLI override.** `--master <path>` on `analyze.py` / `run.py` / `verify.py` wins above all.
+
+When any of those resolve, the skill produces a **`reference-bundle/`** alongside the canonical mixdowns containing three perfectly synchronized files: `<project>_master.<ext>`, `<project>_instrumental.<ext>`, `<project>_acapella.<ext>`, all at identical rate / depth / channels / duration.
 
 Pass 5 runs the **reference battery**: the recombine null `(instrumental + acapella) - master` (headline), and two diagnostic inverse-stems nulls (`master - acapella` ≈ instrumental, `master - instrumental` ≈ acapella), plus per-deliverable LUFS-I and dBTP deltas vs the master. Recombine residual ≤ -90 dBTP is a pass within dither noise; -60 to -90 is a smell; above -60 is structurally different.
 
@@ -175,7 +191,8 @@ Other pathologies (DC offset, length drift, channel mismatch) get flagged in Pas
 
 ## Scripts
 
-- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/identify.py"` — Pass 0a (triage, always run first).
+- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/run.py"` — One-shot orchestrator. Runs identify → analyze → plan → mix → verify with auto-decisions; the recommended entry point for the common case.
+- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/identify.py"` — Pass 0a (triage, always run first when invoking the per-pass scripts directly).
 - `python3 "${CLAUDE_SKILL_DIR}/../../scripts/import_pt_track_names.py"` — Pass 0b (Pro Tools intake bridge, run only when 0a recommends it).
 - `python3 "${CLAUDE_SKILL_DIR}/../../scripts/analyze.py"` — Pass 1 + Pass 2.
 - `python3 "${CLAUDE_SKILL_DIR}/../../scripts/plan.py"` — Pass 3 (dry-run, prints plan).

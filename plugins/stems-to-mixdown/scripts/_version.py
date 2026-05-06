@@ -17,6 +17,20 @@ version of the skill produced an artifact. Bump on tagged releases:
            duration mismatch — Cmd 19 forbids resampling, requantizing, or
            trimming the master to fit. analyze.json schema bumped to "3";
            plan.json schema bumped to "3".
+- 1.2.0  — three operator-noticeable fixes. (1) Skill renamed from
+           "stems-to-mixdown" to "mixdown" so the slash command is
+           /stems-to-mixdown:mixdown instead of the visually-doubled
+           /stems-to-mixdown:stems-to-mixdown. (2) Codec-driven lossy
+           detection in discover.py — ALAC wrapped in m4a is now correctly
+           classified as lossless instead of being silently capped to 16/44.1
+           by a container-only check. (3) Master auto-detection: when a file
+           in the stems folder matches a master pattern (master / final /
+           released / reference / bounce_final) and doesn't classify as a
+           stem, analyze.py uses it as the reference and excludes it from
+           the stem walk. Plus a new scripts/run.py orchestrator that runs
+           the whole pipeline end-to-end for the obvious case.
+           identify.json schema bumped to "2" (adds stem_file_count and
+           master_candidates fields).
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"

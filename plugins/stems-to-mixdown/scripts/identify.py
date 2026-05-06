@@ -59,7 +59,9 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _classification import INFORMATIVE_PATTERNS, normalize_filename  # noqa: E402
+from _classification import (  # noqa: E402
+    INFORMATIVE_PATTERNS, normalize_filename, looks_like_master,
+)
 
 
 AUDIO_EXTS = {
@@ -247,19 +249,36 @@ def main() -> int:
         if p.is_file() and p.suffix.lower() in AUDIO_EXTS
     )
 
-    # Filename quality scoring
+    # Filename quality scoring + master-reference auto-detection. The master
+    # is excluded from the stem walk in analyze.py — but identify needs to
+    # call it out so the operator (and the LLM driving this) sees it before
+    # any heavier processing kicks in.
     scores = {"informative": 0, "ambiguous": 0, "generic": 0}
     per_file_score: dict[str, str] = {}
+    master_candidates: list[str] = []
+    stem_audio_files: list[Path] = []
     for p in audio_files:
+        if looks_like_master(p.name):
+            master_candidates.append(str(p))
+            continue
+        stem_audio_files.append(p)
         s = score_filename(p.name)
         scores[s] += 1
         per_file_score[p.name] = s
+    # Quality scoring runs against stems only (the master, if any, is not a
+    # stem and would skew the "is this a well-named folder" judgement).
+    if not stem_audio_files:
+        # All audio files looked like masters — degenerate; analyze will
+        # complain. Surface here so the recommendation can route to user
+        # clarification.
+        scores = {"informative": 0, "ambiguous": 0, "generic": 0}
 
-    if not audio_files:
+    stem_count = len(stem_audio_files)
+    if not stem_audio_files:
         naming_quality = "no_audio"
-    elif scores["generic"] / len(audio_files) >= 0.5:
+    elif scores["generic"] / stem_count >= 0.5:
         naming_quality = "generic"
-    elif scores["informative"] / len(audio_files) >= 0.5:
+    elif scores["informative"] / stem_count >= 0.5:
         naming_quality = "informative"
     else:
         naming_quality = "mixed"
@@ -297,9 +316,11 @@ def main() -> int:
     )
 
     out = {
-        "schema_version": "1",
+        "schema_version": "2",
         "directory": str(args.dir.resolve()),
         "audio_file_count": len(audio_files),
+        "stem_file_count": stem_count,
+        "master_candidates": master_candidates,
         "filename_scores": scores,
         "naming_quality": naming_quality,
         "per_file_score": per_file_score,
@@ -316,12 +337,16 @@ def main() -> int:
     e = sys.stderr.write
     e("\n=== stems-to-mixdown / identify ===\n")
     e(f"Directory:           {args.dir}\n")
-    e(f"Audio files:         {len(audio_files)}\n")
-    if audio_files:
+    e(f"Audio files:         {len(audio_files)} "
+      f"({stem_count} stem(s), {len(master_candidates)} master candidate(s))\n")
+    if stem_audio_files:
         e(f"Filename quality:    {naming_quality} "
           f"(informative={scores['informative']}, "
           f"ambiguous={scores['ambiguous']}, "
           f"generic={scores['generic']})\n")
+    if master_candidates:
+        for m in master_candidates:
+            e(f"Master candidate:    {Path(m).name}\n")
     e(f"PT session export:   "
       f"{'yes (' + str(len(pt_artifacts['session_info_txt'])) + ')' if pt_artifacts['session_info_txt'] else 'no'}\n")
     e(f"PT .ptx file:        {'yes' if pt_artifacts['ptx'] else 'no'}\n")

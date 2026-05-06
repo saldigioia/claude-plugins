@@ -1,8 +1,87 @@
 # Changelog
 
-All notable changes between the April 2026 prototype and the v1.1 release.
+All notable changes between the April 2026 prototype and the v1.2 release.
 Dates are UTC. Each entry below maps to one or more commits on `main`; see
 `docs/decisions/index.md` for the decision record per phase.
+
+## [1.2.0] — 2026-05-06
+
+Three operator-noticeable bugs and one ergonomic gap closed in a single
+release. Headline change: `scripts/run.py` collapses the six-pass workflow
+into one command for the obvious case.
+
+### Fixed
+
+- **Slash-command listing duplication.** The skill was named
+  `stems-to-mixdown` inside a plugin also named `stems-to-mixdown`, so
+  Claude Code's command list rendered it as `/stems-to-mixdown:stems-to-mixdown`
+  — the same word twice. Renamed the skill to `mixdown`; the slash command
+  is now `/stems-to-mixdown:mixdown`. The skill folder moved from
+  `skills/stems-to-mixdown/` to `skills/mixdown/`; the `${CLAUDE_SKILL_DIR}/../../scripts/`
+  pattern is unchanged because the parent-of-parent still resolves to the
+  plugin root.
+- **m4a was always assumed lossy AAC.** `discover.py` used a container-only
+  check (`container in {mp3, aac, ogg, m4a, opus}`) that flagged every
+  `.m4a` as lossy. Apple Lossless (ALAC) wraps in m4a too, and would get
+  silently capped to 16/44.1 by the format-decision matrix. Replaced with
+  a codec-driven `infer_lossy(codec, container)` helper that explicitly
+  recognizes lossless codecs (`alac`, `flac`, `pcm_*`, `wavpack`, `tta`,
+  `mlp`, `truehd`, etc.) and treats container as a last-resort hint only.
+  ALAC-in-m4a now correctly preserves its native rate / depth in the
+  output. New tests in `tests/test_codec_detection.py`.
+- **Master sitting next to the stems was either summed or ignored.** The
+  CLI / manifest paths to declare a master existed but neither was
+  auto-discoverable. Added `looks_like_master(filename)` in
+  `_classification.py` (matches `master`, `final`, `released`,
+  `reference`, `bounce_final`; refuses filenames that classify as a stem).
+  `identify.py` surfaces detected candidates in `master_candidates` (schema
+  bumped to "2"). `analyze.py` auto-uses a single candidate when neither
+  `--master` nor `manifest.source.master_reference.path` is set; multiple
+  candidates → refusal (Cmd 19 — never guess about the witness). New
+  `--no-auto-master` flag opts out.
+
+### Added
+
+- **`scripts/run.py` — one-shot orchestrator.** Runs identify → (optional
+  PT intake) → analyze → plan → mix → verify in a single command, with
+  sensible defaults at every step. Stops on red flags (`--force` to
+  proceed), prompts for plan approval (`--yes` to skip). All intermediate
+  JSON lands in `<output-dir>/.s2m/run/` for inspection. Forwards
+  `--master`, `--preview`, `--solo`, `--check-mono-fold`,
+  `--report-all-platforms`, and `--bwf-report` to the right per-pass
+  scripts.
+
+### Changed
+
+- **`identify.json` schema bumped to "2".** Adds top-level
+  `stem_file_count` and `master_candidates` fields. Naming-quality scoring
+  now runs against stems only (the master, if any, is excluded from the
+  ratio so a single master file doesn't flip a folder of well-named stems
+  to "ambiguous").
+- **Plugin description trimmed.** The long-form trigger phrasing moved
+  from `plugin.json` into the SKILL.md description; the plugin description
+  is now a one-paragraph summary that reads cleanly in marketplace
+  listings. Same content, less noise per surface.
+- **`scripts/_version.py` → `1.2.0`.**
+- **Cross-skill reference in `stems-from-mix/SKILL.md`** updated to invoke
+  `/stems-to-mixdown:mixdown` (was `/stems-to-mixdown:stems-to-mixdown`).
+
+### Migration
+
+- Existing manifests, fixtures, and per-pass invocations work unchanged.
+  The old SKILL.md path (`skills/stems-to-mixdown/SKILL.md`) is gone;
+  Claude Code installs the plugin against the new layout automatically on
+  next `/plugin update`.
+- ALAC files that used to be capped to 16/44.1 will now produce
+  higher-rate/-depth output. This is a fidelity fix, not a regression — re-run
+  `analyze.py` against any folder containing m4a inputs to see the new
+  format decision.
+- Folders that contained an obvious-master file (`master.flac`, `final.wav`,
+  etc.) and were previously summing it as a stem will now pick it up as the
+  reference. The canonical mixdown bytes change because the file is no
+  longer in the stem set; the new `reference-bundle/` directory appears
+  alongside. Pass `--no-auto-master` to restore the old behavior on a
+  per-run basis.
 
 ## [1.1.0] — 2026-05-05
 

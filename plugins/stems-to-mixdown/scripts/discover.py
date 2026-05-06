@@ -27,8 +27,52 @@ from _classification import classify_by_filename  # noqa: E402
 
 AUDIO_EXTS = {".wav", ".flac", ".aiff", ".aif", ".mp3", ".m4a", ".aac", ".ogg", ".opus"}
 WAV_EXTS = {".wav", ".wave", ".rf64"}  # wavinfo / BWF MetaEdit only handle these
-LOSSY_FORMATS = {"mp3", "aac", "vorbis", "opus"}
-LOSSY_CONTAINERS = {"mp3", "aac", "ogg", "m4a", "opus"}
+
+# Codec is the source of truth for lossy-vs-lossless. Container alone is not:
+# .m4a wraps both AAC (lossy) and ALAC (Apple Lossless); .ogg wraps Vorbis,
+# Opus, and FLAC. Treating "container == m4a" as lossy silently caps an ALAC
+# master at 16/44.1 in the format-decision matrix — a fidelity bug. Treat
+# container only as a tiebreaker when ffprobe failed to name the codec.
+LOSSY_CODECS = {"mp3", "aac", "vorbis", "opus", "ac3", "eac3", "wma", "wmav2",
+                "atrac3", "atrac3al", "amr_nb", "amr_wb", "speex", "gsm", "qdm2",
+                "qcelp"}
+LOSSLESS_CODECS = {
+    "flac", "alac", "wavpack", "tta", "shorten", "ape", "tak", "mlp", "truehd",
+    # PCM family — all lossless by definition
+    "pcm_s8", "pcm_u8",
+    "pcm_s16le", "pcm_s16be", "pcm_u16le", "pcm_u16be",
+    "pcm_s24le", "pcm_s24be", "pcm_u24le", "pcm_u24be",
+    "pcm_s32le", "pcm_s32be", "pcm_u32le", "pcm_u32be",
+    "pcm_f32le", "pcm_f32be", "pcm_f64le", "pcm_f64be",
+    # Apple-specific PCM names ffprobe sometimes emits
+    "pcm_s16le_planar", "pcm_s24daud",
+}
+# Last-resort container hints when codec is unknown ("?") — used only by
+# infer_lossy() below as a tiebreaker. Plain container == m4a is NOT enough.
+LOSSY_CONTAINER_HINTS = {"mp3"}
+
+
+def infer_lossy(codec: str, container: str) -> bool:
+    """Codec-driven lossy detection. ALAC-in-m4a is lossless; AAC-in-m4a is lossy.
+
+    Order: explicit codec match → explicit lossless codec match → container
+    hint as last resort. An unknown codec in an unknown container defaults to
+    lossless — the format-decision matrix is conservative either way (lossy
+    only triggers the 16/44.1 cap), and a misclassified-as-lossless lossless
+    file still gets honest treatment, while a misclassified-as-lossy lossless
+    file is the bug we're fixing.
+    """
+    c = (codec or "").lower()
+    if c in LOSSY_CODECS:
+        return True
+    if c in LOSSLESS_CODECS:
+        return False
+    if c.startswith("pcm_"):
+        # Catch-all for any PCM variant ffmpeg adds in the future.
+        return False
+    if (container or "").lower() in LOSSY_CONTAINER_HINTS:
+        return True
+    return False
 
 
 @dataclass
@@ -164,7 +208,7 @@ def probe_master_reference(master_path: Path, source: str,
     fmt = probed.get("format", {})
     codec = stream.get("codec_name", "?")
     container = (fmt.get("format_name") or "").split(",")[0]
-    is_lossy = codec in LOSSY_FORMATS or container in LOSSY_CONTAINERS
+    is_lossy = infer_lossy(codec, container)
 
     # Bit depth resolution: same priority order as stems, with the wavinfo
     # honesty fix when applicable.
@@ -261,7 +305,7 @@ def discover_stems(directory: Path, recursive: bool, manifest: dict[str, Any],
         fmt = probed.get("format", {})
         codec = stream.get("codec_name", "?")
         container = (fmt.get("format_name") or "").split(",")[0]
-        is_lossy = codec in LOSSY_FORMATS or container in LOSSY_CONTAINERS
+        is_lossy = infer_lossy(codec, container)
 
         # Run optional production-metadata probes BEFORE deriving bit_depth so we
         # can prefer wavinfo's wValidBitsPerSample over ffprobe's container size.

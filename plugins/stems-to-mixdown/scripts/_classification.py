@@ -23,6 +23,7 @@ e.g., the demucs sibling skill — rather than widen the regex here).
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 CLASSIFICATION_RULES: list[tuple[str, re.Pattern[str]]] = [
     ("vocal",  re.compile(r"\b(vox|vocal|lead|bg|chorus|adlib|harm|hook|rap|verse)\b", re.IGNORECASE)),
@@ -56,3 +57,41 @@ def classify_by_filename(filename: str) -> str:
         if pattern.search(normalized):
             return label
     return "other"
+
+
+# Master-reference auto-detection -------------------------------------------
+#
+# When the operator drops the released version of the song into the same
+# folder as the stems (a common archival layout), identify and analyze should
+# notice and propose using it as the master reference (Cmd 19) — not silently
+# sum it as if it were one more stem.
+#
+# Patterns are intentionally narrow: a filename qualifies only if (a) it
+# matches one of the master-vocabulary tokens AND (b) it doesn't classify as
+# a stem. A file like `vocal_master.wav` is a stem (a vocal master mix-bus
+# bounce, perhaps) — not the released master.
+MASTER_NAME_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\bmaster(?:ed|ing)?\b", re.IGNORECASE),
+    re.compile(r"\bfinal(?:_?mix)?\b", re.IGNORECASE),
+    re.compile(r"\breleased?\b", re.IGNORECASE),
+    re.compile(r"\breference\b", re.IGNORECASE),
+    re.compile(r"\bbounce_final\b", re.IGNORECASE),
+]
+
+
+def looks_like_master(filename: str) -> bool:
+    """Filename suggests a released master, not a stem.
+
+    Two-part test: master-vocabulary token present AND the bare name does NOT
+    classify as a stem (vocal/drums/bass/etc.). Returns True only when both
+    conditions hold; the conservative default lets analyze sum the file as a
+    regular stem when the signals are ambiguous.
+    """
+    stem_name = Path(filename).stem
+    normalized = normalize_filename(stem_name)
+    if not any(p.search(normalized) for p in MASTER_NAME_PATTERNS):
+        return False
+    # Don't claim a stem (e.g. "vocal_master.wav") as the released master.
+    if classify_by_filename(stem_name) != "other":
+        return False
+    return True

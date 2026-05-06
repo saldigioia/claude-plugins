@@ -31,9 +31,19 @@ Given a folder of multitrack stems:
 
 Each `.log.md` is a sidecar with input SHA-256s, the exact ffmpeg command, the filter graph, before/after measurements (LUFS-I, LRA, dBTP), tool versions, and the SHA-anchored idempotency key.
 
-## With a master reference (optional)
+## With a master reference (auto-detected, or opt-in)
 
-Declare `source.master_reference.path` in `stems.manifest.yaml` (or pass `--master <path>` to analyze) and the skill produces a `reference-bundle/` containing three perfectly synchronized files (master + instrumental + acapella) at identical rate / depth / channels. Pass 5 runs the reference battery: recombine null `(instrumental + acapella) - master`, two diagnostic inverse-stems nulls, and per-deliverable LUFS-I / dBTP deltas vs the master. The master is the witness, not the source — the skill refuses to resample, requantize, or trim it. (Cmd 19.)
+Drop the released master into the same folder as the stems and the skill picks it up automatically — any file named `master`, `final`, `released`, `reference`, or `bounce_final` (and not classifying as a stem) is treated as the master reference. To override or be explicit, declare `source.master_reference.path` in `stems.manifest.yaml` or pass `--master <path>` to `analyze.py` / `run.py`. Either way, the skill produces a `reference-bundle/` containing three perfectly synchronized files (master + instrumental + acapella) at identical rate / depth / channels. Pass 5 runs the reference battery: recombine null `(instrumental + acapella) - master`, two diagnostic inverse-stems nulls, and per-deliverable LUFS-I / dBTP deltas vs the master. The master is the witness, not the source — the skill refuses to resample, requantize, or trim it. (Cmd 19.)
+
+## One-shot mode (the obvious case)
+
+For a folder that's unambiguous (well-named stems, optional master alongside, no Pro Tools artifacts), `scripts/run.py` collapses the whole pipeline into a single command:
+
+```bash
+python3 scripts/run.py --dir /path/to/some-track-stems --yes
+```
+
+It surveys the directory, runs identify → analyze → plan → mix → verify in order, and stops at the first red flag (use `--force` to push past Pass 2 errors). The per-pass scripts below remain available for power users who want intermediate JSON or to re-run a single step.
 
 ## Install
 
@@ -87,7 +97,7 @@ Optional (the plugin works correctly when these are absent):
 
 ## Doctrine
 
-Eighteen commandments live in `skills/stems-to-mixdown/references/commandments.md`. The load-bearing ones, in plain English:
+Eighteen commandments live in `skills/mixdown/references/commandments.md`. The load-bearing ones, in plain English:
 
 1. **The source is the ceiling.** Output rate/depth follows the inputs. Lossy in chain → 16/44.1 FLAC out.
 2. **Sum at unity.** `amix=normalize=0`. Headroom comes from measured pre-attenuation, never post-sum normalization.
@@ -129,7 +139,7 @@ stems-to-mixdown/
 ├── .claude-plugin/
 │   └── plugin.json                 plugin manifest (name, version, keywords)
 ├── skills/
-│   └── stems-to-mixdown/
+│   └── mixdown/
 │       ├── SKILL.md                skill entry point + frontmatter
 │       └── references/             commandments, format-decisions, manifest schema, etc.
 ├── scripts/                         the six pipeline scripts + shared _*.py modules
