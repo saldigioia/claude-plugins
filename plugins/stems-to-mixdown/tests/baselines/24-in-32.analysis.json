@@ -24,8 +24,8 @@
       "classification_source": "regex",
       "true_peak_dbtp": -18.1,
       "integrated_lufs": -21.8,
-      "loudness_range": 0,
-      "dc_offset_max": 0,
+      "loudness_range": 0.0,
+      "dc_offset_max": 0.0,
       "silent_channels": [],
       "fully_silent": false,
       "tags": {

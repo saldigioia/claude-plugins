@@ -180,21 +180,37 @@ def reference_battery(plan: dict, master_path: Path) -> dict:
         out["error"] = f"master file not found: {master_path}"
         return out
 
-    # Find the canonical instrumental + acapella outputs from the plan.
+    # v1.3: prefer the reference bundle's unity-sum copies for the null
+    # tests. The canonical mixdowns may be normalized (Cmd 9 revised) and
+    # cannot null against the master once loudnorm has touched them; the
+    # bundle's instrumental/acapella members are always unity-sum (Cmd 19),
+    # which is what the recombine null actually needs. Fall back to the
+    # canonical paths when the bundle isn't available (archival mode).
     ipath: Path | None = None
     apath: Path | None = None
-    for g in plan.get("groups", []):
-        if g.get("name") == "instrumental":
-            ipath = Path(g["output_path"])
-        elif g.get("name") == "acapella":
-            apath = Path(g["output_path"])
+    rb = plan.get("reference_bundle") or {}
+    for member in rb.get("members") or []:
+        if member.get("role") == "instrumental":
+            ipath = Path(member["output_path"])
+        elif member.get("role") == "acapella":
+            apath = Path(member["output_path"])
+    if ipath is None or apath is None or not ipath.is_file() or not apath.is_file():
+        # Fallback: canonicals (works in --archival mode, breaks if normalized).
+        for g in plan.get("groups", []):
+            if g.get("name") == "instrumental":
+                ipath = Path(g["output_path"])
+            elif g.get("name") == "acapella":
+                apath = Path(g["output_path"])
     if ipath is None or apath is None:
-        out["error"] = ("plan must have both 'instrumental' and 'acapella' groups "
+        out["error"] = ("plan must have both 'instrumental' and 'acapella' "
+                        "(in reference_bundle.members or in groups) "
                         "for the reference battery")
         return out
     if not ipath.is_file() or not apath.is_file():
-        out["error"] = f"missing canonical mixdowns: instrumental={ipath.is_file()}, acapella={apath.is_file()}"
+        out["error"] = (f"missing instrumental={ipath} (exists={ipath.is_file()}), "
+                        f"acapella={apath} (exists={apath.is_file()})")
         return out
+    out["sources"] = {"instrumental": str(ipath), "acapella": str(apath)}
 
     # 1. Recombine null: (instrumental + acapella) - master
     cmd = [

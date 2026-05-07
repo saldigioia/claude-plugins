@@ -1,5 +1,5 @@
 {
-  "schema_version": "3",
+  "schema_version": "4",
   "directory": "TESTROOT/tests/fixtures/mono-stems",
   "output_directory": "TESTROOT/tests/fixtures/mono-stems-mixdowns",
   "project": "mono-stems",
@@ -22,23 +22,35 @@
         "channels": 2,
         "dither_required": false,
         "lie": false,
-        "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1) Pan law: -3.0 dB (K=0.7079 per channel on mono→stereo) [default; set output.pan_law to declare]. (Cmd 16)",
+        "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1) Pan law: -3.0 dB (K=0.7079 per channel on mono\u2192stereo) [default; set output.pan_law to declare]. (Cmd 16)",
         "compression_level": 8
       },
       "filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[a0]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
       "scout_filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[a0]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
       "measured_peak_dbtp": -21.1,
       "measured_lufs": -21.3,
-      "pre_attenuation_db": 0,
-      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "pre_attenuation_db": 0.0,
+      "pre_attenuation_rationale": "Peak -21.10 dBTP \u2014 comfortable headroom, no attenuation. (Cmd 3)",
       "per_stem_gains": {
-        "vox_lead.wav": 0
+        "vox_lead.wav": 0.0
       },
-      "pan_law_db": -3,
+      "pan_law_db": -3.0,
       "pan_law_coefficient": 0.7079457843841379,
       "pan_law_was_default": true,
+      "pan_map": {
+        "vox_lead.wav": 0.0
+      },
+      "pan_source": "default",
       "has_mono_stems": true,
-      "output_path": "TESTROOT/tests/fixtures/mono-stems-mixdowns/mono-stems_acapella.flac"
+      "output_path": "TESTROOT/tests/fixtures/mono-stems-mixdowns/mono-stems_acapella.flac",
+      "normalization": {
+        "target_lufs": -14.0,
+        "target_true_peak": -1.0,
+        "lra_target": 11.0,
+        "two_pass": true,
+        "method": "loudnorm+alimiter"
+      },
+      "archival": false
     },
     {
       "name": "instrumental",
@@ -59,26 +71,40 @@
         "channels": 2,
         "dither_required": false,
         "lie": false,
-        "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1) Pan law: -3.0 dB (K=0.7079 per channel on mono→stereo) [default; set output.pan_law to declare]. (Cmd 16)",
+        "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1) Pan law: -3.0 dB (K=0.7079 per channel on mono\u2192stereo) [default; set output.pan_law to declare]. (Cmd 16)",
         "compression_level": 8
       },
       "filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[1:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0:weights=1 1[mix]",
       "scout_filter_graph": "[0:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a0];[1:a]pan=stereo|c0=0.707946*c0|c1=0.707946*c0[a1];[a0][a1]amix=inputs=2:duration=longest:normalize=0:weights=1 1[mix]",
       "measured_peak_dbtp": -16.2,
       "measured_lufs": -18.9,
-      "pre_attenuation_db": 0,
-      "pre_attenuation_rationale": "Peak -16.20 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "pre_attenuation_db": 0.0,
+      "pre_attenuation_rationale": "Peak -16.20 dBTP \u2014 comfortable headroom, no attenuation. (Cmd 3)",
       "per_stem_gains": {
-        "kick.wav": 0,
-        "snare.wav": 0
+        "kick.wav": 0.0,
+        "snare.wav": 0.0
       },
-      "pan_law_db": -3,
+      "pan_law_db": -3.0,
       "pan_law_coefficient": 0.7079457843841379,
       "pan_law_was_default": true,
+      "pan_map": {
+        "kick.wav": 0.0,
+        "snare.wav": 0.0
+      },
+      "pan_source": "default",
       "has_mono_stems": true,
-      "output_path": "TESTROOT/tests/fixtures/mono-stems-mixdowns/mono-stems_instrumental.flac"
+      "output_path": "TESTROOT/tests/fixtures/mono-stems-mixdowns/mono-stems_instrumental.flac",
+      "normalization": {
+        "target_lufs": -14.0,
+        "target_true_peak": -1.0,
+        "lra_target": 11.0,
+        "two_pass": true,
+        "method": "loudnorm+alimiter"
+      },
+      "archival": false
     }
   ],
   "any_lie": false,
-  "reference_bundle": null
+  "reference_bundle": null,
+  "master_listening": null
 }

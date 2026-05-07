@@ -59,6 +59,281 @@ def measure_output(path: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Encode-stage helpers (shared by archival and normalized paths)
+# ---------------------------------------------------------------------------
+
+def _build_dither_chain(target_format: str, target_depth: int) -> list[str]:
+    """Return the encode-stage dither / sample-format-conversion filter chain.
+
+    Mirrors the v1.2 logic: 16-bit targets get triangular high-pass dither;
+    24-bit FLAC/WAV/AIFF passes through an s32 container; mp3 always reduces
+    to s16. v1.3 uses `aformat=sample_fmts=...` for the non-dither cases —
+    `aresample=osf=...` loses channel-layout metadata when chained after
+    loudnorm + alimiter, breaking the encoder's auto-channel selection.
+    aresample is still used for the dither variants because that's the only
+    filter that exposes `dither_method`.
+    """
+    chain: list[str] = []
+    if target_format == "flac":
+        if target_depth <= 16:
+            chain.append("aresample=osf=s16:dither_method=triangular_hp")
+            chain.append("aformat=channel_layouts=stereo")
+        elif target_depth == 24:
+            chain.append("aformat=sample_fmts=s32:channel_layouts=stereo")
+    elif target_format in ("wav", "aiff"):
+        if target_depth <= 16:
+            chain.append("aresample=osf=s16:dither_method=triangular_hp")
+            chain.append("aformat=channel_layouts=stereo")
+        else:
+            chain.append("aformat=sample_fmts=s32:channel_layouts=stereo")
+    elif target_format == "mp3":
+        chain.append("aresample=osf=s16:dither_method=triangular_hp")
+        chain.append("aformat=channel_layouts=stereo")
+    return chain
+
+
+def _build_codec_args(fmt: dict) -> list[str]:
+    target_codec = fmt["codec"]
+    target_format = fmt["format"]
+    target_depth = fmt["depth"]
+    args: list[str] = []
+    if target_format == "flac":
+        compression_level = fmt.get("compression_level", 8)
+        args += ["-c:a", "flac", "-compression_level", str(compression_level)]
+        if target_depth in (16, 24):
+            args += ["-bits_per_raw_sample", str(target_depth)]
+        elif target_depth == 32:
+            args += ["-sample_fmt", "s32"]
+    elif target_format == "wav":
+        args += ["-c:a", target_codec]
+    elif target_format == "aiff":
+        args += ["-c:a", target_codec, "-f", "aiff"]
+    elif target_format == "mp3":
+        args += ["-c:a", "libmp3lame", "-q:a", "0"]
+    return args
+
+
+# ---------------------------------------------------------------------------
+# Two-pass loudnorm (v1.3 / Cmd 9 revised)
+# ---------------------------------------------------------------------------
+
+def parse_loudnorm_json(stderr: str) -> dict:
+    """Extract the `print_format=json` block from loudnorm's stderr output.
+
+    ffmpeg loudnorm prints either a `[Parsed_loudnorm_0 @ 0x...]` line
+    followed by JSON, or just JSON, depending on log level. Find the last
+    JSON object that looks like loudnorm's measurement block and return
+    it parsed (string values intact — that's what loudnorm wants on the
+    second pass).
+    """
+    # Take everything from the first `{` to the matching closing `}` at the
+    # bottom of the output. loudnorm's JSON is the only multi-line JSON that
+    # appears in its stderr.
+    end = stderr.rfind("}")
+    if end == -1:
+        return {}
+    start = stderr.rfind("{", 0, end + 1)
+    if start == -1:
+        return {}
+    blob = stderr[start:end + 1]
+    try:
+        data = json.loads(blob)
+    except json.JSONDecodeError:
+        return {}
+    # Must look like loudnorm output
+    if "input_i" not in data or "target_offset" not in data:
+        return {}
+    return data
+
+
+def _true_peak_to_linear(dbtp: float) -> float:
+    """Convert a dBTP ceiling to the linear ratio that alimiter wants
+    (limit=0.891 for -1 dBTP, etc.). Clamps to a safe ceiling.
+    """
+    return max(0.001, min(1.0, 10 ** (dbtp / 20.0)))
+
+
+def render_unity_sum_intermediate(directory: Path, group: dict,
+                                   intermediate_path: Path) -> tuple[bool, str]:
+    """Render the group's unity sum to a 32-bit float WAV intermediate at
+    the target rate. Returns (ok, stderr_tail). The intermediate keeps
+    full precision for the first-pass measurement; encode-stage filtering
+    (dither, s32 conversion, compression) runs only on the second pass.
+    """
+    target_rate = group["format"]["rate"]
+    cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-y"]
+    for fn in group["stem_files"]:
+        cmd += ["-i", str(directory / fn)]
+    cmd += [
+        "-filter_complex", group["filter_graph"],
+        "-map", "[mix]",
+        "-c:a", "pcm_f32le", "-ar", str(target_rate),
+        str(intermediate_path),
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    return (r.returncode == 0), r.stderr[-2000:] if r.stderr else ""
+
+
+def measure_loudnorm_first_pass(intermediate_path: Path,
+                                 norm_cfg: dict) -> dict:
+    """Run loudnorm in first-pass measurement mode and parse the JSON
+    summary. Returns the parsed measurements dict (input_i, input_tp,
+    input_lra, input_thresh, target_offset, ...) or {} on failure.
+    """
+    target_lufs = norm_cfg["target_lufs"]
+    target_tp = norm_cfg["target_true_peak"]
+    lra = norm_cfg.get("lra_target", 11.0)
+    cmd = [
+        "ffmpeg", "-nostdin", "-hide_banner",
+        "-i", str(intermediate_path),
+        "-af", f"loudnorm=I={target_lufs}:LRA={lra}:TP={target_tp}:print_format=json",
+        "-f", "null", "-",
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    return parse_loudnorm_json(r.stderr)
+
+
+def build_normalized_command(intermediate_path: Path, output_path: Path,
+                              fmt: dict, norm_cfg: dict,
+                              measurements: dict,
+                              metadata: dict[str, str]) -> tuple[list[str], str]:
+    """Build the second-pass ffmpeg command: loudnorm (apply with measured
+    params) + alimiter (true-peak ceiling) + dither/format conversion +
+    encode. Returns (cmd, filter_chain_string_for_log).
+    """
+    target_lufs = norm_cfg["target_lufs"]
+    target_tp = norm_cfg["target_true_peak"]
+    lra = norm_cfg.get("lra_target", 11.0)
+
+    loudnorm_args = (
+        f"loudnorm=I={target_lufs}:LRA={lra}:TP={target_tp}"
+        f":measured_I={measurements.get('input_i', '0.0')}"
+        f":measured_LRA={measurements.get('input_lra', '0.0')}"
+        f":measured_TP={measurements.get('input_tp', '0.0')}"
+        f":measured_thresh={measurements.get('input_thresh', '0.0')}"
+        f":offset={measurements.get('target_offset', '0.0')}"
+        f":linear=true:print_format=summary"
+    )
+    limiter_args = (
+        # alimiter takes a linear limit value in [0, 1]. -1 dBTP → 0.891
+        f"alimiter=limit={_true_peak_to_linear(target_tp):.6f}:level=disabled"
+    )
+    dither_chain = _build_dither_chain(fmt["format"], fmt["depth"])
+    full_chain = ",".join([loudnorm_args, limiter_args] + dither_chain)
+
+    cmd = [
+        "ffmpeg", "-nostdin", "-hide_banner", "-y",
+        "-i", str(intermediate_path),
+        "-af", full_chain,
+        # ffmpeg's loudnorm filter internally upsamples to 192 kHz, so pin
+        # the output sample rate explicitly. Without -ar, every normalized
+        # FLAC ships at 192 kHz regardless of the planned target.
+        "-ar", str(fmt["rate"]),
+    ]
+    cmd += _build_codec_args(fmt)
+    for k, v in metadata.items():
+        cmd += ["-metadata", f"{k}={v}"]
+    cmd += [str(output_path)]
+    return cmd, full_chain
+
+
+def execute_group_normalized(directory: Path, group: dict, plan: dict,
+                              output_path: Path, idempotency_key: str,
+                              live_shas: dict[str, str]) -> dict:
+    """Render unity-sum to an intermediate, then two-pass loudnorm + alimiter
+    + dither + encode to the final output. Cmd 9 (revised in v1.3).
+    """
+    norm_cfg = group["normalization"]
+    fmt = group["format"]
+    started_at = datetime.now(timezone.utc).isoformat()
+
+    # Stage 1: unity-sum render to a 32-bit float intermediate.
+    with tempfile.NamedTemporaryFile(
+        prefix=f"s2m_{plan['project']}_{group['name']}_",
+        suffix=".wav",
+        dir=str(output_path.parent),
+        delete=False,
+    ) as tmp:
+        intermediate = Path(tmp.name)
+    try:
+        ok, err_tail = render_unity_sum_intermediate(directory, group, intermediate)
+        if not ok:
+            return {
+                "status": "error",
+                "reason": "unity-sum intermediate render failed",
+                "stderr_tail": err_tail,
+                "output": str(output_path),
+            }
+
+        # Measure unity-sum loudness for the sidecar (LUFS-I + dBTP +
+        # LRA — informational so the operator can see what the unprocessed
+        # mix looks like before normalization).
+        unity_summary = _measure.measure_loudness_file(intermediate)
+
+        # Stage 2: first-pass loudnorm — measure.
+        measurements = measure_loudnorm_first_pass(intermediate, norm_cfg)
+        if not measurements:
+            return {
+                "status": "error",
+                "reason": "loudnorm first-pass measurement failed",
+                "output": str(output_path),
+            }
+
+        # Stage 3: second-pass loudnorm + alimiter + dither + encode.
+        metadata = _gather_metadata(plan, group)
+        cmd, filter_chain = build_normalized_command(
+            intermediate, output_path, fmt, norm_cfg, measurements, metadata,
+        )
+        sys.stderr.write(
+            f"[mix:normalized] running: {' '.join(_shell_escape(c) for c in cmd)}\n"
+        )
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        finished_at = datetime.now(timezone.utc).isoformat()
+        if r.returncode != 0:
+            return {
+                "status": "error",
+                "reason": "second-pass loudnorm/encode failed",
+                "stderr_tail": r.stderr[-2000:],
+                "output": str(output_path),
+                "command": cmd,
+            }
+    finally:
+        try:
+            intermediate.unlink()
+        except OSError:
+            pass
+
+    output_measurements = measure_output(output_path)
+
+    sidecar = render_sidecar_log(
+        directory=directory, plan=plan, group=group,
+        cmd=cmd, filter_graph=group["filter_graph"],
+        started_at=started_at, finished_at=finished_at,
+        output_measurements=output_measurements,
+        idempotency_key=idempotency_key,
+        live_shas=live_shas,
+        normalization={
+            "config": norm_cfg,
+            "first_pass_measurements": measurements,
+            "second_pass_filter_chain": filter_chain,
+            "unity_sum_measurements": unity_summary,
+        },
+    )
+    log_path = Path(str(output_path) + ".log.md")
+    log_path.write_text(sidecar)
+
+    return {
+        "status": "ok",
+        "output": str(output_path),
+        "output_measurements": output_measurements,
+        "unity_sum_measurements": unity_summary,
+        "loudnorm_measurements": measurements,
+        "idempotency_key": idempotency_key,
+        "log": str(log_path),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Mix execution
 # ---------------------------------------------------------------------------
 
@@ -93,6 +368,14 @@ def execute_group(directory: Path, group: dict, plan: dict, force_overwrite: boo
                 }
         except Exception:
             pass  # fall through to remix
+
+    # v1.3: when normalization is set, the canonical output goes through
+    # the unity-sum-then-loudnorm pipeline. Archival mode (and bundle
+    # internals) keep the v1.2 single-shot path below.
+    if group.get("normalization") is not None:
+        return execute_group_normalized(
+            directory, group, plan, output_path, idempotency_key, live_shas,
+        )
 
     # Build the ffmpeg command
     cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-y"]
@@ -207,12 +490,15 @@ def hash_file(path: Path, chunk: int = 1 << 20) -> str:
 
 
 def compute_idempotency_key(directory: Path, group: dict) -> tuple[str, dict[str, str]]:
-    """Stable SHA-256 over the live input contents and the filter graph.
+    """Stable SHA-256 over the live input contents, filter graph, and
+    normalization config.
 
     Returns (key, live_shas). Inputs are re-hashed from disk every run so a
     file replaced under the same name with different content invalidates the
     cache; the plan's `stem_shas` block records the analyze-time hashes for
-    drift-detection comparison.
+    drift-detection comparison. v1.3 also incorporates the normalization
+    config and the archival flag so flipping --archival or changing
+    --target-lufs invalidates correctly.
     """
     live_shas: dict[str, str] = {}
     parts: list[str] = []
@@ -222,6 +508,10 @@ def compute_idempotency_key(directory: Path, group: dict) -> tuple[str, dict[str
         parts.append(f"{fn}:{sha}")
     parts.append("--filter--")
     parts.append(group["filter_graph"])
+    parts.append("--normalization--")
+    parts.append(json.dumps(group.get("normalization"), sort_keys=True, default=str))
+    parts.append("--archival--")
+    parts.append(str(group.get("archival", False)))
     payload = "\n".join(parts).encode("utf-8")
     return hashlib.sha256(payload).hexdigest(), live_shas
 
@@ -483,21 +773,80 @@ def execute_reference_bundle(plan: dict, canonical_outputs: dict[str, str],
             })
             continue
 
-        # role in {instrumental, acapella}: copy the canonical mixdown.
-        canon_path = canonical_outputs.get(role)
-        if not canon_path or not Path(canon_path).is_file():
+        # role in {instrumental, acapella}: produce a unity-sum version of
+        # this group, regardless of whether the canonical was normalized.
+        # Null tests against the master only work on un-normalized inputs
+        # (Cmd 19 + Cmd 9 revised). When the run is --archival the canonical
+        # IS the unity sum and we can copy; when normalized we re-render
+        # from the group's filter graph in the bundle's target format.
+        group_def = next(
+            (g for g in plan.get("groups", []) if g.get("name") == role),
+            None,
+        )
+        if group_def is None:
             any_member_error = True
             member_results.append({
                 "role": role, "status": "error",
-                "reason": f"canonical mixdown for '{role}' not found",
+                "reason": f"plan has no group named '{role}'",
             })
             continue
-        shutil.copy2(canon_path, out_path)
+
+        if group_def.get("normalization") is None:
+            # Archival path: canonical is unity-sum, copy it.
+            canon_path = canonical_outputs.get(role)
+            if not canon_path or not Path(canon_path).is_file():
+                any_member_error = True
+                member_results.append({
+                    "role": role, "status": "error",
+                    "reason": f"canonical mixdown for '{role}' not found",
+                })
+                continue
+            shutil.copy2(canon_path, out_path)
+            member_results.append({
+                "role": role, "status": "ok",
+                "output": str(out_path),
+                "method": "copy",
+                "source": canon_path,
+            })
+            continue
+
+        # Normalized canonical: render unity-sum into the bundle.
+        directory = Path(plan["directory"])
+        cmd = ["ffmpeg", "-nostdin", "-hide_banner", "-y"]
+        for fn in group_def["stem_files"]:
+            cmd += ["-i", str(directory / fn)]
+        encode_chain = _build_dither_chain(target_format, target_depth)
+        if encode_chain:
+            filter_graph = (group_def["filter_graph"]
+                            + ";[mix]" + ",".join(encode_chain) + "[final]")
+            map_label = "[final]"
+        else:
+            filter_graph = group_def["filter_graph"]
+            map_label = "[mix]"
+        cmd += ["-filter_complex", filter_graph, "-map", map_label]
+        cmd += _build_codec_args(rb["format"])
+        cmd += [
+            "-metadata",
+            f"TITLE={plan['project']} (bundle / {role}, unity-sum for null tests)",
+            "-metadata",
+            "COMMENT=Reference-bundle copy: unity-sum render (no normalization). "
+            "The canonical mixdown alongside this bundle is the listening master; "
+            "this file is the witness against the released master. (Cmd 19, Cmd 9 revised)",
+            str(out_path),
+        ]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            any_member_error = True
+            member_results.append({
+                "role": role, "status": "error",
+                "reason": "bundle unity-sum re-render failed",
+                "stderr_tail": r.stderr[-1500:],
+            })
+            continue
         member_results.append({
             "role": role, "status": "ok",
             "output": str(out_path),
-            "method": "copy",
-            "source": canon_path,
+            "method": "render_unity_sum",
         })
 
     # Bundle sidecar log
@@ -554,6 +903,127 @@ def execute_reference_bundle(plan: dict, canonical_outputs: dict[str, str],
     }
 
 
+def execute_master_listening(plan: dict, force_overwrite: bool) -> dict:
+    """v1.3: produce <project>_master_listening.<ext> — a normalized
+    listening copy of the master file, sitting alongside the canonical
+    mixdowns (NOT inside the reference-bundle/ dir, because the bundle's
+    contract is unity-sum). Cmd 9 (revised) + Cmd 19.
+    """
+    ml = plan.get("master_listening")
+    if not ml:
+        return {"status": "skipped", "reason": "no master_listening member in plan"}
+
+    src = Path(ml["source"])
+    out_path = Path(ml["output_path"])
+    if not src.is_file():
+        return {"status": "error", "reason": f"master not found: {src}",
+                "output": str(out_path)}
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if out_path.exists() and not force_overwrite:
+        return {"status": "skipped", "reason": "exists; use --force-overwrite to rebuild",
+                "output": str(out_path)}
+
+    norm_cfg = ml["normalization"]
+    fmt = ml["format"]
+
+    # Stage 1: copy the master into a 32-bit float intermediate so loudnorm
+    # operates on full-precision data regardless of the master's container.
+    with tempfile.NamedTemporaryFile(
+        prefix=f"s2m_{plan['project']}_master_listening_",
+        suffix=".wav",
+        dir=str(out_path.parent),
+        delete=False,
+    ) as tmp:
+        intermediate = Path(tmp.name)
+    started_at = datetime.now(timezone.utc).isoformat()
+    try:
+        cmd1 = [
+            "ffmpeg", "-nostdin", "-hide_banner", "-y",
+            "-i", str(src),
+            "-c:a", "pcm_f32le", "-ar", str(fmt["rate"]),
+            str(intermediate),
+        ]
+        r1 = subprocess.run(cmd1, capture_output=True, text=True)
+        if r1.returncode != 0:
+            return {"status": "error", "reason": "intermediate render failed",
+                    "stderr_tail": r1.stderr[-1500:], "output": str(out_path)}
+
+        measurements = measure_loudnorm_first_pass(intermediate, norm_cfg)
+        if not measurements:
+            return {"status": "error", "reason": "loudnorm first-pass failed",
+                    "output": str(out_path)}
+
+        metadata = {
+            "TITLE": f"{plan['project']} (master listening copy)",
+            "COMMENT": (
+                f"Loudness-normalized listening copy of the master at "
+                f"{norm_cfg['target_lufs']} LUFS-I / {norm_cfg['target_true_peak']} dBTP. "
+                f"The original master file is unmodified; the unity-sum master inside "
+                f"reference-bundle/ is what null tests run against. (Cmd 9 revised, Cmd 19)"
+            ),
+        }
+        cmd2, filter_chain = build_normalized_command(
+            intermediate, out_path, fmt, norm_cfg, measurements, metadata,
+        )
+        sys.stderr.write(
+            f"[master_listening] running: {' '.join(_shell_escape(c) for c in cmd2)}\n"
+        )
+        r2 = subprocess.run(cmd2, capture_output=True, text=True)
+        if r2.returncode != 0:
+            return {"status": "error", "reason": "second-pass loudnorm failed",
+                    "stderr_tail": r2.stderr[-1500:], "output": str(out_path)}
+    finally:
+        try:
+            intermediate.unlink()
+        except OSError:
+            pass
+
+    finished_at = datetime.now(timezone.utc).isoformat()
+    output_measurements = measure_output(out_path)
+
+    # Sidecar log for the listening copy.
+    log_path = Path(str(out_path) + ".log.md")
+    log_lines = [
+        f"# {out_path.name} — provenance log\n",
+        f"_Written by stems-to-mixdown v{__version__} at {finished_at}_\n",
+        "## What this is\n",
+        "Normalized listening copy of the master reference. The bundle in "
+        "`reference-bundle/` keeps the master at unity sum so null tests "
+        "against the deliverables work; this file exists as a comfortable "
+        "A/B reference at the same loudness target as the canonical mixdowns. "
+        "(Cmd 9 revised, Cmd 19.)\n",
+        "## Source\n",
+        f"- **Master:** `{src}`",
+        f"- **Source SHA-256:** `{ml.get('source_sha256', '')[:32]}…`",
+        "",
+        "## Normalization\n",
+        f"- **Target:** {norm_cfg['target_lufs']} LUFS-I, "
+        f"{norm_cfg['target_true_peak']} dBTP, LRA cap {norm_cfg['lra_target']} LU "
+        f"(loudnorm two-pass linear=true + alimiter)",
+        f"- **Loudnorm first-pass:** I={measurements.get('input_i')} LUFS, "
+        f"TP={measurements.get('input_tp')} dBTP, "
+        f"LRA={measurements.get('input_lra')} LU",
+        f"- **Output:** I={output_measurements.get('integrated_lufs')} LUFS, "
+        f"TP={output_measurements.get('true_peak_dbtp')} dBTP, "
+        f"LRA={output_measurements.get('loudness_range')} LU",
+        "",
+        "## Timestamps\n",
+        f"- Started: {started_at}",
+        f"- Finished: {finished_at}",
+        "",
+    ]
+    log_path.write_text("\n".join(log_lines))
+
+    return {
+        "status": "ok",
+        "output": str(out_path),
+        "log": str(log_path),
+        "loudnorm_measurements": measurements,
+        "output_measurements": output_measurements,
+    }
+
+
 def _shell_escape(arg: str) -> str:
     if not arg or any(c in arg for c in ' \t"\'$`\\'):
         return "'" + arg.replace("'", "'\\''") + "'"
@@ -584,7 +1054,8 @@ def render_sidecar_log(directory: Path, plan: dict, group: dict, cmd: list[str],
                        filter_graph: str, started_at: str, finished_at: str,
                        output_measurements: dict,
                        idempotency_key: str = "",
-                       live_shas: dict[str, str] | None = None) -> str:
+                       live_shas: dict[str, str] | None = None,
+                       normalization: dict | None = None) -> str:
     fmt = group["format"]
     live_shas = live_shas or {}
     lines = []
@@ -681,6 +1152,30 @@ def render_sidecar_log(directory: Path, plan: dict, group: dict, cmd: list[str],
                  f"{output_measurements['loudness_range']:.2f} LU" if output_measurements.get('loudness_range') is not None
                  else "- **Output LRA:** unavailable")
     lines.append("")
+
+    # v1.3: normalization stages are recorded explicitly so the unity-sum
+    # intermediate's measurements are preserved next to the final output's.
+    if normalization is not None:
+        cfg = normalization.get("config") or {}
+        unity = normalization.get("unity_sum_measurements") or {}
+        meas = normalization.get("first_pass_measurements") or {}
+        lines.append("## Normalization (Cmd 9 revised)\n")
+        lines.append(f"- **Target:** {cfg.get('target_lufs')} LUFS-I, "
+                     f"{cfg.get('target_true_peak')} dBTP, LRA cap {cfg.get('lra_target')} LU "
+                     f"({cfg.get('method', 'loudnorm+alimiter')}; "
+                     f"{'two-pass, linear=true' if cfg.get('two_pass') else 'single-pass'})")
+        lines.append(f"- **Unity-sum intermediate:** "
+                     f"I={unity.get('integrated_lufs')} LUFS, "
+                     f"TP={unity.get('true_peak_dbtp')} dBTP, "
+                     f"LRA={unity.get('loudness_range')} LU")
+        lines.append(f"- **Loudnorm first-pass measurements:** "
+                     f"I={meas.get('input_i')} LUFS, "
+                     f"TP={meas.get('input_tp')} dBTP, "
+                     f"LRA={meas.get('input_lra')} LU, "
+                     f"thresh={meas.get('input_thresh')}, "
+                     f"target_offset={meas.get('target_offset')} dB")
+        lines.append(f"- **Final filter chain:** `{normalization.get('second_pass_filter_chain', '')}`")
+        lines.append("")
 
     lines.append("## Tool versions\n")
     lines.append(f"- ffmpeg: `{tool_version('ffmpeg')}`")
@@ -785,6 +1280,18 @@ def main() -> int:
     elif plan.get("reference_bundle") is not None and any_error:
         sys.stderr.write(f"\n[skip] reference bundle: at least one canonical group errored; "
                          f"the bundle requires all canonical mixdowns to succeed.\n")
+
+    # v1.3: master listening copy (Cmd 9 revised + Cmd 19). Runs only when
+    # the plan includes master_listening and no canonical groups errored.
+    if plan.get("master_listening") is not None and not any_error:
+        sys.stderr.write(f"\n--- Master listening copy ---\n")
+        ml_result = execute_master_listening(plan, args.force_overwrite)
+        results.append({"group": "master-listening", **ml_result})
+        if ml_result.get("status") == "error":
+            any_error = True
+        sys.stderr.write(
+            f"[{ml_result.get('status')}] {ml_result.get('output','')}\n"
+        )
 
     sys.stdout.write(json.dumps({"results": results}, indent=2, default=str))
     sys.stdout.write("\n")

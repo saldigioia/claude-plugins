@@ -31,6 +31,22 @@ version of the skill produced an artifact. Bump on tagged releases:
            the whole pipeline end-to-end for the obvious case.
            identify.json schema bumped to "2" (adds stem_file_count and
            master_candidates fields).
+- 1.3.0  — three big behavior changes plus a doctrine revision.
+           (1) Folder shape detection in identify.py — when --dir points at
+           a project folder containing one audio subdirectory, run.py
+           descends into it without prompting; identify.json schema bumped
+           to "3". (2) Cmd 20 added: stereo is the deliverable, mono-stem
+           panning is constant-power-curve normalized to the declared pan
+           law, manifest `pan:` map and `--auto-pan` enable per-stem
+           placement, and pseudo-stereo treatments are refused. (3) Cmd 9
+           REVISED: the canonical deliverable now ships normalized to -14
+           LUFS-I / -1 dBTP via two-pass loudnorm + alimiter; --archival
+           preserves the v1.2 unity-sum behavior bit-for-bit. plan.json
+           schema bumped to "4" with new `normalization`, `archival`, and
+           `master_listening` fields. The reference bundle keeps using
+           unity-sum internally (Cmd 19); a new <project>_master_listening
+           file sits alongside the canonicals as a normalized A/B copy of
+           the master.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"

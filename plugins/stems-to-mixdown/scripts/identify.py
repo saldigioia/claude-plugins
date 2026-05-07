@@ -225,34 +225,18 @@ def derive_recommendation(
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description=("stems-to-mixdown / Pass 0a (identify). "
-                     "Fast triage scan; emits identify.json with a recommendation "
-                     "for the next step. No probes, no measurements, no metadata "
-                     "parsing — just orientation."),
-    )
-    parser.add_argument("--dir", required=True, type=Path,
-                        help="Directory of stems to triage.")
-    parser.add_argument("--sample-size", type=int, default=8,
-                        help=("How many WAV/RF64 files to peek at for production-metadata "
-                              "chunk markers. Default 8 — keep small; this is a triage pass."))
-    args = parser.parse_args()
+def survey_directory(directory: Path, sample_size: int) -> dict[str, Any]:
+    """Cheap one-directory survey. No recursion, no ffprobe.
 
-    if not args.dir.is_dir():
-        sys.stderr.write(f"[fatal] not a directory: {args.dir}\n")
-        return 2
-
-    # Catalogue audio files at the top level only — recursion is Pass 1's job.
+    Returns a dict with audio counts, master candidates, naming-quality
+    scoring, PT artifacts, metadata signals, and manifest presence — every
+    field needed to decide whether this directory is a viable stem source.
+    """
     audio_files = sorted(
-        p for p in args.dir.iterdir()
+        p for p in directory.iterdir()
         if p.is_file() and p.suffix.lower() in AUDIO_EXTS
     )
 
-    # Filename quality scoring + master-reference auto-detection. The master
-    # is excluded from the stem walk in analyze.py — but identify needs to
-    # call it out so the operator (and the LLM driving this) sees it before
-    # any heavier processing kicks in.
     scores = {"informative": 0, "ambiguous": 0, "generic": 0}
     per_file_score: dict[str, str] = {}
     master_candidates: list[str] = []
@@ -265,12 +249,7 @@ def main() -> int:
         s = score_filename(p.name)
         scores[s] += 1
         per_file_score[p.name] = s
-    # Quality scoring runs against stems only (the master, if any, is not a
-    # stem and would skew the "is this a well-named folder" judgement).
     if not stem_audio_files:
-        # All audio files looked like masters — degenerate; analyze will
-        # complain. Surface here so the recommendation can route to user
-        # clarification.
         scores = {"informative": 0, "ambiguous": 0, "generic": 0}
 
     stem_count = len(stem_audio_files)
@@ -283,12 +262,10 @@ def main() -> int:
     else:
         naming_quality = "mixed"
 
-    # Pro Tools artifact detection
-    pt_artifacts = find_pt_artifacts(args.dir)
+    pt_artifacts = find_pt_artifacts(directory)
 
-    # Production-metadata chunk signals — sample a few WAVs only.
     wav_files = [p for p in audio_files if p.suffix.lower() in WAV_EXTS]
-    sample = wav_files[:max(0, args.sample_size)]
+    sample = wav_files[:max(0, sample_size)]
     metadata_signals = {
         "samples_inspected": len(sample),
         "with_bext": 0,
@@ -304,20 +281,11 @@ def main() -> int:
         if chunks.get("has_axml"):
             metadata_signals["with_axml"] += 1
 
-    manifest_present = (args.dir / "stems.manifest.yaml").is_file()
-    session_sidecar_present = (args.dir / "stems.session.yaml").is_file()
+    manifest_present = (directory / "stems.manifest.yaml").is_file()
+    session_sidecar_present = (directory / "stems.session.yaml").is_file()
 
-    recommendation, rationale, next_command = derive_recommendation(
-        audio_count=len(audio_files),
-        naming_quality=naming_quality,
-        pt_artifacts=pt_artifacts,
-        manifest_present=manifest_present,
-        directory=args.dir.resolve(),
-    )
-
-    out = {
-        "schema_version": "2",
-        "directory": str(args.dir.resolve()),
+    return {
+        "path": str(directory.resolve()),
         "audio_file_count": len(audio_files),
         "stem_file_count": stem_count,
         "master_candidates": master_candidates,
@@ -328,16 +296,207 @@ def main() -> int:
         "metadata_signals": metadata_signals,
         "manifest_present": manifest_present,
         "session_sidecar_present": session_sidecar_present,
+    }
+
+
+def find_audio_subdirectories(root: Path, max_depth: int) -> list[Path]:
+    """Walk `root` up to `max_depth` levels and return any subdirectory that
+    directly contains audio files. The root itself is NOT included; the
+    caller surveyed it separately. Sorted for determinism. Skips dot-dirs
+    and the skill's own *-mixdowns / .s2m output dirs.
+    """
+    SKIP_NAMES = {"-mixdowns", ".s2m", "qc", "reference-bundle"}
+    out: list[Path] = []
+    visited: set[Path] = set()
+
+    def _walk(current: Path, depth: int) -> None:
+        if depth > max_depth:
+            return
+        try:
+            real = current.resolve()
+        except OSError:
+            return
+        if real in visited:
+            return
+        visited.add(real)
+        for child in sorted(current.iterdir()):
+            if not child.is_dir():
+                continue
+            name = child.name
+            if name.startswith("."):
+                continue
+            if any(name.endswith(suffix) for suffix in SKIP_NAMES) or name in SKIP_NAMES:
+                continue
+            # Does this dir directly contain audio?
+            try:
+                if any(p.is_file() and p.suffix.lower() in AUDIO_EXTS
+                       for p in child.iterdir()):
+                    out.append(child)
+            except OSError:
+                continue
+            # Continue descending regardless — a parent that contains audio
+            # AND a sibling that also contains audio is the multi-candidate
+            # case, and the caller decides.
+            _walk(child, depth + 1)
+
+    _walk(root, 1)
+    return out
+
+
+def resolve_audio_directory(
+    root_survey: dict[str, Any],
+    nested_surveys: list[dict[str, Any]],
+) -> tuple[str | None, str, str]:
+    """Pick which surveyed directory to feed downstream.
+
+    Returns (resolved_path or None, resolution_reason, resolution_message).
+    Rules, in priority order:
+        1. Direct hit          — root has stems → root.
+        2. Single nested dir   — root has no stems but exactly one nested
+                                 dir contains stems → that nested dir.
+        3. Multiple nested     — more than one nested dir contains stems →
+                                 None; operator picks.
+        4. Nothing             — None; nothing to mix.
+    "Stems" means stem_file_count > 0; master-only dirs don't count
+    (they're a witness, not a source).
+    """
+    if root_survey["stem_file_count"] > 0:
+        return root_survey["path"], "exact_match", (
+            f"Audio at {root_survey['path']}; using directly."
+        )
+    nested_with_stems = [s for s in nested_surveys if s["stem_file_count"] > 0]
+    if len(nested_with_stems) == 1:
+        chosen = nested_with_stems[0]
+        return chosen["path"], "single_audio_subdir", (
+            f"No audio at root; descending into {chosen['path']} "
+            f"(the only candidate)."
+        )
+    if len(nested_with_stems) > 1:
+        names = ", ".join(s["path"] for s in nested_with_stems)
+        return None, "needs_user_clarification", (
+            f"{len(nested_with_stems)} subdirectories contain stems "
+            f"({names}). Re-run with --dir pointing at the one you want; "
+            f"this script never guesses across siblings."
+        )
+    return None, "no_audio", (
+        "No audio files found anywhere within reach. Confirm the path or "
+        "lower the audio depth budget."
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(
+        description=("stems-to-mixdown / Pass 0a (identify). "
+                     "Fast triage scan; emits identify.json with a recommendation "
+                     "for the next step. No probes, no measurements, no metadata "
+                     "parsing — just orientation."),
+    )
+    parser.add_argument("--dir", required=True, type=Path,
+                        help="Directory to triage. May be the audio dir itself, "
+                             "or a project folder containing one audio subdir.")
+    parser.add_argument("--sample-size", type=int, default=8,
+                        help=("How many WAV/RF64 files to peek at for production-metadata "
+                              "chunk markers. Default 8 — keep small; this is a triage pass."))
+    parser.add_argument("--max-depth", type=int, default=3,
+                        help=("How many levels deep to look for audio when the root "
+                              "is empty. Default 3 — covers the common DAW project "
+                              "layouts (Logic / Pro Tools / Cubase) without "
+                              "wandering into deep archive trees."))
+    args = parser.parse_args()
+
+    if not args.dir.is_dir():
+        sys.stderr.write(f"[fatal] not a directory: {args.dir}\n")
+        return 2
+
+    # Survey the root, then walk one extra level for nested audio dirs.
+    root_survey = survey_directory(args.dir, args.sample_size)
+    nested_surveys: list[dict[str, Any]] = []
+    if root_survey["stem_file_count"] == 0:
+        for sub in find_audio_subdirectories(args.dir, args.max_depth):
+            nested_surveys.append(survey_directory(sub, args.sample_size))
+
+    resolved_dir, resolution_reason, resolution_message = resolve_audio_directory(
+        root_survey, nested_surveys,
+    )
+    audio_locations = [root_survey] + nested_surveys
+
+    # Pick the survey whose findings drive the recommendation. When we
+    # descended into a nested dir, that nested dir's survey is what
+    # downstream cares about; otherwise the root's.
+    if resolved_dir == root_survey["path"]:
+        primary = root_survey
+    else:
+        primary = next(
+            (s for s in nested_surveys if s["path"] == resolved_dir),
+            root_survey,
+        )
+
+    if resolved_dir is None:
+        recommendation = "needs_user_clarification"
+        rationale = resolution_message
+        next_command = None
+    else:
+        recommendation, rationale, next_command = derive_recommendation(
+            audio_count=primary["audio_file_count"],
+            naming_quality=primary["naming_quality"],
+            pt_artifacts=primary["pt_artifacts"],
+            manifest_present=primary["manifest_present"],
+            directory=Path(resolved_dir),
+        )
+
+    out = {
+        "schema_version": "3",
+        "directory": str(args.dir.resolve()),
+        "resolved_directory": resolved_dir,
+        "resolution_reason": resolution_reason,
+        "resolution_message": resolution_message,
+        "audio_locations": audio_locations,
+        # Compat: the v1.2 top-level fields kept pointing at the chosen
+        # directory's survey so existing callers (tests, scripts grepping
+        # the JSON) don't break on the schema bump.
+        "audio_file_count": primary["audio_file_count"],
+        "stem_file_count": primary["stem_file_count"],
+        "master_candidates": primary["master_candidates"],
+        "filename_scores": primary["filename_scores"],
+        "naming_quality": primary["naming_quality"],
+        "per_file_score": primary["per_file_score"],
+        "pt_artifacts": primary["pt_artifacts"],
+        "metadata_signals": primary["metadata_signals"],
+        "manifest_present": primary["manifest_present"],
+        "session_sidecar_present": primary["session_sidecar_present"],
         "recommendation": recommendation,
         "rationale": rationale,
         "next_command": next_command,
     }
+    # Surface for human report
+    audio_files = []  # legacy report uses this; rebuild from primary
+    pt_artifacts = primary["pt_artifacts"]
+    metadata_signals = primary["metadata_signals"]
+    manifest_present = primary["manifest_present"]
+    session_sidecar_present = primary["session_sidecar_present"]
+    naming_quality = primary["naming_quality"]
+    scores = primary["filename_scores"]
+    stem_count = primary["stem_file_count"]
+    master_candidates = primary["master_candidates"]
+    stem_audio_files = [True] * stem_count  # truthy for the report's `if`
 
     # Human report on stderr
     e = sys.stderr.write
     e("\n=== stems-to-mixdown / identify ===\n")
-    e(f"Directory:           {args.dir}\n")
-    e(f"Audio files:         {len(audio_files)} "
+    e(f"Root:                {args.dir}\n")
+    if resolved_dir and resolved_dir != root_survey["path"]:
+        e(f"Resolved:            {resolved_dir}\n")
+        e(f"  ({resolution_message})\n")
+    elif resolved_dir is None:
+        e(f"Resolved:            (none — see rationale)\n")
+    if nested_surveys:
+        e(f"Nested audio dirs:   {len(nested_surveys)} "
+          f"({sum(1 for s in nested_surveys if s['stem_file_count'] > 0)} with stems)\n")
+        for s in nested_surveys:
+            e(f"  - {s['path']}: "
+              f"{s['stem_file_count']} stem(s), "
+              f"{len(s['master_candidates'])} master candidate(s)\n")
+    e(f"Audio files:         {primary['audio_file_count']} "
       f"({stem_count} stem(s), {len(master_candidates)} master candidate(s))\n")
     if stem_audio_files:
         e(f"Filename quality:    {naming_quality} "

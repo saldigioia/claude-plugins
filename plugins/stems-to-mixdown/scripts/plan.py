@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -74,6 +75,114 @@ def derive_groups(stems: list[dict], manifest: dict) -> dict[str, list[str]]:
 
 ALLOWED_PAN_LAWS = (0.0, -2.5, -3.0, -4.5, -6.0)
 DEFAULT_PAN_LAW_DB = -3.0
+
+
+def pan_coefficients(pan_position: float, pan_law_db: float) -> tuple[float, float]:
+    """Return (L_coef, R_coef) for placing a mono signal at pan_position
+    in [-1.0, +1.0] under the declared pan law.
+
+    Constant-power curve (cos/sin) renormalized so the center coefficient
+    matches `10 ** (pan_law_db / 20)`. Centered placement returns
+    (center_coef, center_coef); fully-left returns (~1.0, 0); fully-right
+    returns (0, ~1.0). Values outside [-1, +1] clamp.
+
+    Note: 0 dB pan law produces super-unity coefficients at full-side
+    placement (math is inherent to the choice). The schema validator and
+    the planner already restrict pan_law_db to ALLOWED_PAN_LAWS; -3.0
+    (the default) gives ~unity at full-side without clipping.
+    """
+    p = max(-1.0, min(1.0, pan_position))
+    theta = (p + 1.0) * math.pi / 4.0
+    raw_L = math.cos(theta)
+    raw_R = math.sin(theta)
+    center_coef = 10 ** (pan_law_db / 20.0)
+    scale = center_coef * math.sqrt(2.0)
+    return raw_L * scale, raw_R * scale
+
+
+def auto_pan_positions(n: int) -> list[float]:
+    """Distribute n mono stems across the stereo field in [-1, +1].
+
+    Vocals and bass conventions live in `auto_pan_for_group()` — this is
+    the raw geometry. Symmetric, max-width capped at 0.7 to stay off the
+    hard sides (where mono compatibility starts to suffer); n=2 stays
+    conservative at ±0.5 (a "halfway" pair, the SOS / Mastering The Mix
+    convention for paired-stem placement).
+    """
+    if n <= 0:
+        return []
+    if n == 1:
+        return [0.0]
+    if n == 2:
+        return [-0.5, 0.5]
+    max_width = 0.7
+    return [(2 * i / (n - 1) - 1) * max_width for i in range(n)]
+
+
+def auto_pan_for_group(group_stems: list[dict]) -> dict[str, float]:
+    """Apply the auto-pan distribution rule (Cmd 20) to a group.
+
+    Conventions taken straight from the SOS / Mastering The Mix research
+    surfaced in docs/IMPROVEMENT-PLAN-v1.3.md (Phase 2):
+      - Vocals and bass stay center.
+      - Other mono stems spread evenly across the field with max width 0.7.
+      - Stereo stems are not re-panned (the plugin doesn't decorate stereo).
+
+    Returns {filename: pan_position in [-1, +1]}.
+    """
+    spreadable = [s for s in group_stems
+                  if s["channels"] == 1
+                  and s["classification"] not in ("vocal", "bass")]
+    positions = auto_pan_positions(len(spreadable))
+    out: dict[str, float] = {}
+    for s, pos in zip(spreadable, positions):
+        out[s["filename"]] = pos
+    for s in group_stems:
+        if s["channels"] == 1 and s["classification"] in ("vocal", "bass"):
+            out[s["filename"]] = 0.0
+    return out
+
+
+def resolve_pan_map(manifest: dict, group_stems: list[dict],
+                    use_auto_pan: bool) -> tuple[dict[str, float], str]:
+    """Pan-resolution priority: manifest pan: > auto-pan (if enabled) > defaults.
+
+    Returns ({filename: pan_position in [-1, +1]}, source_label).
+    Default for any mono stem not covered by either source: 0.0 (center).
+    Stereo stems are absent from the returned map — they're never panned.
+    """
+    raw_manifest_pan = manifest.get("pan") or {}
+    out: dict[str, float] = {}
+
+    # Apply manifest pan first (highest priority); convert -100..+100 to -1..+1.
+    for fn, val in raw_manifest_pan.items():
+        try:
+            v = float(val) / 100.0
+        except (TypeError, ValueError):
+            continue
+        out[fn] = max(-1.0, min(1.0, v))
+
+    # Auto-pan fills in stems the manifest didn't cover, when enabled.
+    if use_auto_pan:
+        auto = auto_pan_for_group(group_stems)
+        for fn, pos in auto.items():
+            if fn not in out:
+                out[fn] = pos
+
+    # Default centered for any mono stem still uncovered.
+    for s in group_stems:
+        if s["channels"] == 1 and s["filename"] not in out:
+            out[s["filename"]] = 0.0
+
+    if raw_manifest_pan and use_auto_pan:
+        source = "manifest+auto"
+    elif raw_manifest_pan:
+        source = "manifest"
+    elif use_auto_pan:
+        source = "auto"
+    else:
+        source = "default"
+    return out, source
 
 
 def resolve_pan_law(manifest_output: dict | None) -> tuple[float, bool]:
@@ -214,25 +323,30 @@ def decide_output_format(group_stems: list[dict], manifest_output: dict | None) 
 
 def build_filter_graph(group_stems: list[dict], target_rate: int, target_channels: int,
                        per_stem_gains: dict[str, float], pre_atten_db: float = 0.0,
-                       pan_law_db: float = DEFAULT_PAN_LAW_DB) -> str:
+                       pan_law_db: float = DEFAULT_PAN_LAW_DB,
+                       pan_map: dict[str, float] | None = None) -> str:
     """
     Construct an ffmpeg filter_complex graph for the group.
-    - Mono stems are upmixed to stereo via pan, with pan_law_db applied as a
-      per-channel gain coefficient (0 dB means full level both sides; -3 dB
-      means each side scaled by ~0.7079).
+    - Mono stems are upmixed to stereo via pan, placed at their declared
+      pan position (default 0 = center) using the constant-power curve
+      renormalized to the declared pan law (Cmd 16 + Cmd 20).
+    - Stereo stems are NOT re-panned (Cmd 20: the plugin doesn't decorate
+      stereo). The pan map applies to mono inputs only.
     - Stems with non-target rate get aresample.
     - Per-stem gain trim from manifest.
     - Uniform pre-attenuation in dB applied to every stem.
     - Final stage is amix=normalize=0 with weights=1.
     """
-    pan_coef = 10 ** (pan_law_db / 20.0)
+    pan_map = pan_map or {}
     chains = []
     labels = []
     for i, s in enumerate(group_stems):
         chain = f"[{i}:a]"
-        # Channel reconciliation
+        # Channel reconciliation + per-stem pan placement (mono only).
         if s["channels"] == 1 and target_channels == 2:
-            chain += f"pan=stereo|c0={pan_coef:.6f}*c0|c1={pan_coef:.6f}*c0,"
+            pan_position = pan_map.get(s["filename"], 0.0)
+            l_coef, r_coef = pan_coefficients(pan_position, pan_law_db)
+            chain += f"pan=stereo|c0={l_coef:.6f}*c0|c1={r_coef:.6f}*c0,"
         # Rate reconciliation
         if s["sample_rate"] != target_rate:
             chain += f"aresample=resampler=soxr:precision=28:osr={target_rate},"
@@ -467,6 +581,25 @@ def main() -> int:
                         help=("Override output directory. Default: a sibling "
                               "directory `<parent>/<dirname>-mixdowns/` so the "
                               "source folder is never written into."))
+    parser.add_argument("--auto-pan", action="store_true", default=False,
+                        help=("Spread mono stems classified the same (e.g. several "
+                              "percussion stems) across the stereo field with the "
+                              "default-distribution rule. Vocals and bass stay center. "
+                              "Stereo stems pass through unchanged. Cmd 20."))
+    parser.add_argument("--archival", action="store_true", default=False,
+                        help=("Produce unity-sum unprocessed output (the v1.2 behavior). "
+                              "Inverse of the default normalized listening master. "
+                              "Cmd 9 (revised in v1.3)."))
+    parser.add_argument("--target-lufs", type=float, default=None,
+                        help=("Integrated-loudness target in LUFS-I. Default -14 "
+                              "(Spotify / YouTube / Tidal / Amazon convention). "
+                              "-16 for Apple-Music-first delivery; -23 for EBU R128 "
+                              "broadcast. Manifest output.target_lufs overrides. (Cmd 9)"))
+    parser.add_argument("--target-true-peak", type=float, default=None,
+                        help=("True-peak ceiling in dBTP. Default -1.0 (modern "
+                              "streaming standard); -1.5 for conservative AAC/Ogg "
+                              "transcoding headroom; -2.0 for ATSC A/85 broadcast. "
+                              "Manifest output.target_true_peak overrides. (Cmd 9)"))
     args = parser.parse_args()
 
     if not args.analysis.is_file():
@@ -497,6 +630,39 @@ def main() -> int:
 
     pan_law_db, pan_law_was_default = resolve_pan_law(manifest_output)
     pan_law_coef = 10 ** (pan_law_db / 20.0)
+    # Auto-pan: CLI > manifest > false. CLI is opt-in only — the manifest's
+    # output.auto_pan: true is also respected so manifests stay reproducible.
+    manifest_auto_pan = bool((manifest_output or {}).get("auto_pan"))
+    use_auto_pan = bool(args.auto_pan) or manifest_auto_pan
+
+    # Cmd 9 (revised in v1.3): default deliverable is normalized to a
+    # streaming-compatible LUFS-I + true-peak ceiling. --archival or
+    # output.archival: true reverts to the v1.2 unity-sum behavior.
+    manifest_archival = bool((manifest_output or {}).get("archival"))
+    archival = bool(args.archival) or manifest_archival
+    manifest_target_lufs = (manifest_output or {}).get("target_lufs")
+    manifest_target_tp = (manifest_output or {}).get("target_true_peak")
+    target_lufs = (
+        float(args.target_lufs) if args.target_lufs is not None
+        else float(manifest_target_lufs) if manifest_target_lufs is not None
+        else -14.0
+    )
+    target_true_peak = (
+        float(args.target_true_peak) if args.target_true_peak is not None
+        else float(manifest_target_tp) if manifest_target_tp is not None
+        else -1.0
+    )
+    normalization_template: dict[str, Any] | None
+    if archival:
+        normalization_template = None
+    else:
+        normalization_template = {
+            "target_lufs": target_lufs,
+            "target_true_peak": target_true_peak,
+            "lra_target": 11.0,
+            "two_pass": True,
+            "method": "loudnorm+alimiter",
+        }
 
     plan_groups = []
     any_lie = False
@@ -513,17 +679,22 @@ def main() -> int:
             note += ". (Cmd 16)"
             fmt["rationale"] = fmt["rationale"] + " " + note
 
+        # Per-stem pan map (Cmd 20). Manifest pan: > auto-pan (if enabled) >
+        # default 0.0 for every mono stem. Stereo stems are absent from the
+        # map by design.
+        pan_map, pan_source = resolve_pan_map(manifest, group_stems, use_auto_pan)
+
         # Build the filter graph WITHOUT pre-attenuation, measure, then build the real one
         scout_graph = build_filter_graph(group_stems, fmt["rate"], fmt["channels"],
                                          per_stem_gains, pre_atten_db=0.0,
-                                         pan_law_db=pan_law_db)
+                                         pan_law_db=pan_law_db, pan_map=pan_map)
         measured_peak, measured_lufs = measure_mix_peak(directory, group_stems, scout_graph)
         pre_atten, pre_atten_rationale = compute_pre_attenuation(measured_peak)
 
         # Build the final filter graph with pre-attenuation
         final_graph = build_filter_graph(group_stems, fmt["rate"], fmt["channels"],
                                          per_stem_gains, pre_atten_db=pre_atten,
-                                         pan_law_db=pan_law_db)
+                                         pan_law_db=pan_law_db, pan_map=pan_map)
 
         # Output filename
         suffix = ".degenerate" if fmt["lie"] else ""
@@ -548,8 +719,17 @@ def main() -> int:
             "pan_law_db": pan_law_db,
             "pan_law_coefficient": pan_law_coef,
             "pan_law_was_default": pan_law_was_default,
+            "pan_map": {fn: pan_map[fn] for fn in filenames if fn in pan_map},
+            "pan_source": pan_source,
             "has_mono_stems": has_mono,
             "output_path": output_path,
+            # v1.3: per-group normalization config. None when --archival
+            # (the v1.2 unity-sum behavior); a dict when the group should
+            # be loudness-conditioned. mix.py reads this and runs the
+            # two-pass loudnorm + alimiter pipeline against the unity-sum
+            # intermediate when present.
+            "normalization": normalization_template,
+            "archival": archival,
         })
 
     # Reference bundle (Cmd 19). Plans the three-synced-versions deliverable
@@ -614,8 +794,39 @@ def main() -> int:
                 ),
             }
 
+    # v1.3: when normalization is on AND a master is present, plan a sibling
+    # <project>_master_listening.<ext> alongside the canonicals. The bundle
+    # itself stays unity-sum (Cmd 19 — null tests need un-normalized inputs);
+    # this is the listener-friendly version of the master.
+    master_listening: dict[str, Any] | None = None
+    if normalization_template is not None and master_ref is not None:
+        # Pick the bundle's format if present, otherwise the first group's.
+        ml_format = None
+        if reference_bundle is not None:
+            ml_format = reference_bundle["format"]
+        elif plan_groups:
+            ml_format = plan_groups[0]["format"]
+        if ml_format is not None:
+            ml_ext = {"flac": ".flac", "wav": ".wav", "aiff": ".aiff", "mp3": ".mp3"}[ml_format["format"]]
+            master_listening = {
+                "source": master_ref["path"],
+                "source_sha256": master_ref["sha256"],
+                "output_path": str(output_dir / f"{project}_master_listening{ml_ext}"),
+                "format": ml_format,
+                "normalization": dict(normalization_template),
+                "rationale": (
+                    "Normalized listening copy of the master at "
+                    f"{normalization_template['target_lufs']} LUFS-I / "
+                    f"{normalization_template['target_true_peak']} dBTP. "
+                    "Sits alongside the canonical mixdowns for A/B listening. "
+                    "The original master file is unmodified; the unity-sum "
+                    "version inside reference-bundle/ is what null tests run "
+                    "against. (Cmd 9 revised, Cmd 19)"
+                ),
+            }
+
     plan = {
-        "schema_version": "3",
+        "schema_version": "4",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "directory": str(directory),
         "output_directory": str(output_dir),
@@ -624,6 +835,7 @@ def main() -> int:
         "groups": plan_groups,
         "any_lie": any_lie,
         "reference_bundle": reference_bundle,
+        "master_listening": master_listening,
     }
 
     sys.stderr.write(render_plan_markdown(plan))

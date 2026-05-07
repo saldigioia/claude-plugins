@@ -23,9 +23,9 @@
       "classification": "bass",
       "classification_source": "regex",
       "true_peak_dbtp": -21.1,
-      "integrated_lufs": -22,
-      "loudness_range": 0,
-      "dc_offset_max": 0,
+      "integrated_lufs": -22.0,
+      "loudness_range": 0.0,
+      "dc_offset_max": 0.0,
       "silent_channels": [],
       "fully_silent": false,
       "tags": {
@@ -53,8 +53,8 @@
       "classification_source": "regex",
       "true_peak_dbtp": -21.1,
       "integrated_lufs": -21.8,
-      "loudness_range": 0,
-      "dc_offset_max": 0,
+      "loudness_range": 0.0,
+      "dc_offset_max": 0.0,
       "silent_channels": [],
       "fully_silent": false,
       "tags": {
@@ -68,7 +68,7 @@
     {
       "severity": "error",
       "code": "rate_mismatch",
-      "message": "Stems disagree on sample rate: [44100, 96000]. This is almost always a production bug. The skill will resample to the highest common rate via soxr precision 28 if --force is passed. → One or more stems will be resampled; resampling is a lossy operation (Cmd 4).",
+      "message": "Stems disagree on sample rate: [44100, 96000]. This is almost always a production bug. The skill will resample to the highest common rate via soxr precision 28 if --force is passed. \u2192 One or more stems will be resampled; resampling is a lossy operation (Cmd 4).",
       "affected": [
         "bass.mp3",
         "synth_lead.wav"
@@ -85,7 +85,7 @@
     {
       "severity": "warn",
       "code": "lossy_input",
-      "message": "Lossy inputs present (1 file(s)). Default output will be 16-bit / 44.1 kHz FLAC. → Output is capped at 16/44.1 because the source can't honestly carry more (Cmd 1 + 8).",
+      "message": "Lossy inputs present (1 file(s)). Default output will be 16-bit / 44.1 kHz FLAC. \u2192 Output is capped at 16/44.1 because the source can't honestly carry more (Cmd 1 + 8).",
       "affected": [
         "bass.mp3"
       ]

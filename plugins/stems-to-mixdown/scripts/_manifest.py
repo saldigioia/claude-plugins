@@ -36,9 +36,21 @@ MANIFEST_FILENAME = "stems.manifest.yaml"
 
 ALLOWED_OUTPUT_KEYS = {
     "format", "rate", "depth", "channels", "compression_level", "pan_law",
+    # v1.3: Phase 2 stereo-policy fields. `auto_pan` opts into the
+    # auto-distribution rule for groups of N classified-the-same mono stems.
+    "auto_pan",
+    # v1.3: Phase 3 normalization fields.
+    "target_lufs", "target_true_peak", "archival",
 }
 ALLOWED_PAN_LAWS = (0.0, -2.5, -3.0, -4.5, -6.0)
 ALLOWED_FORMATS = {"flac", "wav", "aiff", "mp3"}
+# v1.3: only -14, -16, -23 land on a documented streaming/broadcast spec.
+# Anything outside this set is almost certainly a mistake; the validator
+# warns and the planner clamps. See docs/research/2C-reference-loudness.md.
+ALLOWED_LUFS_TARGETS = (-14.0, -16.0, -23.0)
+# v1.3: -1.0 is the modern-streaming standard, -1.5 a slightly more
+# conservative ceiling for AAC/Ogg transcoding, -2.0 for ATSC A/85.
+ALLOWED_TRUE_PEAK_TARGETS = (-1.0, -1.5, -2.0)
 
 # Recognized keys inside the manifest's `source:` block. `master_reference` is
 # the master-witness opt-in (Cmd 19); the rest are provenance from sibling
@@ -61,6 +73,9 @@ ALLOWED_TOP_LEVEL_KEYS = {
     # source.model / source.source_mix; the master_reference block (Cmd 19)
     # opts the run into the reference-bundle deliverable.
     "source",
+    # v1.3: per-stem pan placement (Cmd 20). Maps filename → -100..+100
+    # pan position. Mono stems only; stereo entries warn and pass through.
+    "pan",
     # schema_version is informational; some scaffolds emit it.
     "schema_version",
 }
@@ -148,6 +163,68 @@ def validate_manifest(manifest: dict[str, Any]) -> list[str]:
                     f"manifest output.compression_level={output['compression_level']!r} "
                     f"is not an integer"
                 )
+        if "auto_pan" in output and output["auto_pan"] is not None:
+            if not isinstance(output["auto_pan"], bool):
+                warnings.append(
+                    f"manifest output.auto_pan={output['auto_pan']!r} is not a boolean; "
+                    f"treating as false"
+                )
+        if "target_lufs" in output and output["target_lufs"] is not None:
+            try:
+                tl = float(output["target_lufs"])
+                if tl not in ALLOWED_LUFS_TARGETS:
+                    warnings.append(
+                        f"manifest output.target_lufs={tl} not in {list(ALLOWED_LUFS_TARGETS)}; "
+                        f"will be clamped to nearest"
+                    )
+            except (TypeError, ValueError):
+                warnings.append(
+                    f"manifest output.target_lufs={output['target_lufs']!r} is not a number"
+                )
+        if "target_true_peak" in output and output["target_true_peak"] is not None:
+            try:
+                ttp = float(output["target_true_peak"])
+                if ttp not in ALLOWED_TRUE_PEAK_TARGETS:
+                    warnings.append(
+                        f"manifest output.target_true_peak={ttp} not in "
+                        f"{list(ALLOWED_TRUE_PEAK_TARGETS)}; will be clamped"
+                    )
+                if ttp > 0:
+                    warnings.append(
+                        f"manifest output.target_true_peak={ttp} dBTP is above 0; "
+                        f"this is a clipping invitation"
+                    )
+            except (TypeError, ValueError):
+                warnings.append(
+                    f"manifest output.target_true_peak={output['target_true_peak']!r} "
+                    f"is not a number"
+                )
+        if "archival" in output and output["archival"] is not None:
+            if not isinstance(output["archival"], bool):
+                warnings.append(
+                    f"manifest output.archival={output['archival']!r} is not a boolean; "
+                    f"treating as false"
+                )
+
+    pan = manifest.get("pan")
+    if pan is not None:
+        if not isinstance(pan, dict):
+            warnings.append(
+                f"manifest pan must be a mapping (filename -> -100..+100); "
+                f"got {type(pan).__name__}"
+            )
+        else:
+            for fn, val in pan.items():
+                try:
+                    pv = float(val)
+                    if not -100.0 <= pv <= 100.0:
+                        warnings.append(
+                            f"manifest pan[{fn!r}]={pv} out of -100..+100"
+                        )
+                except (TypeError, ValueError):
+                    warnings.append(
+                        f"manifest pan[{fn!r}]={val!r} is not a number"
+                    )
 
     source = manifest.get("source") or {}
     if isinstance(source, dict):

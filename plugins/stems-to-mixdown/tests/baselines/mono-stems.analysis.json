@@ -23,9 +23,9 @@
       "classification": "drums",
       "classification_source": "regex",
       "true_peak_dbtp": -18.1,
-      "integrated_lufs": -22,
-      "loudness_range": 0,
-      "dc_offset_max": 0,
+      "integrated_lufs": -22.0,
+      "loudness_range": 0.0,
+      "dc_offset_max": 0.0,
       "silent_channels": [],
       "fully_silent": false,
       "tags": {
@@ -53,8 +53,8 @@
       "classification_source": "regex",
       "true_peak_dbtp": -18.1,
       "integrated_lufs": -21.8,
-      "loudness_range": 0,
-      "dc_offset_max": 0,
+      "loudness_range": 0.0,
+      "dc_offset_max": 0.0,
       "silent_channels": [],
       "fully_silent": false,
       "tags": {
@@ -82,8 +82,8 @@
       "classification_source": "regex",
       "true_peak_dbtp": -18.1,
       "integrated_lufs": -21.3,
-      "loudness_range": 0,
-      "dc_offset_max": 0,
+      "loudness_range": 0.0,
+      "dc_offset_max": 0.0,
       "silent_channels": [],
       "fully_silent": false,
       "tags": {
@@ -98,6 +98,16 @@
       "severity": "warn",
       "code": "pan_law_default_assumed",
       "message": "Mono stems present and manifest output.pan_law is unset. Defaulting to -3.0 dB pan law (Logic / Cubase convention; Pro Tools default is -2.5 dB; legacy 0 dB is +3 dB hotter than any DAW-equivalent center sum). Set output.pan_law in the manifest to declare it explicitly. See references/format-decisions.md.",
+      "affected": [
+        "kick.wav",
+        "snare.wav",
+        "vox_lead.wav"
+      ]
+    },
+    {
+      "severity": "warn",
+      "code": "mono_pile_at_center",
+      "message": "3 mono stems will sum to center (kick.wav, snare.wav, vox_lead.wav). The result is mono-in-a-stereo-container. Either declare a `pan:` map in the manifest, set `output.auto_pan: true`, or pass --auto-pan to spread them across the field. (Cmd 20)",
       "affected": [
         "kick.wav",
         "snare.wav",

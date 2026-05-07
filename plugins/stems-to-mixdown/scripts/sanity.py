@@ -181,6 +181,37 @@ def sanity_check(stems: list[StemInfo],
             affected=[s.filename for s in stems if s.channels == 1],
         ))
 
+    # Cmd 20 — multiple mono stems all summing to center is mono-in-a-stereo-
+    # container. Warn (not error); the operator can opt into --auto-pan or
+    # declare a manifest pan: map.
+    manifest_pan = (manifest or {}).get("pan") or {}
+    use_auto_pan = bool(((manifest or {}).get("output") or {}).get("auto_pan"))
+    mono_at_center = [s.filename for s in stems
+                      if s.channels == 1 and s.filename not in manifest_pan]
+    if not use_auto_pan and len(mono_at_center) >= 3:
+        flags.append(RedFlag(
+            "warn", "mono_pile_at_center",
+            f"{len(mono_at_center)} mono stems will sum to center "
+            f"({', '.join(mono_at_center[:5])}{'...' if len(mono_at_center) > 5 else ''}). "
+            "The result is mono-in-a-stereo-container. Either declare a "
+            "`pan:` map in the manifest, set `output.auto_pan: true`, or "
+            "pass --auto-pan to spread them across the field. (Cmd 20)",
+            affected=mono_at_center,
+        ))
+
+    # Manifest pan on a stereo stem is a no-op — the plugin does not re-pan
+    # stereo (Cmd 20). Surface so the operator notices.
+    stereo_filenames = {s.filename for s in stems if s.channels == 2}
+    pan_on_stereo = [fn for fn in manifest_pan if fn in stereo_filenames]
+    if pan_on_stereo:
+        flags.append(RedFlag(
+            "warn", "pan_on_stereo_ignored",
+            f"manifest pan: entries for stereo stems "
+            f"({', '.join(pan_on_stereo)}) will be ignored — the plugin "
+            f"does not re-pan stereo inputs. (Cmd 20)",
+            affected=pan_on_stereo,
+        ))
+
     rates = {s.sample_rate for s in stems if s.sample_rate}
     if len(rates) > 1:
         flags.append(RedFlag(

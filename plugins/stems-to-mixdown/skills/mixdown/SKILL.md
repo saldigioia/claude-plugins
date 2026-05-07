@@ -26,20 +26,27 @@ A conservative mixdown engineer in script form. Reads a directory of stems, refu
 When the directory is unambiguous (well-named stems, optional master alongside, no Pro Tools artifacts), one command does the whole pipeline:
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/../../scripts/run.py" --dir <stems-folder>
+python3 "${CLAUDE_SKILL_DIR}/../../scripts/run.py" --dir <stems-or-project-folder>
 ```
 
-`run.py` surveys first, then chains identify → analyze → plan → mix → verify with auto-decisions. It auto-detects a master file in the folder (any file named `master`, `final`, `released`, `reference`, or `bounce_final`), uses it for the reference bundle, and excludes it from the stem walk. Pass `--yes` to skip the plan-approval prompt; `--preview` and `--solo` add the listening-copy and per-stem-QC bounces. The per-pass scripts below remain available for power users who want intermediate JSON or to re-run a single step.
+`run.py` surveys first, then chains identify → analyze → plan → mix → verify with auto-decisions:
 
-## What you're getting (three tiers)
+- **Folder shape detection (v1.3).** `--dir` may point at the audio dir itself OR at a project folder containing one nested audio dir; identify hops one level deeper without prompting. Multiple sibling audio dirs is the only surviving prompt path.
+- **Master auto-detection.** Any file in the audio dir named `master`, `final`, `released`, `reference`, or `bounce_final` (and not classifying as a stem) is treated as the master reference; it gets excluded from the stem walk and drives the reference bundle. `--no-auto-master` disables; `--master <path>` overrides.
+- **Default normalized output (v1.3 / Cmd 9 revised).** The canonical mixdown ships at -14 LUFS-I / -1 dBTP via two-pass loudnorm + true-peak limiter — the 2025–2026 streaming consensus, ready to send. Pass `--archival` to get the v1.2 unity-sum behavior. `--target-lufs -16` for Apple-first delivery; `--target-lufs -23` for EBU R128 broadcast.
+- **Stereo always (v1.3 / Cmd 20).** Mono stems are panned via the constant-power curve renormalized to the declared pan law; the manifest's `pan:` map (per-stem -100..+100) overrides; `--auto-pan` opts into auto-distribution for groups of N classified-the-same mono stems (vocals + bass stay center).
+
+`--yes` skips the plan-approval prompt; `--solo` adds per-stem QC bounces. The per-pass scripts below remain available for power users who want intermediate JSON or to re-run a single step.
+
+## What you're getting (three tiers, v1.3 revised)
 
 | Tier | What it is | How to get it | Doctrine |
 |---|---|---|---|
-| **Technical rough mix** | Unity sum of the stems with no creative processing. The default. | `mix.py` with no manifest. | Cmd 2 (sum at unity) |
-| **Balanced demo mix** | Above + per-stem manifest gain trims for fixing balance bugs upstream of this skill. | Manifest with `gains:` set. | Cmd 12 (manifest is the override), Cmd 2 |
-| **Release-quality master** | Loudness target + EQ + compression + limiting + creative judgment. | **Out of scope.** A separate stage with separate tools. | Cmd 9 (loudness normalization is not mastering) |
+| **Listening master** _(default)_ | Unity sum + two-pass loudnorm to -14 LUFS-I + true-peak limit at -1 dBTP. Universal-streaming-compatible; ready to send. No EQ, no compression, no spectral processing — strictly loudness conditioning. | `mix.py` (or `run.py`) with no extra flags. | Cmd 9 (revised), Cmd 2 (still sums at unity inside) |
+| **Archival unity-sum** | Bit-exact sum of the stems, no loudness conditioning. The reference for null tests, the source for downstream mastering, the v1.2 default. | `--archival` (or `output.archival: true`). | Cmd 2, Cmd 9 (revised; archival path still honors the original framing) |
+| **Release-quality master** | Loudness target + EQ + compression + limiting + creative judgment. | **Out of scope.** Use a mastering tool. | Cmd 9 (mastering vs. loudness conditioning is a structural distinction) |
 
-The skill produces the first two tiers. It refuses to produce the third — `--preview` exists for headphone listening, not delivery (Cmd 17).
+The default deliverable is the listening master. Pass `--archival` when you need the unity-sum file (e.g. for null testing against a DAW bounce, or when the file will be mastered downstream). The reference bundle (Cmd 19) always uses unity-sum internally regardless of which mode the canonical was rendered in — null tests against the master only work on un-normalized signals.
 
 ## With a master reference (auto-detected, or opt-in)
 

@@ -100,8 +100,18 @@ def main() -> int:
     parser.add_argument("--force", action="store_true",
                         help=("Continue past Pass 2 red flags (rate mismatch, etc.) "
                               "and re-mix even when an idempotency key matches."))
-    parser.add_argument("--preview", action="store_true",
-                        help="Pass --preview to mix.py (loudness-normalized listening copy).")
+    parser.add_argument("--archival", action="store_true",
+                        help=("Produce unity-sum unprocessed output (the v1.2 default). "
+                              "Inverse of the v1.3 normalized listening master. (Cmd 9 revised)"))
+    parser.add_argument("--target-lufs", type=float, default=None,
+                        help=("Integrated-loudness target in LUFS-I. Default -14 "
+                              "(streaming consensus); -16 for Apple-first; -23 for EBU R128."))
+    parser.add_argument("--target-true-peak", type=float, default=None,
+                        help=("True-peak ceiling in dBTP. Default -1.0; -1.5 for "
+                              "conservative AAC headroom; -2.0 for ATSC A/85."))
+    parser.add_argument("--auto-pan", action="store_true",
+                        help=("Spread N classified-the-same mono stems across the field; "
+                              "vocals + bass stay center. (Cmd 20)"))
     parser.add_argument("--solo", action="store_true",
                         help="Pass --solo to mix.py (per-stem QC bounces).")
     parser.add_argument("--check-mono-fold", action="store_true",
@@ -159,6 +169,18 @@ def main() -> int:
         )
         return 1
 
+    # Phase 1 (v1.3): identify may have hopped one level deeper to find the
+    # actual audio directory. Use resolved_directory for everything downstream;
+    # the operator still sees what they typed in artifacts.
+    resolved = identify.get("resolved_directory")
+    if resolved and resolved != str(args.dir.resolve()):
+        sys.stderr.write(
+            f"[info] descending into {resolved} (the only nested audio dir).\n"
+        )
+        analyze_target = Path(resolved)
+    else:
+        analyze_target = args.dir
+
     # ---- Pass 0b — Pro Tools track-name borrow (only if recommended) ----
     if rec == "run_pass0_pt_intake":
         _pretty("Pro Tools track-name intake (Pass 0b)")
@@ -175,7 +197,7 @@ def main() -> int:
 
     # ---- Pass 1+2 — analyze ----
     _pretty("analyze (Pass 1+2)")
-    cmd = ["python3", str(SCRIPTS / "analyze.py"), "--dir", str(args.dir)]
+    cmd = ["python3", str(SCRIPTS / "analyze.py"), "--dir", str(analyze_target)]
     if args.master is not None:
         cmd += ["--master", str(args.master)]
     if args.no_auto_master:
@@ -196,12 +218,24 @@ def main() -> int:
 
     # ---- Pass 3 — plan ----
     _pretty("plan (Pass 3)")
+    # Always pass --output-dir so artifacts and mixdowns land in the same
+    # tree the orchestrator computed up front. Without this, plan.py would
+    # default to <analyze_target>/../<analyze_target.name>-mixdowns/ and
+    # the artifacts (in <args.dir>/../<args.dir.name>-mixdowns/.s2m/run/)
+    # would diverge from the canonical mixdowns when run.py descended.
     cmd = [
         "python3", str(SCRIPTS / "plan.py"),
         "--analysis", str(analysis_json),
+        "--output-dir", str(output_dir),
     ]
-    if args.output_dir is not None:
-        cmd += ["--output-dir", str(args.output_dir)]
+    if args.archival:
+        cmd.append("--archival")
+    if args.target_lufs is not None:
+        cmd += ["--target-lufs", str(args.target_lufs)]
+    if args.target_true_peak is not None:
+        cmd += ["--target-true-peak", str(args.target_true_peak)]
+    if args.auto_pan:
+        cmd.append("--auto-pan")
     r = _run(cmd, capture_stdout=True)
     if r.stdout:
         plan_json.write_text(r.stdout)
@@ -227,8 +261,6 @@ def main() -> int:
     # ---- Pass 4 — mix ----
     _pretty("mix (Pass 4)")
     cmd = ["python3", str(SCRIPTS / "mix.py"), "--plan", str(plan_json), "--yes"]
-    if args.preview:
-        cmd.append("--preview")
     if args.solo:
         cmd.append("--solo")
     if args.force:

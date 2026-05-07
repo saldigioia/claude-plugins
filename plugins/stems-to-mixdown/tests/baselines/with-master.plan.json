@@ -1,5 +1,5 @@
 {
-  "schema_version": "3",
+  "schema_version": "4",
   "directory": "TESTROOT/tests/fixtures/with-master",
   "output_directory": "TESTROOT/tests/fixtures/with-master-mixdowns",
   "project": "with-master",
@@ -37,16 +37,26 @@
       "scout_filter_graph": "[0:a]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
       "measured_peak_dbtp": -21.1,
       "measured_lufs": -21.8,
-      "pre_attenuation_db": 0,
-      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "pre_attenuation_db": 0.0,
+      "pre_attenuation_rationale": "Peak -21.10 dBTP \u2014 comfortable headroom, no attenuation. (Cmd 3)",
       "per_stem_gains": {
-        "vox_lead.wav": 0
+        "vox_lead.wav": 0.0
       },
-      "pan_law_db": -3,
+      "pan_law_db": -3.0,
       "pan_law_coefficient": 0.7079457843841379,
       "pan_law_was_default": true,
+      "pan_map": {},
+      "pan_source": "default",
       "has_mono_stems": false,
-      "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_acapella.flac"
+      "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_acapella.flac",
+      "normalization": {
+        "target_lufs": -14.0,
+        "target_true_peak": -1.0,
+        "lra_target": 11.0,
+        "two_pass": true,
+        "method": "loudnorm+alimiter"
+      },
+      "archival": false
     },
     {
       "name": "instrumental",
@@ -74,17 +84,27 @@
       "scout_filter_graph": "[0:a][1:a]amix=inputs=2:duration=longest:normalize=0:weights=1 1[mix]",
       "measured_peak_dbtp": -16.6,
       "measured_lufs": -21.5,
-      "pre_attenuation_db": 0,
-      "pre_attenuation_rationale": "Peak -16.60 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
+      "pre_attenuation_db": 0.0,
+      "pre_attenuation_rationale": "Peak -16.60 dBTP \u2014 comfortable headroom, no attenuation. (Cmd 3)",
       "per_stem_gains": {
-        "bass.wav": 0,
-        "drums.wav": 0
+        "bass.wav": 0.0,
+        "drums.wav": 0.0
       },
-      "pan_law_db": -3,
+      "pan_law_db": -3.0,
       "pan_law_coefficient": 0.7079457843841379,
       "pan_law_was_default": true,
+      "pan_map": {},
+      "pan_source": "default",
       "has_mono_stems": false,
-      "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_instrumental.flac"
+      "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_instrumental.flac",
+      "normalization": {
+        "target_lufs": -14.0,
+        "target_true_peak": -1.0,
+        "lra_target": 11.0,
+        "two_pass": true,
+        "method": "loudnorm+alimiter"
+      },
+      "archival": false
     }
   ],
   "any_lie": false,
@@ -114,11 +134,11 @@
       "sample_fmt": "s32",
       "channels": 2,
       "channel_layout": "stereo",
-      "duration_sec": 2,
+      "duration_sec": 2.0,
       "duration_samples": 96000,
       "true_peak_dbtp": -12.9,
       "integrated_lufs": -18.6,
-      "loudness_range": 0,
+      "loudness_range": 0.0,
       "source": "manifest",
       "duration_tolerance_samples": 1
     },
@@ -148,5 +168,30 @@
       }
     ],
     "rationale": "Three perfectly synchronized versions: master + instrumental + acapella, all at flac 48000 Hz / 24-bit / 2ch. The master is the witness, not the source (Cmd 19). Verify will null-test (instrumental + acapella) against the master and report the residual."
+  },
+  "master_listening": {
+    "source": "TESTROOT/tests/fixtures/with-master/song_master.flac",
+    "source_sha256": "70f9ca7204784dbe514a8471b9e9089fe8f90ac782e66ca3e3a5c46a50aadc27",
+    "output_path": "TESTROOT/tests/fixtures/with-master-mixdowns/with-master_master_listening.flac",
+    "format": {
+      "format": "flac",
+      "codec": "flac",
+      "container": "flac",
+      "rate": 48000,
+      "depth": 24,
+      "channels": 2,
+      "dither_required": false,
+      "lie": false,
+      "rationale": "Uniform lossless: 48000 Hz / 24-bit FLAC. (Cmd 1)",
+      "compression_level": 8
+    },
+    "normalization": {
+      "target_lufs": -14.0,
+      "target_true_peak": -1.0,
+      "lra_target": 11.0,
+      "two_pass": true,
+      "method": "loudnorm+alimiter"
+    },
+    "rationale": "Normalized listening copy of the master at -14.0 LUFS-I / -1.0 dBTP. Sits alongside the canonical mixdowns for A/B listening. The original master file is unmodified; the unity-sum version inside reference-bundle/ is what null tests run against. (Cmd 9 revised, Cmd 19)"
   }
 }

@@ -24,7 +24,7 @@
       "classification_source": "default",
       "true_peak_dbtp": -21.2,
       "integrated_lufs": -32.2,
-      "loudness_range": 0,
+      "loudness_range": 0.0,
       "dc_offset_max": 0.05,
       "silent_channels": [],
       "fully_silent": false,
@@ -51,10 +51,10 @@
       "duration_samples": 24000,
       "classification": "other",
       "classification_source": "default",
-      "true_peak_dbtp": -1.7976931348623157e+308,
-      "integrated_lufs": -70,
-      "loudness_range": 0,
-      "dc_offset_max": 0,
+      "true_peak_dbtp": -Infinity,
+      "integrated_lufs": -70.0,
+      "loudness_range": 0.0,
+      "dc_offset_max": 0.0,
       "silent_channels": [
         0,
         1
@@ -85,8 +85,8 @@
       "classification_source": "regex",
       "true_peak_dbtp": -18.1,
       "integrated_lufs": -21.3,
-      "loudness_range": 0,
-      "dc_offset_max": 0,
+      "loudness_range": 0.0,
+      "dc_offset_max": 0.0,
       "silent_channels": [],
       "fully_silent": false,
       "tags": {
@@ -109,7 +109,7 @@
     {
       "severity": "warn",
       "code": "dc_offset",
-      "message": "dc_offset_stem.wav has DC offset of 0.0500 — analog stage problem upstream. → Silent budget eaten and asymmetric clipping likely; investigate the recording chain.",
+      "message": "dc_offset_stem.wav has DC offset of 0.0500 \u2014 analog stage problem upstream. \u2192 Silent budget eaten and asymmetric clipping likely; investigate the recording chain.",
       "affected": [
         "dc_offset_stem.wav"
       ]

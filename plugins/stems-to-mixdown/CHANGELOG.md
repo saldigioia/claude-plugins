@@ -1,8 +1,123 @@
 # Changelog
 
-All notable changes between the April 2026 prototype and the v1.2 release.
+All notable changes between the April 2026 prototype and the v1.3 release.
 Dates are UTC. Each entry below maps to one or more commits on `main`; see
 `docs/decisions/index.md` for the decision record per phase.
+
+## [1.3.0] — 2026-05-07
+
+Three behavior changes plus one doctrine revision. The default deliverable
+is now a normalized listening master, the pipeline auto-descends into
+project folders, and stereo output is codified as policy with a per-stem
+manifest pan map.
+
+### Doctrine
+
+- **Cmd 9 revised — "Loudness normalization is not mastering — but the
+  deliverable should be listenable."** The plugin now applies two-pass
+  loudnorm to a streaming-compatible target (-14 LUFS-I default) plus a
+  true-peak limiter (-1 dBTP default) on the canonical output. Mastering
+  (creative EQ, compression, character) remains structurally out of scope.
+  The unity-sum-only behavior is preserved bit-for-bit behind `--archival`
+  (CLI) or `output.archival: true` (manifest). Decision recorded at
+  `docs/decisions/2026-05-cmd-9-revision.md`.
+- **Cmd 20 added — "Stereo is the deliverable. Mono is the source format.
+  Don't decorate it."** Codifies that pseudo-stereo treatments (Haas-effect
+  doubling, decorrelators, mid-side widening of mono inputs) are out of
+  scope; mono stems are panned via constant-power curve + declared pan law
+  (Cmd 16) and nothing else. Backed by the 2025–2026 consensus across
+  Sound on Sound, Mastering The Mix, Mixing Monster, and the ISMIR
+  mono-to-stereo literature; full citations in
+  `docs/IMPROVEMENT-PLAN-v1.3.md` Phase 2.
+
+### Added
+
+- **`scripts/run.py` folder shape detection.** When `--dir` points at a
+  project folder with no top-level audio but exactly one nested audio dir,
+  identify descends silently. Multiple sibling audio dirs is the only
+  surviving prompt path. New fields in `identify.json` (schema 3):
+  `audio_locations`, `resolved_directory`, `resolution_reason`,
+  `resolution_message`. New `--max-depth` flag on identify.py (default 3).
+- **Default normalization pipeline.** `mix.py` now renders the unity sum
+  to a 32-bit float intermediate, runs first-pass `loudnorm` to measure,
+  then second-pass `loudnorm` (gain-only via `linear=true`) + `alimiter`
+  (true-peak ceiling) + dither + encode. Sidecar `.log.md` records the
+  unity-sum intermediate measurements, the loudnorm first-pass JSON, and
+  the second-pass filter chain alongside the existing input/output blocks.
+  Three new CLI flags on `plan.py` and `run.py`: `--archival` (opt out
+  of normalization), `--target-lufs` (default -14, allowed -14/-16/-23),
+  `--target-true-peak` (default -1.0, allowed -1.0/-1.5/-2.0). Manifest
+  equivalents: `output.archival`, `output.target_lufs`,
+  `output.target_true_peak`.
+- **`<project>_master_listening.<ext>`.** When normalization is on AND a
+  master is declared, the plugin produces a normalized version of the
+  master alongside the canonical mixdowns. The `reference-bundle/`
+  directory still contains the unity-sum master (Cmd 19) — null tests
+  only work on un-normalized signals. `execute_master_listening` runs
+  the same two-pass loudnorm pipeline against the original master file;
+  the original master is never modified.
+- **Manifest `pan:` map.** Per-stem placement: `pan: { vox.wav: 0,
+  bgL.wav: -50, bgR.wav: 50 }`. Values are -100..+100; mono stems get
+  the constant-power upmix at the requested position renormalized to the
+  declared pan law. Stereo stems are not re-panned (Cmd 20); a
+  `pan_on_stereo_ignored` warn fires when the manifest sets pan on
+  stereo inputs.
+- **`--auto-pan` flag (CLI + `output.auto_pan` manifest field).** Spreads
+  N classified-the-same mono stems across the field; vocals and bass
+  always center. Symmetric, max-width 0.7 to keep mono compatibility.
+  Warn `mono_pile_at_center` (sanity.py) fires when ≥3 mono stems would
+  otherwise sum to center and no `pan:` map is present.
+- **Reference bundle re-renders unity-sum members from scratch.** When
+  the canonical is normalized, `execute_reference_bundle` renders
+  unity-sum versions of `instrumental` and `acapella` directly from each
+  group's filter graph (instead of copying the canonical). When
+  `--archival` is set the canonical IS unity-sum, so the bundle copies
+  it as before. `verify.py`'s reference battery uses the bundle's
+  unity-sum members for the recombine + inverse-stems nulls (with the
+  canonical paths as fallback for `--archival` runs).
+- **`tests/test_pan_distribution.py`** — pan-coefficient math + auto-pan
+  distribution rule + manifest > auto > default precedence (5 case
+  groups, ~25 individual assertions).
+- **`docs/IMPROVEMENT-PLAN-v1.3.md`** — the planning document this
+  release executes against.
+- **`docs/decisions/2026-05-cmd-9-revision.md`** — the doctrine-revision
+  record.
+
+### Changed
+
+- **`plan.json` schema bumped to "4".** Each group gains
+  `normalization: { target_lufs, target_true_peak, lra_target, two_pass,
+  method }` (or null for archival groups), `archival: bool`, `pan_map:
+  { ... }`, `pan_source: "manifest" | "auto" | "manifest+auto" |
+  "default"`. New top-level `master_listening` block (or null).
+- **`identify.json` schema bumped to "3".** Adds `audio_locations`,
+  `resolved_directory`, `resolution_reason`, `resolution_message`.
+- **Skill description trimmed.** SKILL.md and `plugin.json` lead with
+  the listening-master default.
+- **Idempotency key incorporates normalization config + archival flag.**
+  Flipping `--archival` or changing `--target-lufs` correctly invalidates
+  the sidecar cache.
+- **`tests/assert-audio-shas.sh`** runs the `--archival` path so the
+  preserved v1.2 baselines still apply byte-for-byte.
+- **Cmd 17 (`--preview`) is gone from `run.py`.** The canonical IS the
+  listening copy now; `--preview` on `mix.py` directly is preserved for
+  back-compat but the rationale is moot.
+
+### Migration
+
+- **Default audio bytes change.** Every fixture's canonical mixdown is
+  now normalized; the v1.2 audio-MD5 baselines apply to `--archival`
+  runs only. To restore the v1.2 default behavior on every run, set
+  `output.archival: true` in `stems.manifest.yaml` or alias your
+  invocation: `alias s2m='python3 .../run.py --archival'`.
+- **Project folders just work.** `python3 scripts/run.py --dir
+  ~/Music/some-song/` now descends into a single nested audio dir
+  automatically; no need to point at the audio subdirectory directly.
+- **The reference bundle is unchanged on disk** when `--archival` is
+  set. When normalized, the bundle's `instrumental.flac` and
+  `acapella.flac` are unity-sum re-renders from the original stems
+  (byte-identical to what v1.2 would have produced) — only the canonical
+  files outside the bundle are normalized.
 
 ## [1.2.0] — 2026-05-06
 

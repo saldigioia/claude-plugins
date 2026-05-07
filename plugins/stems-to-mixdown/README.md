@@ -33,7 +33,7 @@ Each `.log.md` is a sidecar with input SHA-256s, the exact ffmpeg command, the f
 
 ## With a master reference (auto-detected, or opt-in)
 
-Drop the released master into the same folder as the stems and the skill picks it up automatically — any file named `master`, `final`, `released`, `reference`, or `bounce_final` (and not classifying as a stem) is treated as the master reference. To override or be explicit, declare `source.master_reference.path` in `stems.manifest.yaml` or pass `--master <path>` to `analyze.py` / `run.py`. Either way, the skill produces a `reference-bundle/` containing three perfectly synchronized files (master + instrumental + acapella) at identical rate / depth / channels. Pass 5 runs the reference battery: recombine null `(instrumental + acapella) - master`, two diagnostic inverse-stems nulls, and per-deliverable LUFS-I / dBTP deltas vs the master. The master is the witness, not the source — the skill refuses to resample, requantize, or trim it. (Cmd 19.)
+Drop the released master into the same folder as the stems and the skill picks it up automatically — any file named `master`, `final`, `released`, `reference`, or `bounce_final` (and not classifying as a stem) is treated as the master reference. To override or be explicit, declare `source.master_reference.path` in `stems.manifest.yaml` or pass `--master <path>` to `analyze.py` / `run.py`. Either way, the skill produces a `reference-bundle/` containing three perfectly synchronized files (master + instrumental + acapella) at identical rate / depth / channels — always unity-sum internally so null tests work. When the canonical mixdowns are normalized (the v1.3 default), a sibling `<project>_master_listening.<ext>` is also produced as a normalized A/B copy of the master. Pass 5 runs the reference battery: recombine null `(instrumental + acapella) - master`, two diagnostic inverse-stems nulls, and per-deliverable LUFS-I / dBTP deltas vs the master. The master is the witness, not the source — the skill refuses to resample, requantize, or trim it. (Cmd 19.)
 
 ## One-shot mode (the obvious case)
 
@@ -43,7 +43,7 @@ For a folder that's unambiguous (well-named stems, optional master alongside, no
 python3 scripts/run.py --dir /path/to/some-track-stems --yes
 ```
 
-It surveys the directory, runs identify → analyze → plan → mix → verify in order, and stops at the first red flag (use `--force` to push past Pass 2 errors). The per-pass scripts below remain available for power users who want intermediate JSON or to re-run a single step.
+`--dir` may point at the audio dir itself OR at a project folder containing one nested audio dir; identify hops one level deeper without prompting. The default deliverable is a **listening master** normalized to -14 LUFS-I / -1 dBTP (universally streaming-compatible). Pass `--archival` for the v1.2 unity-sum behavior, `--target-lufs -16` for Apple-Music-first delivery, or `--target-lufs -23` for EBU R128 broadcast. The per-pass scripts below remain available for power users who want intermediate JSON or to re-run a single step.
 
 ## Install
 

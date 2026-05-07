@@ -71,3 +71,17 @@ Five research notes produced, no code changes. Each names the action it triggers
 ## Phase 2 DoD
 
 Five `docs/research/*.md` files committed. This index names each next-phase action. Phase 3 (reconfiguration) can now begin with research-informed targets rather than informed by re-discovery.
+
+---
+
+## v1.3 — folder shape, stereo policy, Cmd 9 revision (2026-05-07)
+
+Three behavior changes plus one doctrine revision shipped together. Reference document: `docs/IMPROVEMENT-PLAN-v1.3.md`.
+
+| Phase | Decision | Doctrine effect | Triggers |
+|---|---|---|---|
+| v1.3-1 | identify.py walks one level deeper; `run.py` descends silently into a single nested audio dir | None | identify.json schema 3 |
+| v1.3-2 | Cmd 20 added: stereo is the deliverable, mono panned via constant-power + declared pan law, pseudo-stereo refused; manifest `pan:` map + `--auto-pan` for placement | New §20 | Cmd 6 (mono fold) check still gates |
+| v1.3-3 | **Cmd 9 revised**: default deliverable is normalized to -14 LUFS-I / -1 dBTP via two-pass loudnorm + alimiter; `--archival` preserves v1.2 behavior | §9 rewritten; full record at [`2026-05-cmd-9-revision.md`](2026-05-cmd-9-revision.md) | plan.json schema 4; new `master_listening` member; bundle re-renders unity-sum from stems when canonical is normalized |
+
+v1.3 DoD met when all five existing fixtures pass under both default-normalized and `--archival` paths, and the with-master fixture's recombine-null verdict stays `pass` against the bundle's unity-sum members.
