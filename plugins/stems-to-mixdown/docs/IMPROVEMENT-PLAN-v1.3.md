@@ -338,8 +338,6 @@ These are deliberately listed at the end so they're seen and resolved before Pha
 
 5. **Reference-bundle naming convention with the new default.** Today the bundle's `<project>_master.<ext>` is the unity-sum. In v1.3 it's still the unity-sum (the bundle uses archival internally). Should there be a fourth member, `<project>_master_listening.<ext>`, at the normalized -14 LUFS? Recommendation: yes, but as a sibling of the bundle dir, not inside it — the bundle's three-synced-versions promise depends on identical loudness, which the listening copy violates by design.
 
-6. **What about the `stems-from-mix` sibling skill?** Its hand-off manifest and stem regex are unchanged. The downstream `stems-to-mixdown` v1.3 default applies normalization to its mixdowns the same way it would to any other stems. No change needed in `stems-from-mix` itself, but the `stems-from-mix` README should link to the v1.3 CHANGELOG section about Cmd 9 so a separation→bounce user understands the new default.
-
 ---
 
 ## What "v1.3 ready" looks like

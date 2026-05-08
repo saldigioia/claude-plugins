@@ -147,7 +147,7 @@ needed.
 ## Pro Tools intake (Pass 0)
 
 When stems are badly named or come from a Pro Tools session export,
-`scripts/import_pt_track_names.py` reads a "Session Info as Text" export
+`stems_to_mixdown/import_pt_track_names.py` reads a "Session Info as Text" export
 and writes:
 
 - `stems.session.yaml` — full structural context (session metadata,

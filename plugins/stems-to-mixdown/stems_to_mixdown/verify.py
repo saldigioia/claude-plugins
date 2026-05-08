@@ -26,9 +26,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _measure  # noqa: E402
-from _version import __version__  # noqa: E402
+# Allow `python3 stems_to_mixdown/verify.py` invocation alongside `python3 -m stems_to_mixdown.verify`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from stems_to_mixdown import _measure  # noqa: E402
+from stems_to_mixdown._version import __version__  # noqa: E402
 
 
 def ffprobe_json(path: Path) -> dict:

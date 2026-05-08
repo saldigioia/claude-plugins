@@ -1,5 +1,7 @@
 # `stems-to-mixdown` — improvement plan
 
+> **SUPERSEDED 2026-05-08.** Phase 6 of this plan calls for a `stems-from-mix` sibling skill (demucs wrapper). That direction was rejected; source separation from a finished mix is out of scope for this plugin by design. See `docs/decisions/index.md` ADR 2D. Phase 6 and the ADR-style "2D — Demucs as a sibling skill" section are dead. The plan is preserved as a historical artifact for the other phases that did ship.
+
 _End state: a highly-opinionated, capable Claude skill that an archivist would trust with irreplaceable multitracks and a non-expert mixer can drive without learning ffmpeg. Reference document: `REVIEW-2026-05.md`._
 
 This plan is sequenced for safe application. Phase 1 fixes audio defects. Phase 2 is research that informs Phase 3+. Phases 3 and 4 reshape the codebase. Phase 5 sharpens the doctrine. Phase 6 is an optional sibling skill. Phase 7 ships v1.0.

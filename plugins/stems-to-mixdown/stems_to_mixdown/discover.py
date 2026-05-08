@@ -20,10 +20,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _enrichment  # noqa: E402
-import _measure  # noqa: E402
-from _classification import classify_by_filename  # noqa: E402
+# Allow `python3 stems_to_mixdown/discover.py` invocation alongside `python3 -m stems_to_mixdown.discover`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from stems_to_mixdown import _enrichment  # noqa: E402
+from stems_to_mixdown import _measure  # noqa: E402
+from stems_to_mixdown._classification import classify_by_filename  # noqa: E402
 
 AUDIO_EXTS = {".wav", ".flac", ".aiff", ".aif", ".mp3", ".m4a", ".aac", ".ogg", ".opus"}
 WAV_EXTS = {".wav", ".wave", ".rf64"}  # wavinfo / BWF MetaEdit only handle these

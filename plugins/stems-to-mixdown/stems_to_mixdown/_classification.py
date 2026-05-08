@@ -15,9 +15,9 @@ The trailing word-boundary (`\\b`) in each regex deliberately matches singular
 forms only — `vocals.wav` and `drums.wav` will NOT match `\\bvocal\\b` /
 `\\bdrum\\b` because Python's `\\b` requires a word/non-word transition that a
 trailing `s` doesn't provide. This is intentional. Strictness protects
-operators who name multitrack stems carelessly. See docs/research/2D for the
-empirical confirmation and the recommended fix path (rename at the source —
-e.g., the demucs sibling skill — rather than widen the regex here).
+operators who name multitrack stems carelessly. The recommended fix when an
+upstream tool produces plural names is to rename at the source rather than
+widen the regex here.
 """
 
 from __future__ import annotations

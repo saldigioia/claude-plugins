@@ -6,7 +6,7 @@ version of the skill produced an artifact. Bump on tagged releases:
 - 1.0.0  — first stable release (2026-05-05). Eighteen commandments, six
            passes (identify → import_pt_track_names → analyze → plan → mix →
            verify), shared scripts/_*.py infrastructure, fixtures-backed
-           smoke + format-decision tests, sibling stems-from-mix skill.
+           smoke + format-decision tests.
 - 1.1.0  — master-reference pipeline (Cmd 19). Optional source.master_reference
            manifest field (or --master CLI override) opts the run into a
            three-synced-versions reference-bundle deliverable: master +

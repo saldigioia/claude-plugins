@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
-from plan import (  # noqa: E402
+sys.path.insert(0, str(REPO))
+from stems_to_mixdown.plan import (  # noqa: E402
     auto_pan_for_group, auto_pan_positions,
     pan_coefficients, resolve_pan_map,
 )

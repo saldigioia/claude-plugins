@@ -29,7 +29,7 @@ for fix in mono-stems mixed-rates dirty-inputs 24-in-32; do
     tmp_root="/tmp/_s2m_audio_${fix}"
     rm -rf "$tmp_root"
     mkdir -p "$tmp_root"
-    python3 scripts/analyze.py --dir "tests/fixtures/$fix" --force \
+    python3 stems_to_mixdown/analyze.py --dir "tests/fixtures/$fix" --force \
         > "$tmp_root/a.json" 2>/dev/null \
         || { echo "  [fail] analyze exited non-zero"; any_fail=1; continue; }
     # v1.3: the canonical default is now normalized to -14 LUFS-I, which
@@ -38,11 +38,11 @@ for fix in mono-stems mixed-rates dirty-inputs 24-in-32; do
     # exercises the --archival path. A separate v1.3 default-normalized
     # baseline lives in tests/baselines/v1.3-default-md5s.txt and is
     # asserted by assert-normalized-shas.sh.
-    python3 scripts/plan.py --analysis "$tmp_root/a.json" --output-dir "$tmp_root/mixdowns" \
+    python3 stems_to_mixdown/plan.py --analysis "$tmp_root/a.json" --output-dir "$tmp_root/mixdowns" \
         --archival \
         > "$tmp_root/p.json" 2>/dev/null \
         || { echo "  [fail] plan exited non-zero"; any_fail=1; continue; }
-    python3 scripts/mix.py --plan "$tmp_root/p.json" --yes \
+    python3 stems_to_mixdown/mix.py --plan "$tmp_root/p.json" --yes \
         > /dev/null 2>&1 || { echo "  [fail] mix exited non-zero"; any_fail=1; continue; }
     out_dir="$tmp_root/mixdowns"
 

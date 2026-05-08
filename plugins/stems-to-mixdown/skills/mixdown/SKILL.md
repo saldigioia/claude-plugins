@@ -26,7 +26,7 @@ A conservative mixdown engineer in script form. Reads a directory of stems, refu
 When the directory is unambiguous (well-named stems, optional master alongside, no Pro Tools artifacts), one command does the whole pipeline:
 
 ```bash
-python3 "${CLAUDE_SKILL_DIR}/../../scripts/run.py" --dir <stems-or-project-folder>
+python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/run.py" --dir <stems-or-project-folder>
 ```
 
 `run.py` surveys first, then chains identify → analyze → plan → mix → verify with auto-decisions:
@@ -85,7 +85,7 @@ Follow this order. Do not skip Pass 3's approval gate unless the user passed `--
 
 ### Pass 0a — Identify (always first)
 
-Run `python3 "${CLAUDE_SKILL_DIR}/../../scripts/identify.py" --dir <path>` whenever the user points at a folder. This is a cheap triage pass — no `ffprobe`, no measurements, no heavy parsing — that decides whether the rest of the workflow needs to think about Pro Tools at all. It scans filenames, looks for Session Info text exports / `.ptx` artifacts, samples a few WAVs for `bext` / `iXML` chunk signals, and emits `identify.json` plus a markdown report on stderr.
+Run `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/identify.py" --dir <path>` whenever the user points at a folder. This is a cheap triage pass — no `ffprobe`, no measurements, no heavy parsing — that decides whether the rest of the workflow needs to think about Pro Tools at all. It scans filenames, looks for Session Info text exports / `.ptx` artifacts, samples a few WAVs for `bext` / `iXML` chunk signals, and emits `identify.json` plus a markdown report on stderr.
 
 **The output is a contract.** Read the `recommendation` field and act on it:
 
@@ -97,7 +97,7 @@ The point is the negative result. When the directory is a clean folder of well-n
 
 ### Pass 0b — Pro Tools track-name borrowing (only if Pass 0a says so)
 
-When Pass 0a's recommendation is `run_pass0_pt_intake`, run `python3 "${CLAUDE_SKILL_DIR}/../../scripts/import_pt_track_names.py" --session-info <txt> --audio-dir <wav-folder> --out <wav-folder>`. The helper **borrows the track names** from the Pro Tools export so analyze.py's classifier can label files the engineer didn't bother to rename. It does **not** reconstruct session timing — the "Session Info as Text" export simply doesn't carry that data in machine-parseable form.
+When Pass 0a's recommendation is `run_pass0_pt_intake`, run `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/import_pt_track_names.py" --session-info <txt> --audio-dir <wav-folder> --out <wav-folder>`. The helper **borrows the track names** from the Pro Tools export so analyze.py's classifier can label files the engineer didn't bother to rename. It does **not** reconstruct session timing — the "Session Info as Text" export simply doesn't carry that data in machine-parseable form.
 
 If you have stems with different timeline anchors (different `bext.time_reference` values per stem), the right move is to **consolidate stems in Pro Tools first** (Edit → Consolidate). The rest of the pipeline assumes anchor-aligned stems at sample 0; `amix=duration=longest` will sum at zero offset and the song will be wrong otherwise. Pass 2's `stems_unanchored` warn flags this when wavinfo is installed.
 
@@ -110,7 +110,7 @@ Files referenced by the session but not present in the audio dir are preflighted
 
 ### Pass 1 — Discovery
 
-Run `python3 "${CLAUDE_SKILL_DIR}/../../scripts/analyze.py" --dir <path>`. It walks the directory, calls `ffprobe` on every audio file, computes SHA-256, and classifies each stem by filename heuristic. Output: `analysis.json` (machine) plus a human report on stderr. If `stems.manifest.yaml` exists in the directory, the manifest's classifications and groupings override the heuristics — see `references/manifest-schema.md`.
+Run `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/analyze.py" --dir <path>`. It walks the directory, calls `ffprobe` on every audio file, computes SHA-256, and classifies each stem by filename heuristic. Output: `analysis.json` (machine) plus a human report on stderr. If `stems.manifest.yaml` exists in the directory, the manifest's classifications and groupings override the heuristics — see `references/manifest-schema.md`.
 
 The classification buckets are: `vocal`, `drums`, `bass`, `guitar`, `keys`, `fx`, `other`. The skill maps these to *groups* (the actual mixdown deliverables) in Pass 3.
 
@@ -133,7 +133,7 @@ A red flag is not the end of the world — it's a request for the human to look.
 
 ### Pass 3 — Plan (dry-run)
 
-Run `python3 "${CLAUDE_SKILL_DIR}/../../scripts/plan.py" --analysis analysis.json`. It reads the discovery output, applies the format-decision matrix in `references/format-decisions.md`, predicts the mixdown peak, and prints a markdown plan to stdout. The plan is the contract — show it to the user and wait for approval.
+Run `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/plan.py" --analysis analysis.json`. It reads the discovery output, applies the format-decision matrix in `references/format-decisions.md`, predicts the mixdown peak, and prints a markdown plan to stdout. The plan is the contract — show it to the user and wait for approval.
 
 The format-decision matrix in short:
 
@@ -147,7 +147,7 @@ Peak prediction is **measured, not estimated**. The plan stage runs the mix at 3
 
 ### Pass 4 — Execute
 
-Run `python3 "${CLAUDE_SKILL_DIR}/../../scripts/mix.py" --plan plan.json`. The mix engine is **ffmpeg** with `amix=normalize=0` and explicit weights (decision documented in `references/tool-cheatsheet.md` — sox's `--guard` was rejected because it conflates "fits without clipping" with "unity sum," and we want unity sum). Internal precision: 32-bit float. Mono stems are upmixed to stereo via `pan=stereo|c0=K*c0|c1=K*c0` with `K = 10 ** (pan_law_db / 20)` (default `-3.0 dB` per Commandment 16; `output.pan_law` in the manifest overrides) before summing.
+Run `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/mix.py" --plan plan.json`. The mix engine is **ffmpeg** with `amix=normalize=0` and explicit weights (decision documented in `references/tool-cheatsheet.md` — sox's `--guard` was rejected because it conflates "fits without clipping" with "unity sum," and we want unity sum). Internal precision: 32-bit float. Mono stems are upmixed to stereo via `pan=stereo|c0=K*c0|c1=K*c0` with `K = 10 ** (pan_law_db / 20)` (default `-3.0 dB` per Commandment 16; `output.pan_law` in the manifest overrides) before summing.
 
 Outputs land in a **sibling** directory of the source by default — `<source-dir>/../<source-dirname>-mixdowns/<project>_<group>.<ext>` — so the source folder is never written into. Pass `--output-dir` to plan.py to override (e.g., to keep the legacy `<source-dir>/mixdowns/` layout). Project name derives from the directory basename unless the manifest specifies one.
 
@@ -157,7 +157,7 @@ Dither is applied at final encode if and only if bit depth is being reduced. Met
 
 ### Pass 5 — Verify
 
-Run `python3 "${CLAUDE_SKILL_DIR}/../../scripts/verify.py" --plan plan.json`. Re-probes every output, confirms format matches the plan, confirms no clipping. If the user passed `--reference <file>`, it does a null test (phase-invert + sum) against the reference and reports residual peak. Below -90 dBFS residual is a pass; louder is a smell worth investigating.
+Run `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/verify.py" --plan plan.json`. Re-probes every output, confirms format matches the plan, confirms no clipping. If the user passed `--reference <file>`, it does a null test (phase-invert + sum) against the reference and reports residual peak. Below -90 dBFS residual is a pass; louder is a smell worth investigating.
 
 ## Group definitions
 
@@ -198,12 +198,12 @@ Other pathologies (DC offset, length drift, channel mismatch) get flagged in Pas
 
 ## Scripts
 
-- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/run.py"` — One-shot orchestrator. Runs identify → analyze → plan → mix → verify with auto-decisions; the recommended entry point for the common case.
-- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/identify.py"` — Pass 0a (triage, always run first when invoking the per-pass scripts directly).
-- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/import_pt_track_names.py"` — Pass 0b (Pro Tools intake bridge, run only when 0a recommends it).
-- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/analyze.py"` — Pass 1 + Pass 2.
-- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/plan.py"` — Pass 3 (dry-run, prints plan).
-- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/mix.py"` — Pass 4 (executes the plan).
-- `python3 "${CLAUDE_SKILL_DIR}/../../scripts/verify.py"` — Pass 5 (re-probes outputs, optional null test).
+- `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/run.py"` — One-shot orchestrator. Runs identify → analyze → plan → mix → verify with auto-decisions; the recommended entry point for the common case.
+- `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/identify.py"` — Pass 0a (triage, always run first when invoking the per-pass scripts directly).
+- `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/import_pt_track_names.py"` — Pass 0b (Pro Tools intake bridge, run only when 0a recommends it).
+- `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/analyze.py"` — Pass 1 + Pass 2.
+- `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/plan.py"` — Pass 3 (dry-run, prints plan).
+- `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/mix.py"` — Pass 4 (executes the plan).
+- `python3 "${CLAUDE_SKILL_DIR}/../../stems_to_mixdown/verify.py"` — Pass 5 (re-probes outputs, optional null test).
 
 All scripts: `--dir <path>` or `--analysis/--plan <json>`, JSON to stdout, logs to stderr, exit nonzero on red flags unless `--force`. Idempotent — re-running yields identical artifact hashes. (The advisory artifacts under `<dir>/.s2m/metadata/` from `--bwf-report` are not subject to the determinism contract; see `references/pro-audio-metadata.md`.)

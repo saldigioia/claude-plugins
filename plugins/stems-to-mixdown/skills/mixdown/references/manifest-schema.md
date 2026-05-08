@@ -86,17 +86,11 @@ metadata:
   genre: Hip-Hop
   comment: Mixed from session-XYZ stems on 2024-04-15
 
-# Provenance / reference material from upstream sources. Recognized keys:
+# Provenance / reference material. Recognized keys:
 #
 #   master_reference:
 #     path: ../mastered/song.flac          # relative to manifest dir, or absolute
 #     duration_tolerance_samples: 1        # optional; default 1 sample
-#
-#   tool: stems-from-mix                   # written by the sibling skill; informational
-#   model: htdemucs_ft
-#   source_mix:
-#     path: /path/to/finished_mix.flac
-#     sha256: 0123abcd...
 #
 # The master_reference block opts the run into the reference-bundle deliverable
 # (see Cmd 19). When present, Pass 1 probes the master, Pass 2 enforces that its

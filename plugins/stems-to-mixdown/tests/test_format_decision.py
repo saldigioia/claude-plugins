@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
-from plan import decide_output_format, resolve_pan_law, ALLOWED_PAN_LAWS  # noqa: E402
+sys.path.insert(0, str(REPO))
+from stems_to_mixdown.plan import decide_output_format, resolve_pan_law, ALLOWED_PAN_LAWS  # noqa: E402
 
 
 def stem(*, rate: int, depth: int, channels: int = 2, lossy: bool = False) -> dict:

@@ -3,7 +3,7 @@
 The original bug: every .m4a was treated as lossy because the test was
 `container in LOSSY_CONTAINERS`. ALAC (Apple Lossless) wraps in m4a too —
 that file would silently get capped to 16/44.1 in the format-decision matrix.
-The fix is in scripts/discover.py:infer_lossy(), which is codec-driven.
+The fix is in stems_to_mixdown/discover.py:infer_lossy(), which is codec-driven.
 
 Run via:
 
@@ -18,8 +18,8 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO / "scripts"))
-from discover import infer_lossy  # noqa: E402
+sys.path.insert(0, str(REPO))
+from stems_to_mixdown.discover import infer_lossy  # noqa: E402
 
 
 # (codec, container, expected_is_lossy, comment)

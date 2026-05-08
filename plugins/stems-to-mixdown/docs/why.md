@@ -23,7 +23,7 @@ The audience: anyone with a folder of multitrack stems who wants a stereo mixdow
 ## What's adjacent, not this
 
 - **Mastering** — out of scope by Cmd 9. Send the unity-sum output to a separate mastering tool.
-- **Source separation from a finished mix** — different problem, different tooling. The Phase 6 sibling `stems-from-mix` (planned, optional) wraps `htdemucs_ft` and hands off to this skill via a manifest.
+- **Source separation from a finished mix** — different problem, different tooling. Out of scope by design; use a dedicated separation tool.
 - **Session timeline reconstruction** — out of scope. If your stems have different `bext.time_reference` values, consolidate in the source DAW first; the `stems_unanchored` warn (Cmd 10) tells you when this matters.
 - **Multichannel input** (5.1, 7.1, ambisonic) — different problem; downmix in a tool that's honest about the coefficients.
 

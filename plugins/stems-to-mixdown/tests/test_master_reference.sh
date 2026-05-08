@@ -26,7 +26,7 @@ fail=0
 fail_with() { echo "  [fail] $*"; fail=1; }
 
 echo "=== 1. Pass 1+2 with manifest master_reference ==="
-if ! python3 scripts/analyze.py --dir "$FIX" > "$OUT/a.json" 2> "$OUT/a.err"; then
+if ! python3 stems_to_mixdown/analyze.py --dir "$FIX" > "$OUT/a.json" 2> "$OUT/a.err"; then
     fail_with "analyze exited nonzero"
     cat "$OUT/a.err"
 fi
@@ -41,7 +41,7 @@ if [ "$errors" != "0" ]; then
 fi
 
 echo "=== 2. Pass 3 plans the reference bundle ==="
-python3 scripts/plan.py --analysis "$OUT/a.json" --output-dir "$OUT/mixdowns" \
+python3 stems_to_mixdown/plan.py --analysis "$OUT/a.json" --output-dir "$OUT/mixdowns" \
     > "$OUT/p.json" 2> "$OUT/p.err"
 bundle_present=$(jq -r '.reference_bundle != null' "$OUT/p.json")
 if [ "$bundle_present" != "true" ]; then
@@ -53,7 +53,7 @@ if [ "$bundle_members" != "3" ]; then
 fi
 
 echo "=== 3. Pass 4 writes the bundle ==="
-python3 scripts/mix.py --plan "$OUT/p.json" --yes > "$OUT/m.json" 2> "$OUT/m.err"
+python3 stems_to_mixdown/mix.py --plan "$OUT/p.json" --yes > "$OUT/m.json" 2> "$OUT/m.err"
 bundle_dir="$OUT/mixdowns/reference-bundle"
 for role in master instrumental acapella; do
     f="$bundle_dir/with-master_$role.flac"
@@ -66,7 +66,7 @@ if [ ! -f "$bundle_dir/bundle.log.md" ]; then
 fi
 
 echo "=== 4. Pass 5 reference battery — recombine null = pass ==="
-python3 scripts/verify.py --plan "$OUT/p.json" > "$OUT/v.json" 2> "$OUT/v.err"
+python3 stems_to_mixdown/verify.py --plan "$OUT/p.json" > "$OUT/v.json" 2> "$OUT/v.err"
 verdict=$(jq -r '.reference_battery.headline_verdict' "$OUT/v.json")
 if [ "$verdict" != "pass" ]; then
     fail_with "expected headline verdict 'pass'; got '$verdict'"
@@ -79,7 +79,7 @@ echo "=== 5. Mismatched master fires Cmd 19 refusal ==="
 ffmpeg -y -f lavfi -i "sine=frequency=440:duration=3:sample_rate=44100" -ac 2 \
     -c:a pcm_s16le -bits_per_raw_sample 16 "$OUT/bad_master.wav" 2> /dev/null
 # Expect exit 1 because of master_rate / depth / duration mismatch.
-if python3 scripts/analyze.py --dir "$FIX" --master "$OUT/bad_master.wav" \
+if python3 stems_to_mixdown/analyze.py --dir "$FIX" --master "$OUT/bad_master.wav" \
     > "$OUT/bad.json" 2> "$OUT/bad.err"; then
     fail_with "analyze with bad master exited 0; expected 1 (master_*_mismatch errors)"
 fi

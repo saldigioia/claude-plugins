@@ -37,10 +37,10 @@ Drop the released master into the same folder as the stems and the skill picks i
 
 ## One-shot mode (the obvious case)
 
-For a folder that's unambiguous (well-named stems, optional master alongside, no Pro Tools artifacts), `scripts/run.py` collapses the whole pipeline into a single command:
+For a folder that's unambiguous (well-named stems, optional master alongside, no Pro Tools artifacts), `stems_to_mixdown/run.py` collapses the whole pipeline into a single command:
 
 ```bash
-python3 scripts/run.py --dir /path/to/some-track-stems --yes
+python3 stems_to_mixdown/run.py --dir /path/to/some-track-stems --yes
 ```
 
 `--dir` may point at the audio dir itself OR at a project folder containing one nested audio dir; identify hops one level deeper without prompting. The default deliverable is a **listening master** normalized to -14 LUFS-I / -1 dBTP (universally streaming-compatible). Pass `--archival` for the v1.2 unity-sum behavior, `--target-lufs -16` for Apple-Music-first delivery, or `--target-lufs -23` for EBU R128 broadcast. The per-pass scripts below remain available for power users who want intermediate JSON or to re-run a single step.
@@ -119,7 +119,7 @@ Each commandment is cited (`Cmd N`) by the error messages and plan rationales th
 - Mastering. The skill bounces a clean sum; loudness targets are a separate decision.
 - Lossy → same-codec lossy at higher bitrate. That's a fidelity claim the source doesn't support.
 - Pro Tools `.ptx` parsing. Format is undocumented and version-fragile; consolidate stems first.
-- Source separation from a finished mix. Use the sibling [`stems-from-mix`](../stems-from-mix/) plugin.
+- Source separation from a finished mix. Different problem, different tooling.
 
 ## Quick test
 
@@ -142,7 +142,7 @@ stems-to-mixdown/
 │   └── mixdown/
 │       ├── SKILL.md                skill entry point + frontmatter
 │       └── references/             commandments, format-decisions, manifest schema, etc.
-├── scripts/                         the six pipeline scripts + shared _*.py modules
+├── stems_to_mixdown/                the six pipeline scripts + shared _*.py modules (a Python package; supports `python3 -m stems_to_mixdown.<pass>` and `python3 stems_to_mixdown/<pass>.py`)
 ├── tests/                           fixtures, baselines, smoke + correctness tests
 ├── docs/
 │   ├── why.md                      one-page ethos

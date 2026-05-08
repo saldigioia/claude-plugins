@@ -52,12 +52,12 @@ Five research notes produced, no code changes. Each names the action it triggers
 **Reference:** `docs/research/2C-reference-loudness.md`.
 **Triggers:** Phase 4 capability addition.
 
-### 2D — Demucs sibling skill (`stems-from-mix`)
+### 2D — Source separation (rejected 2026-05-08)
 
-**Decision:** Phase 6 (optional) builds a separate `stems-from-mix` skill using `htdemucs_ft`, MPS-aware, 4-stem default. Sibling renames demucs's `vocals.wav`/`drums.wav` to `vocal.wav`/`drum.wav` because the existing regex uses `\b(vocal|drum|...)\b` which does not match plurals (confirmed by inspection: `vocals.wav` and `drums.wav` both fall through to `other`). Sibling also emits `stems.manifest.yaml` with explicit classifications so the manifest-override path is the source of truth. **Do not widen `analyze.py`'s regex to accept plurals** — strictness protects multitrack-stem operators.
+**Decision:** Source separation from a finished mix is **out of scope** for stems-to-mixdown. An earlier plan considered a separate `stems-from-mix` sibling skill (using `htdemucs_ft`) and a brief prototype existed; both the prototype plugin and the supporting research file (`docs/research/2D-demucs-sibling.md`) were deleted on 2026-05-08. The plugin is deliberately scoped to stems-in → mixdown-out; users who need to extract stems from a mix should reach for a dedicated separation tool.
 
-**Reference:** `docs/research/2D-demucs-sibling.md`.
-**Triggers:** Phase 6 (optional) skill build. No change to `stems-to-mixdown`.
+**Reference:** None — research file deleted with the rejected direction.
+**Triggers:** None. Do not propose source-separation features, even as optional flags. **Do not widen `analyze.py`'s regex to accept plurals** (`vocals`, `drums`) — strictness protects multitrack-stem operators and there is no separation-tool output to accommodate.
 
 ### 2E — Stem alignment heuristics
 

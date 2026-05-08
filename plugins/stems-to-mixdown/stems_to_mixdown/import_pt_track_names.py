@@ -40,7 +40,7 @@ Exit codes:
     2 = structural error (audio dir missing, etc.)
 
 Usage:
-    python3 scripts/import_pt_track_names.py \\
+    python3 stems_to_mixdown/import_pt_track_names.py \\
         --session-info "Session Info.txt" \\
         --audio-dir "Audio Files" \\
         --out ./
@@ -58,8 +58,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _classification import classify_by_filename  # noqa: E402
+# Allow `python3 stems_to_mixdown/import_pt_track_names.py` invocation alongside `python3 -m stems_to_mixdown.import_pt_track_names`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from stems_to_mixdown._classification import classify_by_filename  # noqa: E402
 
 try:
     import yaml  # PyYAML

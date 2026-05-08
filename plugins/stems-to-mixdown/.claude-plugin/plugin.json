@@ -11,6 +11,6 @@
     "ebur128", "lufs", "dither", "pan-law", "pro-tools",
     "archival-audio", "music-production", "remix",
     "unity-sum", "provenance", "reference-bundle", "null-test",
-    "demucs", "mastering"
+    "mastering"
   ]
 }

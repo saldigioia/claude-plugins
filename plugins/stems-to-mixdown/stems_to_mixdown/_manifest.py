@@ -53,10 +53,10 @@ ALLOWED_LUFS_TARGETS = (-14.0, -16.0, -23.0)
 ALLOWED_TRUE_PEAK_TARGETS = (-1.0, -1.5, -2.0)
 
 # Recognized keys inside the manifest's `source:` block. `master_reference` is
-# the master-witness opt-in (Cmd 19); the rest are provenance from sibling
-# skills (e.g. stems-from-mix's hand-off manifest) and are informational only.
+# the master-witness opt-in (Cmd 19). Source separation is out of scope, so
+# the schema does not reserve provenance slots for separation-tool output.
 ALLOWED_SOURCE_KEYS = {
-    "master_reference", "tool", "model", "source_mix",
+    "master_reference",
 }
 # Recognized keys inside source.master_reference itself.
 ALLOWED_MASTER_REFERENCE_KEYS = {
@@ -68,10 +68,8 @@ DEFAULT_MASTER_DURATION_TOLERANCE_SAMPLES = 1
 
 ALLOWED_TOP_LEVEL_KEYS = {
     "project", "classifications", "gains", "groups", "output", "metadata",
-    # Provenance from upstream sibling skills + the master-witness block.
-    # The hand-off contract from stems-from-mix populates source.tool /
-    # source.model / source.source_mix; the master_reference block (Cmd 19)
-    # opts the run into the reference-bundle deliverable.
+    # Provenance: master_reference (Cmd 19) opts the run into the
+    # reference-bundle deliverable.
     "source",
     # v1.3: per-stem pan placement (Cmd 20). Maps filename → -100..+100
     # pan position. Mono stems only; stereo entries warn and pass through.

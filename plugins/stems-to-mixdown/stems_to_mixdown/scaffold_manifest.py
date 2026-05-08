@@ -14,12 +14,12 @@ Refuses to overwrite an existing manifest unless `--overwrite` is passed —
 manifests are operator decisions and the script shouldn't clobber them.
 
 Usage:
-    python3 scripts/scaffold_manifest.py \\
+    python3 stems_to_mixdown/scaffold_manifest.py \\
         --analysis analysis.json \\
         --out tests/fixtures/some-stems/stems.manifest.yaml
 
     # Or write next to the source dir's stems
-    python3 scripts/scaffold_manifest.py \\
+    python3 stems_to_mixdown/scaffold_manifest.py \\
         --analysis analysis.json \\
         --out tests/fixtures/some-stems/
 
@@ -39,7 +39,7 @@ from typing import Any
 
 
 HEADER = """\
-# stems.manifest.yaml — scaffolded by scripts/scaffold_manifest.py.
+# stems.manifest.yaml — scaffolded by stems_to_mixdown/scaffold_manifest.py.
 #
 # Uncomment + edit the sections you want to override. Anything left
 # commented out is a no-op; analyze.py will read this file cleanly even

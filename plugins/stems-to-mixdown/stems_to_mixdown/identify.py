@@ -16,12 +16,12 @@ Decision contract (the `recommendation` field in identify.json):
 
     skip_to_pass1            — Filenames are informative or a manifest is
                                already present. The LLM should proceed
-                               directly to scripts/analyze.py and not bother
+                               directly to stems_to_mixdown/analyze.py and not bother
                                loading any Pro Tools metadata.
 
     run_pass0_pt_intake      — Filenames are mostly generic AND a Pro Tools
                                Session Info text export is present. The LLM
-                               should run scripts/import_pt_track_names.py
+                               should run stems_to_mixdown/import_pt_track_names.py
                                first, then proceed to analyze.py.
 
     needs_user_clarification — Filenames are generic and no Session Info
@@ -46,7 +46,7 @@ Exit codes:
     2 = structural error (directory missing, etc.)
 
 Usage:
-    python3 scripts/identify.py --dir /path/to/stems
+    python3 stems_to_mixdown/identify.py --dir /path/to/stems
 """
 
 from __future__ import annotations
@@ -58,8 +58,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _classification import (  # noqa: E402
+# Allow `python3 stems_to_mixdown/identify.py` invocation alongside `python3 -m stems_to_mixdown.identify`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from stems_to_mixdown._classification import (  # noqa: E402
     INFORMATIVE_PATTERNS, normalize_filename, looks_like_master,
 )
 
@@ -176,7 +179,7 @@ def derive_recommendation(
             "skip_to_pass1",
             ("stems.manifest.yaml is already present; Pass 1 will use it. "
              "Do not run Pro Tools intake — it would clobber existing manifest decisions."),
-            f"python3 scripts/analyze.py --dir {directory}",
+            f"python3 stems_to_mixdown/analyze.py --dir {directory}",
         )
 
     if naming_quality == "informative":
@@ -185,7 +188,7 @@ def derive_recommendation(
             ("Stem filenames are informative; Pass 1's regex classifier will work. "
              "Pro Tools intake is not relevant here, even if a Session Info export exists. "
              "Do not load PT metadata into context."),
-            f"python3 scripts/analyze.py --dir {directory}",
+            f"python3 stems_to_mixdown/analyze.py --dir {directory}",
         )
 
     if naming_quality == "generic" and has_pt_export:
@@ -195,7 +198,7 @@ def derive_recommendation(
             ("Stem filenames are mostly generic (DAW auto-numbered) AND a Pro Tools "
              "Session Info text export is present. Run Pass 0 to derive classifications "
              "from track names, then proceed to Pass 1."),
-            (f"python3 scripts/import_pt_track_names.py "
+            (f"python3 stems_to_mixdown/import_pt_track_names.py "
              f"--session-info '{export}' --audio-dir {directory} --out {directory}"),
         )
 
@@ -221,7 +224,7 @@ def derive_recommendation(
         ("Filenames are mixed informative/generic. Pass 1's regex classifier will "
          "label what it can; the rest land in 'other' and can be moved into groups "
          "via the manifest if needed. Pro Tools intake is not required."),
-        f"python3 scripts/analyze.py --dir {directory}",
+        f"python3 stems_to_mixdown/analyze.py --dir {directory}",
     )
 
 

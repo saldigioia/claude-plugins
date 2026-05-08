@@ -29,8 +29,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _measure  # noqa: E402
+# Allow `python3 stems_to_mixdown/plan.py` invocation alongside `python3 -m stems_to_mixdown.plan`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from stems_to_mixdown import _measure  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Group derivation

@@ -34,9 +34,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _measure  # noqa: E402
-from _version import __version__  # noqa: E402
+# Allow `python3 stems_to_mixdown/mix.py` invocation alongside `python3 -m stems_to_mixdown.mix`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from stems_to_mixdown import _measure  # noqa: E402
+from stems_to_mixdown._version import __version__  # noqa: E402
 
 IDEMPOTENCY_TAG = "stems-to-mixdown idempotency-key"
 
@@ -889,7 +892,7 @@ def execute_reference_bundle(plan: dict, canonical_outputs: dict[str, str],
         "- **LUFS-I and dBTP deltas vs master** for both deliverables — "
         "informational, not normalized (Cmd 9).",
         "",
-        f"Run: `python3 scripts/verify.py --plan <plan.json>`",
+        f"Run: `python3 stems_to_mixdown/verify.py --plan <plan.json>`",
         "",
     ]
     log_path.write_text("\n".join(line for line in log_lines if line is not None))

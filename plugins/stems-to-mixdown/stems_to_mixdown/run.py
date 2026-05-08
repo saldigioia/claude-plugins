@@ -41,10 +41,10 @@ Exit codes:
     2  = structural error (missing tools, bad directory, etc.)
 
 Usage:
-    python3 scripts/run.py --dir /path/to/stems
-    python3 scripts/run.py --dir /path/to/stems --yes
-    python3 scripts/run.py --dir /path/to/stems --master /path/to/song.flac
-    python3 scripts/run.py --dir /path/to/stems --preview --solo
+    python3 stems_to_mixdown/run.py --dir /path/to/stems
+    python3 -m stems_to_mixdown.run --dir /path/to/stems --yes
+    python3 -m stems_to_mixdown.run --dir /path/to/stems --master /path/to/song.flac
+    python3 -m stems_to_mixdown.run --dir /path/to/stems --preview --solo
 """
 
 from __future__ import annotations
@@ -58,9 +58,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SCRIPTS = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPTS))
-from _version import __version__  # noqa: E402
+# Allow `python3 stems_to_mixdown/run.py` invocation alongside `python3 -m stems_to_mixdown.run`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from stems_to_mixdown._version import __version__  # noqa: E402
 
 
 def _run(cmd: list[str], *, capture_stdout: bool = False) -> subprocess.CompletedProcess:
@@ -148,7 +150,7 @@ def main() -> int:
     # ---- Pass 0a — identify ----
     _pretty("identify (Pass 0a)")
     r = _run(
-        ["python3", str(SCRIPTS / "identify.py"), "--dir", str(args.dir)],
+        ["python3", "-m", "stems_to_mixdown.identify", "--dir", str(args.dir)],
         capture_stdout=True,
     )
     if r.returncode != 0:
@@ -197,7 +199,7 @@ def main() -> int:
 
     # ---- Pass 1+2 — analyze ----
     _pretty("analyze (Pass 1+2)")
-    cmd = ["python3", str(SCRIPTS / "analyze.py"), "--dir", str(analyze_target)]
+    cmd = ["python3", "-m", "stems_to_mixdown.analyze", "--dir", str(analyze_target)]
     if args.master is not None:
         cmd += ["--master", str(args.master)]
     if args.no_auto_master:
@@ -224,7 +226,7 @@ def main() -> int:
     # the artifacts (in <args.dir>/../<args.dir.name>-mixdowns/.s2m/run/)
     # would diverge from the canonical mixdowns when run.py descended.
     cmd = [
-        "python3", str(SCRIPTS / "plan.py"),
+        "python3", "-m", "stems_to_mixdown.plan",
         "--analysis", str(analysis_json),
         "--output-dir", str(output_dir),
     ]
@@ -260,7 +262,7 @@ def main() -> int:
 
     # ---- Pass 4 — mix ----
     _pretty("mix (Pass 4)")
-    cmd = ["python3", str(SCRIPTS / "mix.py"), "--plan", str(plan_json), "--yes"]
+    cmd = ["python3", "-m", "stems_to_mixdown.mix", "--plan", str(plan_json), "--yes"]
     if args.solo:
         cmd.append("--solo")
     if args.force:
@@ -274,7 +276,7 @@ def main() -> int:
 
     # ---- Pass 5 — verify ----
     _pretty("verify (Pass 5)")
-    cmd = ["python3", str(SCRIPTS / "verify.py"), "--plan", str(plan_json)]
+    cmd = ["python3", "-m", "stems_to_mixdown.verify", "--plan", str(plan_json)]
     if args.check_mono_fold:
         cmd.append("--check-mono-fold")
     if args.report_all_platforms:

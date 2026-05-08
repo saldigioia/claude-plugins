@@ -34,8 +34,8 @@ for fix in mono-stems mixed-rates dirty-inputs 24-in-32 with-master; do
 
     a_now=/tmp/_now_${fix}.analysis.json
     p_now=/tmp/_now_${fix}.plan.json
-    python3 scripts/analyze.py --dir "tests/fixtures/$fix" --force > "$a_now" 2>/dev/null
-    python3 scripts/plan.py --analysis "$a_now" > "$p_now" 2>/dev/null
+    python3 stems_to_mixdown/analyze.py --dir "tests/fixtures/$fix" --force > "$a_now" 2>/dev/null
+    python3 stems_to_mixdown/plan.py --analysis "$a_now" > "$p_now" 2>/dev/null
 
     if ! diff -q <(strip "$a_baseline") <(strip "$a_now") > /dev/null; then
         echo "[fail] $fix analysis.json drifted"

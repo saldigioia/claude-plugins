@@ -29,17 +29,20 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _manifest  # noqa: E402
-from _version import __version__  # noqa: E402
-from discover import (  # noqa: E402,F401
+# Allow `python3 stems_to_mixdown/analyze.py` invocation alongside `python3 -m stems_to_mixdown.analyze`
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from stems_to_mixdown import _manifest  # noqa: E402
+from stems_to_mixdown._version import __version__  # noqa: E402
+from stems_to_mixdown.discover import (  # noqa: E402,F401
     AUDIO_EXTS, StemInfo, MasterReferenceInfo, discover_stems,
     probe_master_reference, require_tools,
 )
-from sanity import RedFlag, sanity_check  # noqa: E402,F401
-from _enrichment import WavInfoReader  # noqa: E402  -- soft-imported; None if missing
+from stems_to_mixdown.sanity import RedFlag, sanity_check  # noqa: E402,F401
+from stems_to_mixdown._enrichment import WavInfoReader  # noqa: E402  -- soft-imported; None if missing
 # Re-export for back-compat with anything that imports these symbols here:
-from _classification import (  # noqa: E402,F401
+from stems_to_mixdown._classification import (  # noqa: E402,F401
     CLASSIFICATION_RULES, classify_by_filename, looks_like_master,
 )
 
