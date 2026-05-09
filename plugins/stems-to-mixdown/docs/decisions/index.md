@@ -76,7 +76,7 @@ Five `docs/research/*.md` files committed. This index names each next-phase acti
 
 ## v1.3 — folder shape, stereo policy, Cmd 9 revision (2026-05-07)
 
-Three behavior changes plus one doctrine revision shipped together. Reference document: `docs/IMPROVEMENT-PLAN-v1.3.md`.
+Three behavior changes plus one doctrine revision shipped together. Reference document: `docs/archive/IMPROVEMENT-PLAN-v1.3.md`.
 
 | Phase | Decision | Doctrine effect | Triggers |
 |---|---|---|---|

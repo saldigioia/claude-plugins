@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stems-to-mixdown"
+version = "1.3.0"
+description = "Sum a folder of multitrack stems into a stereo listening master at the highest quality the source honestly supports."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Rare Data Club" }]
+keywords = [
+    "audio", "mixdown", "stems", "acapella", "instrumental",
+    "ffmpeg", "flac", "true-peak", "lufs", "ebu-r128",
+    "pan-law", "archival-audio", "music-production",
+    "unity-sum", "provenance", "reference-bundle", "null-test",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Sound/Audio :: Mixers",
+]
+dependencies = []
+
+[project.optional-dependencies]
+manifest = ["PyYAML"]
+wavinfo = ["wavinfo"]
+all = ["PyYAML", "wavinfo"]
+dev = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/saldigioia/claude-plugins"
+Repository = "https://github.com/saldigioia/claude-plugins"
+
+# System tools required at runtime (not Python packages, declared here for reference):
+#   - ffmpeg >= 5.0  (for `ebur128 peak=true` summary format and aresample dither methods)
+#   - ffprobe        (ships with ffmpeg)
+# Optional system tools:
+#   - mediainfo CLI    (brew install mediainfo)  — cross-check probe
+#   - bwfmetaedit CLI  (brew install bwfmetaedit) — FADGI XML/CSV reports
+
+[tool.setuptools.packages.find]
+include = ["stems_to_mixdown*"]
+exclude = ["tests*", "docs*", "skills*"]

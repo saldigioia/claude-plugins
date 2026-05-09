@@ -60,7 +60,7 @@ def auto_pan_for_group(group_stems: list[dict]) -> dict[str, float]:
     """Apply the auto-pan distribution rule (Cmd 20) to a group.
 
     Conventions taken straight from the SOS / Mastering The Mix research
-    surfaced in docs/IMPROVEMENT-PLAN-v1.3.md (Phase 2):
+    surfaced in docs/archive/IMPROVEMENT-PLAN-v1.3.md (Phase 2):
       - Vocals and bass stay center.
       - Other mono stems spread evenly across the field with max width 0.7.
       - Stereo stems are not re-panned (the plugin doesn't decorate stereo).
