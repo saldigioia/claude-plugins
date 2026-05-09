@@ -1,6 +1,6 @@
 ---
 name: mixdown
-description: Sum a directory of multitrack audio stems into stereo mixdowns (acapella, instrumental, custom groupings) at the highest quality the source material honestly supports. Triggers on phrases like "sum these stems," "bounce an instrumental," "make an acapella," "mix these stems down," or pointing at a folder of audio files and asking for a combined version. When a released master sits alongside the stems, the skill auto-detects it and produces a three-synced-versions reference bundle plus a recombine-null verification battery.
+description: Sum multitrack stems into stereo mixdowns (acapella, instrumental, custom groupings). Triggers on "sum these stems," "bounce an instrumental," "make an acapella," "mix these stems down," or pointing at a folder of audio files asking to combine them. Auto-detects a master file alongside the stems for a three-synced-versions reference bundle and recombine-null verification battery. Outputs at the highest quality the source honestly supports.
 argument-hint: "<stems-folder> [--master <path>] [--preview] [--solo] [--yes]"
 allowed-tools:
   - Bash(python3 *)

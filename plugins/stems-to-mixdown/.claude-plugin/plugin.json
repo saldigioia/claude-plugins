@@ -5,6 +5,9 @@
   "author": {
     "name": "Rare Data Club"
   },
+  "homepage": "https://github.com/saldigioia/claude-plugins/tree/main/plugins/stems-to-mixdown",
+  "repository": "https://github.com/saldigioia/claude-plugins",
+  "license": "MIT",
   "keywords": [
     "audio", "mixdown", "stems", "acapella", "instrumental",
     "ffmpeg", "flac", "wav", "true-peak", "ebu-r128",
