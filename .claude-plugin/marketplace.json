@@ -5,8 +5,8 @@
     "email": "salthecowboy@proton.me"
   },
   "metadata": {
-    "description": "Rare Data Club's Claude Code plugins: CSS layout primitives, web-archive recovery, archival-grade audio mixdown, and source separation.",
-    "version": "1.1.0"
+    "description": "Rare Data Club's Claude Code plugins: CSS layout primitives, web-archive recovery, and archival-grade audio mixdown.",
+    "version": "1.2.0"
   },
   "plugins": [
     {
@@ -71,27 +71,6 @@
         "provenance",
         "reference-bundle",
         "null-test"
-      ]
-    },
-    {
-      "name": "stems-from-mix",
-      "source": "./plugins/stems-from-mix",
-      "description": "Extract stems (vocals, drums, bass, other) from a finished stereo mix using Demucs htdemucs_ft, then hand off to stems-to-mixdown for unity-sum mixdowns. Honest framing: separation is approximation, bleed is real, separated stems are sketches that read as deliverables only after a human listens. Writes a stems.manifest.yaml with classifications already filled in (no guessing — the model knows what it produced) so the downstream skill doesn't re-classify.",
-      "category": "audio-production",
-      "keywords": [
-        "audio",
-        "source-separation",
-        "demucs",
-        "htdemucs",
-        "vocal-isolation",
-        "acapella",
-        "instrumental",
-        "stems",
-        "music-production",
-        "remix",
-        "ai-audio",
-        "deep-learning",
-        "torch"
       ]
     }
   ]
