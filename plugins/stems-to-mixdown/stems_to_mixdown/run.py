@@ -50,6 +50,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import shutil
@@ -63,17 +64,41 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from stems_to_mixdown._version import __version__  # noqa: E402
+from stems_to_mixdown import (  # noqa: E402
+    analyze as _analyze_mod,
+    identify as _identify_mod,
+    mix as _mix_mod,
+    plan as _plan_mod,
+    verify as _verify_mod,
+)
 
 
-def _run(cmd: list[str], *, capture_stdout: bool = False) -> subprocess.CompletedProcess:
-    """Run a script, streaming stderr to the console; capture stdout if asked."""
-    return subprocess.run(
-        cmd,
-        check=False,
-        stdout=subprocess.PIPE if capture_stdout else None,
-        stderr=None,  # always passes through to console
-        text=True,
-    )
+def _run_pass(module, argv: list[str]) -> tuple[int, str]:
+    """Call module.main() with the given argv, capture stdout, return (rc, stdout).
+
+    Each per-pass script emits its JSON artifact to stdout and progress
+    messages to stderr. We capture stdout (the artifact) and pass stderr
+    through to the operator's terminal so they see the same live progress
+    they would from a subprocess invocation.
+
+    SystemExit raised by argparse on bad args (or by validators in plan.py)
+    is caught and converted to an exit code so it doesn't tear down the
+    orchestrator.
+    """
+    old_argv = sys.argv
+    old_stdout = sys.stdout
+    captured = io.StringIO()
+    try:
+        sys.argv = [module.__name__] + argv
+        sys.stdout = captured
+        try:
+            rc = module.main()
+        except SystemExit as e:
+            rc = e.code if isinstance(e.code, int) else (0 if e.code is None else 1)
+    finally:
+        sys.argv = old_argv
+        sys.stdout = old_stdout
+    return (rc, captured.getvalue())
 
 
 def _pretty(label: str) -> None:
@@ -149,16 +174,13 @@ def main() -> int:
 
     # ---- Pass 0a — identify ----
     _pretty("identify (Pass 0a)")
-    r = _run(
-        ["python3", "-m", "stems_to_mixdown.identify", "--dir", str(args.dir)],
-        capture_stdout=True,
-    )
-    if r.returncode != 0:
+    rc, out = _run_pass(_identify_mod, ["--dir", str(args.dir)])
+    if rc != 0:
         sys.stderr.write("[fatal] identify failed; halting.\n")
         return 2
-    identify_json.write_text(r.stdout)
+    identify_json.write_text(out)
     try:
-        identify = json.loads(r.stdout)
+        identify = json.loads(out)
     except json.JSONDecodeError as e:
         sys.stderr.write(f"[fatal] identify produced invalid JSON: {e}\n")
         return 2
@@ -199,19 +221,19 @@ def main() -> int:
 
     # ---- Pass 1+2 — analyze ----
     _pretty("analyze (Pass 1+2)")
-    cmd = ["python3", "-m", "stems_to_mixdown.analyze", "--dir", str(analyze_target)]
+    argv = ["--dir", str(analyze_target)]
     if args.master is not None:
-        cmd += ["--master", str(args.master)]
+        argv += ["--master", str(args.master)]
     if args.no_auto_master:
-        cmd.append("--no-auto-master")
+        argv.append("--no-auto-master")
     if args.bwf_report:
-        cmd.append("--bwf-report")
+        argv.append("--bwf-report")
     if args.force:
-        cmd.append("--force")
-    r = _run(cmd, capture_stdout=True)
-    if r.stdout:
-        analysis_json.write_text(r.stdout)
-    if r.returncode != 0:
+        argv.append("--force")
+    rc, out = _run_pass(_analyze_mod, argv)
+    if out:
+        analysis_json.write_text(out)
+    if rc != 0:
         sys.stderr.write(
             "\n[stop] analyze reported red flags. Re-run with --force to "
             "proceed past Pass 2 errors, or fix the inputs and try again.\n"
@@ -225,23 +247,22 @@ def main() -> int:
     # default to <analyze_target>/../<analyze_target.name>-mixdowns/ and
     # the artifacts (in <args.dir>/../<args.dir.name>-mixdowns/.s2m/run/)
     # would diverge from the canonical mixdowns when run.py descended.
-    cmd = [
-        "python3", "-m", "stems_to_mixdown.plan",
+    argv = [
         "--analysis", str(analysis_json),
         "--output-dir", str(output_dir),
     ]
     if args.archival:
-        cmd.append("--archival")
+        argv.append("--archival")
     if args.target_lufs is not None:
-        cmd += ["--target-lufs", str(args.target_lufs)]
+        argv += ["--target-lufs", str(args.target_lufs)]
     if args.target_true_peak is not None:
-        cmd += ["--target-true-peak", str(args.target_true_peak)]
+        argv += ["--target-true-peak", str(args.target_true_peak)]
     if args.auto_pan:
-        cmd.append("--auto-pan")
-    r = _run(cmd, capture_stdout=True)
-    if r.stdout:
-        plan_json.write_text(r.stdout)
-    if r.returncode != 0:
+        argv.append("--auto-pan")
+    rc, out = _run_pass(_plan_mod, argv)
+    if out:
+        plan_json.write_text(out)
+    if rc != 0:
         sys.stderr.write("[fatal] plan generation failed; halting.\n")
         return 1
 
@@ -262,29 +283,29 @@ def main() -> int:
 
     # ---- Pass 4 — mix ----
     _pretty("mix (Pass 4)")
-    cmd = ["python3", "-m", "stems_to_mixdown.mix", "--plan", str(plan_json), "--yes"]
+    argv = ["--plan", str(plan_json), "--yes"]
     if args.solo:
-        cmd.append("--solo")
+        argv.append("--solo")
     if args.force:
-        cmd.append("--force-overwrite")
-    r = _run(cmd, capture_stdout=True)
-    if r.stdout:
-        mix_json.write_text(r.stdout)
-    if r.returncode != 0:
+        argv.append("--force-overwrite")
+    rc, out = _run_pass(_mix_mod, argv)
+    if out:
+        mix_json.write_text(out)
+    if rc != 0:
         sys.stderr.write("[stop] mix failed; verify will not run.\n")
         return 1
 
     # ---- Pass 5 — verify ----
     _pretty("verify (Pass 5)")
-    cmd = ["python3", "-m", "stems_to_mixdown.verify", "--plan", str(plan_json)]
+    argv = ["--plan", str(plan_json)]
     if args.check_mono_fold:
-        cmd.append("--check-mono-fold")
+        argv.append("--check-mono-fold")
     if args.report_all_platforms:
-        cmd.append("--report-all-platforms")
-    r = _run(cmd, capture_stdout=True)
-    if r.stdout:
-        verify_json.write_text(r.stdout)
-    if r.returncode != 0:
+        argv.append("--report-all-platforms")
+    rc, out = _run_pass(_verify_mod, argv)
+    if out:
+        verify_json.write_text(out)
+    if rc != 0:
         sys.stderr.write(
             "[stop] verify reported issues; outputs are present but the run "
             "should not be considered clean.\n"
