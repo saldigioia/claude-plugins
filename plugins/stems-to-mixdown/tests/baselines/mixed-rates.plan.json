@@ -30,7 +30,7 @@
       "measured_peak_dbtp": -21.1,
       "measured_lufs": -21.8,
       "pre_attenuation_db": 0.0,
-      "pre_attenuation_rationale": "Peak -21.10 dBTP \u2014 comfortable headroom, no attenuation. (Cmd 3)",
+      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
       "per_stem_gains": {
         "synth_lead.wav": 0.0
       },
@@ -67,7 +67,7 @@
         "channels": 2,
         "dither_required": true,
         "lie": false,
-        "rationale": "Lossy in chain \u2192 output capped at 16/44.1 FLAC. (Cmd 1, Cmd 8)",
+        "rationale": "Lossy in chain → output capped at 16/44.1 FLAC. (Cmd 1, Cmd 8)",
         "compression_level": 8
       },
       "filter_graph": "[0:a]amix=inputs=1:duration=longest:normalize=0:weights=1[mix]",
@@ -75,7 +75,7 @@
       "measured_peak_dbtp": -21.1,
       "measured_lufs": -22.0,
       "pre_attenuation_db": 0.0,
-      "pre_attenuation_rationale": "Peak -21.10 dBTP \u2014 comfortable headroom, no attenuation. (Cmd 3)",
+      "pre_attenuation_rationale": "Peak -21.10 dBTP — comfortable headroom, no attenuation. (Cmd 3)",
       "per_stem_gains": {
         "bass.mp3": 0.0
       },

@@ -18,8 +18,8 @@
       "sample_fmt": "fltp",
       "channels": 2,
       "channel_layout": "stereo",
-      "duration_sec": 0.548571,
-      "duration_samples": 24192,
+      "duration_sec": 0.5,
+      "duration_samples": 22050,
       "classification": "bass",
       "classification_source": "regex",
       "true_peak_dbtp": -21.1,
@@ -30,8 +30,7 @@
       "fully_silent": false,
       "tags": {
         "encoder": "Lavf62.12.100"
-      },
-      "production_metadata": {}
+      }
     },
     {
       "path": "tests/fixtures/mixed-rates/synth_lead.wav",
@@ -59,8 +58,7 @@
       "fully_silent": false,
       "tags": {
         "encoder": "Lavf62.12.100"
-      },
-      "production_metadata": {}
+      }
     }
   ],
   "master_reference": null,
@@ -68,7 +66,7 @@
     {
       "severity": "error",
       "code": "rate_mismatch",
-      "message": "Stems disagree on sample rate: [44100, 96000]. This is almost always a production bug. The skill will resample to the highest common rate via soxr precision 28 if --force is passed. \u2192 One or more stems will be resampled; resampling is a lossy operation (Cmd 4).",
+      "message": "Stems disagree on sample rate: [44100, 96000]. This is almost always a production bug. The skill will resample to the highest common rate via soxr precision 28 if --force is passed. → One or more stems will be resampled; resampling is a lossy operation (Cmd 4).",
       "affected": [
         "bass.mp3",
         "synth_lead.wav"
@@ -77,7 +75,7 @@
     {
       "severity": "warn",
       "code": "length_drift",
-      "message": "bass.mp3 is 539.9 ms shorter than the longest stem. Will mix with duration=longest; tail will be silence.",
+      "message": "bass.mp3 is 588.4 ms shorter than the longest stem. Will mix with duration=longest; tail will be silence.",
       "affected": [
         "bass.mp3"
       ]
@@ -85,7 +83,7 @@
     {
       "severity": "warn",
       "code": "lossy_input",
-      "message": "Lossy inputs present (1 file(s)). Default output will be 16-bit / 44.1 kHz FLAC. \u2192 Output is capped at 16/44.1 because the source can't honestly carry more (Cmd 1 + 8).",
+      "message": "Lossy inputs present (1 file(s)). Default output will be 16-bit / 44.1 kHz FLAC. → Output is capped at 16/44.1 because the source can't honestly carry more (Cmd 1 + 8).",
       "affected": [
         "bass.mp3"
       ]

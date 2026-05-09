@@ -24,16 +24,20 @@ If these fail, the pipeline is broken. Fix the code.
 
 ## Drift detectors — advisory only
 
-These compare current outputs against committed byte-level baselines. Useful for spotting that *something* changed during a refactor, but the baselines were captured at a specific environment and false-positive drift is normal (ffmpeg resampler revisions, mediainfo version differences, wavinfo presence/absence, fixture content edits).
+These compare current outputs against committed byte-level baselines. Useful for spotting that *something* changed during a refactor.
 
 ```bash
-bash tests/assert-audio-shas.sh   # audio-MD5 drift detector
-bash tests/diff-baseline.sh        # JSON-baseline drift detector
+bash tests/assert-audio-shas.sh    # audio-MD5 drift detector — fragile across ffmpeg versions
+bash tests/diff-baseline.sh        # JSON-baseline drift detector — stable in the typical case
 ```
 
 Both scripts always exit 0. Drift is reported on stderr with `[drift]` prefix. **Do not wire these into CI as gates** — wire the perceptual tests instead.
 
-If they show drift after a refactor, that's a hint, not a failure. Confirm via the perceptual tests, then either:
+The JSON baselines (`diff-baseline.sh`) are stable in the typical case: the `strip()` function in the script removes path-prefix variance and the env-dependent `production_metadata` block (mediainfo / wavinfo / bwfmetaedit population). After Phase 4 + the Phase B follow-up, all five fixtures report `[ok]` on a fresh checkout. If you see drift here, suspect a real structural change in the JSON contract.
+
+The audio MD5s (`assert-audio-shas.sh`) are inherently fragile: ffmpeg's resampler (libswresample + soxr) produces byte-level differences across minor versions even on identical inputs. `mixed-rates_instrumental.flac` typically drifts because it exercises the resampler; the perceptual test confirms the output is still structurally correct. Treat MD5 drift as a "something happened" signal, not a regression.
+
+If a drift detector trips after a refactor, that's a hint, not a failure. Confirm via the perceptual tests, then either:
 
 - Accept the drift if the perceptual tests still pass (it's an environment-driven byte-level change with no doctrinal consequence), or
 - Investigate if the perceptual tests also fail (the refactor genuinely changed behavior — fix the code or update the doctrine).

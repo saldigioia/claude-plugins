@@ -25,9 +25,18 @@ cd "$(dirname "$0")/.."
 #   the same absolute-path leak when a master is present.
 # - groups[].output_path / scout_filter_graph / filter_graph also embed
 #   absolute paths to inputs.
+# - production_metadata is populated only when mediainfo / wavinfo /
+#   bwfmetaedit are installed; the contents (and their absence) are
+#   environment-dependent and not a regression signal. analyze's red
+#   flags / classifications / sample-rate / depth fields capture the
+#   structural facts the baselines actually want to assert.
 strip() {
     jq '
         walk(
+            if type == "object" then del(.production_metadata)
+            else . end
+        )
+        | walk(
             if type == "string" then
                 gsub("/[^ ]*?/tests/fixtures/"; "TESTROOT/tests/fixtures/")
             else . end
