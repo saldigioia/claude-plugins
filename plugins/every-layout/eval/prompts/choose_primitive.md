@@ -3,6 +3,15 @@
 ## Purpose
 Select the appropriate Every Layout primitive for a given layout problem.
 
+## Fixtures
+
+Run this prompt against each scenario in the scenario bank, then score the
+selections:
+
+| Fixture | Expected Score | Grade |
+|---------|----------------|-------|
+| `eval/fixtures/choose-primitive-scenarios.md` (13 scenarios) | 9-10/10 | A |
+
 ## Prompt Template
 
 ```
@@ -58,7 +67,7 @@ OUTPUT:
 ### Question 6: Is this about inline elements?
 - **Icons with text** → ELC_ICON
 
-## Expected Response Format
+## Expected Output Format
 
 ```
 ## Recommendation: [Primitive Name] (ELC_*)
@@ -78,3 +87,18 @@ OUTPUT:
 ### Verification
 [How to test it works]
 ```
+
+## Scoring (0-10)
+
+Score a run against `eval/fixtures/choose-primitive-scenarios.md`:
+
+| Dimension | Points | Criteria |
+|-----------|--------|----------|
+| Primitive correctness | 0-6 | The expected `ELC_*` is named for each scenario (≈0.5 per scenario across the 13, rounded to 6) |
+| Alternatives reasoning | 0-2 | Correctly rules out each scenario's listed near-miss, with the right reason |
+| Configuration & verification | 0-2 | Names the primitive's real custom properties and a valid way to test the result |
+| **Total** | **/10** | |
+
+A correct response scores **9-10/10 (A)**. Any scenario answered with a
+non-existent or wrong-axis primitive (e.g. Cluster for vertical spacing) costs
+full marks for that scenario.

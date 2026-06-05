@@ -4,6 +4,15 @@
 Evaluate database schema design and content loader implementation against
 the archival-data-engine skill.
 
+## Fixtures
+
+Run this prompt against these fixture files:
+
+| Fixture | Expected Score | Grade |
+|---------|----------------|-------|
+| `eval/fixtures/archival-schema-compliant.sql` | 9-10/10 | A |
+| `eval/fixtures/archival-schema-non-compliant.sql` | 2-4/10 | D-F |
+
 ## Prompt Template
 
 ```

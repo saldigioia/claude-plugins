@@ -1,51 +1,74 @@
 # Escape Hatch Registry
 
-> Copy this file to your project root as `escapes.md`. Every intentional deviation from the plugin's axioms lives here, with a justification and an expiry date. The `/strict-check` skill and `bin/css-strict.sh` gate will tell you when an entry has expired.
+> Copy this file to your project root as `escapes.md`. Every intentional deviation
+> from the plugin's axioms lives here, with a justification and an expiry date.
+> `bin/css-strict.sh` and `bin/js-budget.sh` read this file directly: a registered,
+> **unexpired** escape suppresses the matching violation and the gate stays green;
+> an **expired** escape, or a violation with **no** escape, fails the gate.
 
 ## How this works
 
-The plugin's six axioms (`skills/css-layout-engine/references/axioms.md`) are enforced by `bin/css-strict.sh` and `bin/js-budget.sh`. When a violation is intentional — a third-party widget you can't strip, a legacy route awaiting migration, an editorial page that breaks the system on purpose — you register it here. The build stays green; the debt stays visible.
+The plugin's six axioms (`skills/css-layout-engine/references/axioms.md`) are
+enforced by `bin/css-strict.sh` (ELA_001–006) and `bin/js-budget.sh` (ELA_005).
+When a violation is intentional — a third-party widget you can't strip, a legacy
+route awaiting migration, an editorial page that breaks the system on purpose —
+you register it in the table below. The build stays green; the debt stays visible.
 
-Every entry MUST include:
+The gates parse the **Active escapes** table. The match key is **(Target, Axiom, Lines)**:
 
-- **ID** — one of: `ESC_EDITORIAL`, `ESC_EMBED`, `ESC_DATAVIZ`, `ESC_LEGACY`, `ESC_JS_EAGER`, `ESC_JS_EXCESS`, or a project-specific `ESC_<CATEGORY>`
-- **Scope** — which files, routes, or components are affected
-- **Axiom violated** — which `ELA_###` and/or `ELP_###` are suspended here
-- **Justification** — why the canonical CSS/JS alternative was rejected
-- **Author** — @handle or owner
-- **Opened** — date when the exception was registered
-- **Expires** — review date. Entries without an expiry are forbidden.
-- **Owner** — who reviews the entry on expiry
+- **Target** is a shell glob matched against the file path the gate reports. `*`
+  matches any characters **including `/`**, so `demos/*` covers everything under
+  `demos/`, and `*/embed.css` matches `embed.css` anywhere. For `js-budget.sh`,
+  the target is matched against the dist-relative path of the over-budget `.js`
+  file; the reserved target `page-total` suppresses a page-total overage.
+- **Axiom** is the exact `ELA_###` id the gate emits (`ELA_001`…`ELA_006`).
+- **Lines** scopes the escape to specific line numbers: `-` (or empty) covers
+  **every** line of the matching file; `9`, `9,10`, or `9-11` covers only those
+  lines, so an accidental same-axiom violation elsewhere in the file still fails.
+  Prefer the narrowest scope. `js-budget.sh` has no line concept, so its routes
+  only match file-level (`-`) escapes.
+- **Expires** is an ISO date (`YYYY-MM-DD`), inclusive — the escape is expired
+  once today is past it. There is no "never": unbounded debt is forbidden. For a
+  genuinely long-lived third-party constraint, use a far-future review date
+  (e.g. `2099-12-31`) so the entry stays visible and re-reviewable.
+
+A row is recognised only when its Axiom column is an `ELA_###` id and its Expires
+column is an ISO date, so the header/separator rows and any prose are ignored.
+Put **one (Target, Axiom) entry per row** — if one file needs two axioms suppressed,
+write two rows. For reproducible CI, the gate's notion of "today" can be pinned
+with the `ESCAPES_TODAY=YYYY-MM-DD` environment variable.
+
+## Field reference
+
+| Column | Required | Used by gate | Description |
+|--------|----------|--------------|-------------|
+| **ESC ID** | Yes | message only | One of the canonical categories below, or a project-specific `ESC_<CATEGORY>`. Shown in the "suppressed by …" message. |
+| **Target (glob)** | Yes | **match key** | File path / glob the violation occurs in (backticks optional). |
+| **Axiom** | Yes | **match key** | The exact `ELA_###` being suppressed for this target. |
+| **Lines** | Yes | **match key** | `-` for the whole file, or `9` / `9,10` / `9-11` to scope to line numbers. |
+| **Expires** | Yes | **expiry check** | ISO date; inclusive. Expired entries fail the gate. |
+| **Owner** | Yes | message only | @handle accountable for the exception. |
+| **Justification** | Yes | message only | One sentence: what the canonical alternative looked like and why it was rejected. |
+
+Canonical `ESC_*` categories (immutable — never renamed or removed):
+`ESC_EDITORIAL`, `ESC_EMBED`, `ESC_DATAVIZ`, `ESC_LEGACY`, `ESC_JS_EAGER`,
+`ESC_JS_EXCESS`. Add project-specific `ESC_<CATEGORY>` ids as needed.
 
 ## Review cadence
 
-- Quarterly review of every entry. If still justified, extend the expiry with a fresh note.
-- If the justification no longer holds, remove the entry and fix the underlying violation.
-- If the violation was registered under false pretenses, remove the entry and open a ticket.
+- Quarterly review of every entry. If still justified, extend `Expires` with a fresh note.
+- If the justification no longer holds, remove the row and fix the underlying violation.
+- If the violation was registered under false pretenses, remove the row and open a ticket.
 
 ---
 
-## Template entry
+## Active escapes
 
-```markdown
-## ESC_<CATEGORY> — short label
+<!-- The gate parses the table below. One (Target, Axiom, Lines) per row. Delete the examples. -->
 
-- **Scope:** `src/components/<file>` (lines X-Y) or `/app/dashboard` route
-- **Axiom violated:** ELA_005, ELP_028
-- **Justification:** [one paragraph — what the CSS alternative looked like and why you rejected it]
-- **Author:** @handle
-- **Opened:** YYYY-MM-DD
-- **Expires:** YYYY-MM-DD (next review)
-- **Owner:** @team-or-person
+| ESC ID | Target (glob) | Axiom | Lines | Expires | Owner | Justification |
+|--------|---------------|-------|-------|---------|-------|---------------|
+| ESC_EMBED | `src/styles/checkout.css` | ELA_002 | 12 | 2026-12-31 | @owner | Stripe iframe has a 13px internal pad; alignment requires matching just this rule until they ship logical-property support. |
+| ESC_JS_EXCESS | `_astro/search.*.js` | ELA_005 | - | 2026-09-15 | @owner | Client-side search island; static index migration is scheduled but not done. |
 
-### Entry / exit criteria (optional)
-
-- Entry: [what made this necessary]
-- Exit: [what would let us retire this exception — new CSS feature, third-party fix, migration milestone]
-```
-
----
-
-## Your active entries go below this line
-
-(None yet — clean slate.)
+<!-- Remove the example rows above once you add your own. An empty table = no escapes. -->

@@ -1,0 +1,7 @@
+/* Fixture for escape-suppression tests (Phase 1).
+   Contains exactly one deliberate axiom violation: an ELA_003 !important.
+   Used by bin/test-escapes.sh to prove suppressed / expired / unregistered
+   behavior against bin/css-strict.sh. */
+.legacy-widget {
+  color: var(--gl-ink) !important;
+}

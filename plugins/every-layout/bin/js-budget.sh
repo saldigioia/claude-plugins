@@ -15,6 +15,14 @@
 
 set -uo pipefail
 
+# Escape-hatch registry: an unexpired ESC_JS_EXCESS suppresses an over-budget
+# route; an expired or unregistered one still fails the gate. Targets are matched
+# against the dist-relative path of each .js file; the page-total overage matches
+# the reserved target `page-total`.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/escapes.sh
+. "$SCRIPT_DIR/lib/escapes.sh"
+
 DIR="${1:-}"
 if [ -z "$DIR" ]; then
   echo "usage: bin/js-budget.sh <dist-dir>" >&2
@@ -48,8 +56,12 @@ if [ -z "$JS_FILES" ]; then
   exit 0
 fi
 
+escapes_load "${ESCAPES_FILE:-escapes.md}"
+[ -n "$ESCAPES_FILE_USED" ] && printf "Escapes:       %s\n---\n" "$ESCAPES_FILE_USED"
+
 TOTAL=0
 FAILURES=0
+SUPPRESSED=0
 
 printf "%-48s %10s %10s %s\n" "File" "Raw" "Gzipped" "Status"
 printf "%-48s %10s %10s %s\n" "$(printf '%0.s-' {1..48})" "----------" "----------" "------"
@@ -64,8 +76,21 @@ while IFS= read -r file; do
   RAW_KB=$(awk -v n="$RAW" 'BEGIN{printf "%.1f", n/1024}')
   GZ_KB=$(awk -v n="$GZ" 'BEGIN{printf "%.1f", n/1024}')
   if [ "$GZ" -gt "$PER_ROUTE_LIMIT" ]; then
-    printf "%-48s %7s KB %7s KB ${RED}OVER${NC}\n" "$REL" "$RAW_KB" "$GZ_KB"
-    FAILURES=$((FAILURES + 1))
+    case "$(escapes_lookup "$REL" ELA_005)" in
+      "suppressed "*)
+        printf "%-48s %7s KB %7s KB ${YELLOW}OVER (suppressed by %s)${NC}\n" \
+          "$REL" "$RAW_KB" "$GZ_KB" "$(escapes_lookup "$REL" ELA_005 | sed 's/^suppressed //')"
+        SUPPRESSED=$((SUPPRESSED + 1))
+        ;;
+      "expired "*)
+        printf "%-48s %7s KB %7s KB ${RED}OVER (escape expired)${NC}\n" "$REL" "$RAW_KB" "$GZ_KB"
+        FAILURES=$((FAILURES + 1))
+        ;;
+      *)
+        printf "%-48s %7s KB %7s KB ${RED}OVER${NC}\n" "$REL" "$RAW_KB" "$GZ_KB"
+        FAILURES=$((FAILURES + 1))
+        ;;
+    esac
   else
     printf "%-48s %7s KB %7s KB ${GREEN}OK${NC}\n" "$REL" "$RAW_KB" "$GZ_KB"
   fi
@@ -75,13 +100,27 @@ echo "---"
 TOTAL_KB=$(awk -v n="$TOTAL" 'BEGIN{printf "%.1f", n/1024}')
 PAGE_LIMIT_KB=$(awk -v n="$PAGE_TOTAL_LIMIT" 'BEGIN{printf "%g", n/1024}')
 if [ "$TOTAL" -gt "$PAGE_TOTAL_LIMIT" ]; then
-  printf "Page total:    %s KB gzipped  ${RED}OVER %s KB page budget${NC}\n" "$TOTAL_KB" "$PAGE_LIMIT_KB"
-  FAILURES=$((FAILURES + 1))
+  case "$(escapes_lookup "page-total" ELA_005)" in
+    "suppressed "*)
+      printf "Page total:    %s KB gzipped  ${YELLOW}OVER %s KB (suppressed by %s)${NC}\n" \
+        "$TOTAL_KB" "$PAGE_LIMIT_KB" "$(escapes_lookup "page-total" ELA_005 | sed 's/^suppressed //')"
+      SUPPRESSED=$((SUPPRESSED + 1))
+      ;;
+    "expired "*)
+      printf "Page total:    %s KB gzipped  ${RED}OVER %s KB page budget (escape expired)${NC}\n" "$TOTAL_KB" "$PAGE_LIMIT_KB"
+      FAILURES=$((FAILURES + 1))
+      ;;
+    *)
+      printf "Page total:    %s KB gzipped  ${RED}OVER %s KB page budget${NC}\n" "$TOTAL_KB" "$PAGE_LIMIT_KB"
+      FAILURES=$((FAILURES + 1))
+      ;;
+  esac
 else
   printf "Page total:    %s KB gzipped  ${GREEN}OK${NC}\n" "$TOTAL_KB"
 fi
 
 echo ""
+[ "$SUPPRESSED" -gt 0 ] && printf "${YELLOW}%d over-budget route(s) suppressed by registered escapes.${NC}\n" "$SUPPRESSED"
 if [ "$FAILURES" -eq 0 ]; then
   printf "${GREEN}${BOLD}PASS${NC} — JavaScript within ELA_005 budget.\n"
   exit 0

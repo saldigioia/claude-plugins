@@ -7,6 +7,116 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.5.0] - 2026-06-04
+
+### Reconciliation — merge of the two divergent lineages
+
+This release merges the standalone lineage (4.3.0 Astro 6 + 4.4.0 escape-aware
+gates + eval green-up) with the vendored marketplace lineage (4.2.1 + 4.2.2),
+which had diverged after 4.1.0. Neither was a superset; this is the best-of-both.
+
+### Added (ported from the 4.2.x lineage)
+
+- **Inline-style detection** in `bin/css-lint-hook.sh` for framework templates
+  (`.astro/.tsx/.jsx/.vue/.svelte`): bespoke declarations inside `style="..."`
+  fail `ELA_002`; the primitive-parameter custom properties remain allowed. Plus
+  the `inline-style-{bespoke,mixed,primitive-param}.astro` fixtures.
+- **Single-file argument** for `bin/css-strict.sh` (pass one `.css` file for
+  targeted fixture testing, in addition to a directory).
+- `eval/fixtures/css-strict-motion-reset-intentional.css` — regression fixture
+  for the prefers-reduced-motion whitelist (2 whitelisted, 2 failing).
+
+### Changed — unified escape engine
+
+- The two escape designs are reconciled onto **one** system: the table format
+  (`bin/lib/escapes.sh`, honored by **both** `css-strict.sh` and `js-budget.sh`,
+  `ESCAPES_TODAY`-pinnable) **plus** the 4.2.x lineage's **line-level precision**,
+  now expressed as an optional **`Lines`** column (`-` = whole file; `9` / `9,10`
+  / `9-11` = scoped). Mandatory ISO `Expires` is kept — permanent (`Expiry: none`)
+  is intentionally **not** carried over, per the plugin's "every exception has an
+  expiry" axiom; use a far-future review date for long-lived constraints.
+- `escapes.md.template` and `escape-hatch-registry.md` document the `Lines` column.
+- The bullet-format escape fixtures (`escapes-registered/`, `escapes-expired/`)
+  are replaced by the table-format `eval/fixtures/escapes/` set; `test-escapes.sh`
+  gains a line-level assertion (8 assertions total).
+
+### Notes
+
+- The `\s`→`[[:space:]]` motion-whitelist fix was made independently in both
+  lineages (4.2.1 and 4.4.0); the merged tree carries it once.
+
+---
+
+## [4.4.0] - 2026-06-04
+
+### Added — escape-aware axiom gates (Improvement Plan Phase 1)
+
+The strict gates now read `escapes.md` directly, so a registered intentional
+deviation passes while expired or unregistered ones still fail — removing the
+incentive to `git commit --no-verify`.
+
+- **`bin/lib/escapes.sh`** — shared parser, sourced by both gates. Parses the
+  canonical **Active escapes** markdown table into an allowlist keyed on
+  `(Target glob, ELA_### axiom)` with an inclusive ISO `Expires`. Written for
+  bash 3.2 / onetrueawk (no associative arrays, globstar, or awk intervals).
+  Target globs use shell `case` semantics (`*` spans `/`); `ESCAPES_TODAY`
+  pins "today" for reproducible CI; `ESCAPES_FILE` overrides the path.
+- **`bin/css-strict.sh`** and **`bin/js-budget.sh`** consult the registry: an
+  unexpired match prints `… — suppressed by ESC_…` and is not counted; an
+  expired match fails with `escape expired`; an unregistered violation fails as
+  before. For `js-budget.sh`, the reserved target `page-total` covers a
+  page-total overage. Each gate prints a suppressed-count summary line.
+- **`bin/test-escapes.sh`** + `eval/fixtures/escapes/` — acceptance test proving
+  all three outcomes for both gates (6 assertions, all green).
+
+### Changed
+
+- **`escapes.md.template`** and **`skills/css-design-system/references/escape-hatch-registry.md`**
+  reconciled onto one machine-parseable table format. The previous prose layout
+  and the reference's divergent `ESC-NNN` / `ELP` / "Review date / Never" scheme
+  are replaced by `ESC ID | Target | Axiom | Expires | Owner | Justification`.
+  `ESC_*` category ids stay immutable; the match key uses `ELA_###` axioms (not
+  `ELP_###` principles) because the gates enforce axioms; expiry is mandatory.
+
+### Fixed
+
+- `bin/css-strict.sh` counted every violation twice (each `fail` call plus a
+  redundant caller increment). `fail()` is now the sole counter, so reported
+  counts are correct (e.g. the demo's pre-existing ELA_003 findings now read as
+  4, not 8). No change to pass/fail outcomes.
+
+### Repo hygiene
+
+- Untracked `review/` (14 build-artifact files) and added it to `.gitignore`
+  (`.full-review/` and `.DS_Store` were already ignored).
+
+---
+
+## [4.3.0] - 2026-06-04
+
+### Changed — Astro 6 migration
+
+All Astro guidance now targets **Astro 6** (latest: 6.4.4). Astro 6 went stable in 2026 after the v6 beta; the plugin previously documented Astro 5 throughout.
+
+- **Version strings** updated to "Astro 6" in `plugin.json`, `marketplace.json`, `README.md`, `CLAUDE.md`, `agents/site-builder.md`, and `skills/astro-site-architect/SKILL.md`.
+- **Zod imports** corrected across `astro-site-architect` and `archival-data-engine`: import `z` from `astro/zod` instead of `astro:content` (the `z` re-export from `astro:content` and the `astro:schema` alias are deprecated in Astro 6). Zod 4 format helpers updated (`z.string().url()` → `z.url()`, `z.string().date()` → `z.iso.date()`).
+- **Content collections**: documented that the Content Layer API is now the *only* collections system — legacy collections, the `legacy.collections` flag, and the `src/content/config.ts` location are removed; every collection must declare a `loader`.
+- **View Transitions**: `<ViewTransitions />` is removed in Astro 6; docs now show `<ClientRouter />` only.
+- **Output modes**: removed the long-stale `'hybrid'` mode (dropped back in Astro 5) from `SKILL.md`, `routing.md`, and `astro-config-recipes.md`; replaced with `output: 'static'` + per-page `prerender = false`.
+- **Content Loader API**: noted that the function-form `schema: () => ...` signature was removed in favor of `createSchema()`.
+- **Demo (`demos/archive-site`)**: pinned `astro@^6`, `@astrojs/react@^5` (React 19), `@astrojs/check@^0.9.9`; added `engines.node >= 22.12.0` and `.nvmrc`; updated `content.config.ts` Zod import.
+
+### Fixed
+
+- Corrected stale counts in `CLAUDE.md`: 13 skills (was 12) and 7 eval prompts (was 5).
+
+---
+
+> The 4.2.1 and 4.2.2 entries below come from a parallel lineage (the vendored
+> marketplace copy) that diverged after 4.1.0. They are folded in here by the
+> 4.5.0 reconciliation; their escape-format details were superseded by 4.5.0's
+> table format (see that entry).
+
 ## [4.2.2] - 2026-04-23
 
 ### Fixed
@@ -25,23 +135,18 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- `bin/css-strict.sh` — ELA_003 `!important` check produced false positives for the canonical WCAG 2.2 motion reset inside `@media (prefers-reduced-motion: reduce)`. The awk pattern that built the whitelist used `\s` (unsupported in POSIX awk), so the whitelist was always empty and the downstream `is_whitelisted_line` call never matched. Replaced with `[[:space:]]` so the whitelist actually populates.
+- `bin/css-strict.sh` — ELA_003 `!important` check produced false positives for the canonical WCAG 2.2 motion reset inside `@media (prefers-reduced-motion: reduce)`. The awk pattern that built the whitelist used `\s` (unsupported in POSIX awk), so the whitelist was always empty and the downstream `is_whitelisted_line` call never matched. Replaced with `[[:space:]]` so the whitelist actually populates. (The standalone lineage hit and fixed the same bug independently; see 4.4.0.)
 
 ### Added
 
-- `bin/css-strict.sh` — consumes `escapes.md` at the root of the scanned directory. Registered `ESC_<CATEGORY>_<NAME>` entries matching `(axiom, file[, line])` suppress the corresponding violation while unexpired. Expired entries (past `Expiry:` date) still count as violations and emit an "Expired escape" diagnostic per offending line. Entries with `Expiry: none` are permanent. Escape consumption applies uniformly across ELA_001–006.
-- Trailing summary diagnostics:
-  - `ELA_003: N line(s) whitelisted via @media (prefers-reduced-motion: reduce)`
-  - `Registered escapes consumed: N (from escapes.md: ESC_NAME, ...)`
-  - `Expired escapes still counted as violations: N`
+- `bin/css-strict.sh` — consumes `escapes.md` at the root of the scanned directory, with line-level matching and permanent (`Expiry: none`) entries. **Superseded by 4.5.0**, which unified the escape engine onto the table format (mandatory ISO expiry, line scoping via a `Lines` column, both gates).
 - `bin/css-strict.sh` — accepts a single CSS file as a positional argument in addition to a directory, for targeted fixture testing.
 - `eval/fixtures/css-strict-motion-reset-intentional.css` — positive case: 2 `!important` lines inside `@media (prefers-reduced-motion: reduce)` (whitelisted), 2 outside (fail).
-- `eval/fixtures/escapes-registered/{escapes.md,css-strict-escapes-registered.css}` — active `ESC_MUX_PLAYER_STYLING` entry; 2 registered lines suppressed, 2 unregistered lines still fail.
-- `eval/fixtures/escapes-expired/{escapes.md,css-strict-expired-escape.css}` — `ESC_LEGACY_NAV_OVERRIDE` with `Expiry: 2025-01-01`; both lines fail with expired-escape diagnostic.
+- `eval/fixtures/escapes-registered/` and `eval/fixtures/escapes-expired/` — bullet-format escape fixtures. **Replaced in 4.5.0** by the table-format `eval/fixtures/escapes/` set.
 
 ### Notes
 
-- v4.2.0 shipped without a CHANGELOG entry; not reconstructed here to avoid inventing history. The 4.1.0 → 4.2.1 span represents the intermediate 4.2.0 plus this patch.
+- v4.2.0 shipped without a CHANGELOG entry; not reconstructed, to avoid inventing history.
 
 ---
 

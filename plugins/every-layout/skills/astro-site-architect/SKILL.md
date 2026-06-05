@@ -1,6 +1,6 @@
 ---
 name: astro-site-architect
-description: "Astro 5 architecture: astro.config, content collections (defineCollection, loader), [slug] routing, src/pages, src/layouts, SSG/SSR, ClientRouter, island hydration, performance. Use when building or structuring an Astro site."
+description: "Astro 6 architecture: astro.config, content collections (defineCollection, loader), [slug] routing, src/pages, src/layouts, SSG/SSR, ClientRouter, island hydration, performance. Use when building or structuring an Astro site."
 allowed-tools: Bash(astro *) Bash(npm *) Bash(npx *) Read Glob Grep Write Edit
 paths:
   - "**/*.astro"
@@ -14,13 +14,15 @@ paths:
 
 # Astro Site Architect
 
-Build, structure, and maintain Astro 5 sites with the Every Layout design philosophy: zero-JS by default, intrinsically responsive, token-driven, and archival-grade.
+Build, structure, and maintain Astro 6 sites with the Every Layout design philosophy: zero-JS by default, intrinsically responsive, token-driven, and archival-grade.
+
+> **Astro 6 baseline.** Requires Node `22.12.0+` (Node 18/20 dropped), Vite 7, and Zod 4. Content collections must use the Content Layer API — legacy collections and the `legacy.collections` flag are removed. Import `z` from `astro/zod` (the `z` re-export from `astro:content` and the `astro:schema` alias are deprecated). See `references/content-layer.md` for the full v6 notes.
 
 > **Axiomatic commitment.** Every island in this skill's recommendations must justify itself against axiom **ELA_005** (CSS-Dominant Composition). The `bin/js-budget.sh` script enforces a **15 KB per-route / 30 KB page-total** compressed JavaScript budget. `client:load` requires an entry in `escapes.md` (category `ESC_JS_EAGER`). See `skills/css-layout-engine/references/axioms.md` for the full axiom hierarchy.
 
 ---
 
-## Astro 5 Project Structure
+## Astro 6 Project Structure
 
 ```
 project-root/
@@ -57,15 +59,16 @@ project-root/
 
 ---
 
-## Content Layer API (Astro 5)
+## Content Layer API
 
-Astro 5 introduced the Content Layer API — a unified system for defining typed content collections from any source.
+Astro 5 introduced the Content Layer API — a unified system for defining typed content collections from any source. In **Astro 6 it is the only content collections system**: the original (Astro 2.0) collections API and the `legacy.collections` flag are removed, so every collection must define a `loader`.
 
 ### Defining Collections
 
 ```typescript
 // content.config.ts
-import { defineCollection, z } from 'astro:content';
+import { defineCollection } from 'astro:content';
+import { z } from 'astro/zod';            // Astro 6: import z from astro/zod
 import { glob, file } from 'astro/loaders';
 
 const blog = defineCollection({
@@ -163,8 +166,9 @@ const { Content } = await render(post);
 | Mode | Config | Use Case |
 |------|--------|----------|
 | `static` (default) | `output: 'static'` | Fully pre-rendered at build time |
-| `server` | `output: 'server'` | All pages server-rendered on demand |
-| `hybrid` | `output: 'hybrid'` | Static by default, opt-in SSR per page |
+| `server` | `output: 'server'` | Server-rendered on demand; opt specific pages back into prerendering |
+
+There are only two output modes. The old `'hybrid'` mode was removed in Astro 5 — to mix static and on-demand pages, use `output: 'static'` (the default) and add `export const prerender = false` to the individual pages that must run on the server (requires an adapter).
 
 For archival sites, **always prefer `static`** — pre-rendered pages are durable, fast, and don't depend on runtime infrastructure.
 
@@ -349,7 +353,7 @@ export default defineConfig({
 
 ### View Transitions
 
-Astro 5 renamed the router component from `<ViewTransitions />` (the Astro 4 alias) to `<ClientRouter />`. Use the new name in new code:
+Use the `<ClientRouter />` component. The old `<ViewTransitions />` component (an Astro 4 name kept as a deprecated alias in Astro 5) was **removed in Astro 6** — `<ClientRouter />` is now the only name:
 
 ```astro
 ---

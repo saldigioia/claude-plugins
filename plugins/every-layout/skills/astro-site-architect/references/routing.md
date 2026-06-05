@@ -227,7 +227,7 @@ export const GET: APIRoute = async ({ url }) => {
 };
 ```
 
-**Note:** API endpoints require `output: 'server'` or `output: 'hybrid'` in `astro.config.mjs`, unless pre-rendered at build time.
+**Note:** On-demand API endpoints require `output: 'server'` (with an adapter) in `astro.config.mjs`, unless pre-rendered at build time. The `'hybrid'` mode was removed in Astro 5 — use `output: 'static'` with per-page `export const prerender = false` to mix static and server routes.
 
 ---
 

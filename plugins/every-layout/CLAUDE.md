@@ -1,8 +1,8 @@
 # Every Layout Plugin
 
-Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 5 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
+Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 6 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
 
-**Version:** 4.2.0 | **Author:** Rare Data Club
+**Version:** 4.5.0 | **Author:** Rare Data Club
 
 ## The commitment
 
@@ -11,13 +11,13 @@ This plugin treats **simple, durable, CSS-dominant web design as a requirement, 
 ## Architecture
 
 ```
-skills/                  12 skills (knowledge base + task workflows)
+skills/                  13 skills (knowledge base + task workflows)
 
   Knowledge skills (auto-invokable)
     css-layout-engine/       13 primitives, 29 layout principles, 16 reference files
     css-design-system/       Tokens, theming, fluid type, 6 design-system principles, 18 reference files
     framework-implementations/ Ports for Astro, React, Vue, Svelte, Tailwind, Vanilla
-    astro-site-architect/    Astro 5 project structure, content layer, routing, performance
+    astro-site-architect/    Astro 6 project structure, content layer, routing, performance
     archival-data-engine/    SQLite/libSQL/Drizzle, custom loaders, schema patterns
 
   Workflow skills (user-invoked — disable-model-invocation)
@@ -39,10 +39,12 @@ hooks/                   PostToolUse CSS linting
   hooks.json               Routes Write/Edit/MultiEdit to bin/css-lint-hook.sh for .css files
 
 bin/                     Shell utilities
-  css-strict.sh            AXIOM GATE — exits non-zero on any ELA_001–006 violation
-  js-budget.sh             AXIOM GATE — enforces ELA_005 JS budget (15 KB route / 30 KB page)
+  css-strict.sh            AXIOM GATE — exits non-zero on any ELA_001–006 violation (escape-aware)
+  js-budget.sh             AXIOM GATE — enforces ELA_005 JS budget (15 KB route / 30 KB page) (escape-aware)
+  lib/escapes.sh           Shared escapes.md parser — sourced by both gates
+  test-escapes.sh          Acceptance test for escape suppression (suppressed/expired/unregistered)
   install-git-hooks.sh     Installs a pre-commit hook that runs both gates on every commit
-  css-lint-hook.sh         PostToolUse warning hook — lighter-touch than strict mode
+  css-lint-hook.sh         PostToolUse warning hook (.css + inline-style scan for .astro/.tsx/.jsx/.vue/.svelte)
   css-audit.sh             Directory-wide CSS lint with colored output
   css-budget.sh            Performance budget measurement (sizes, properties, specificity)
   run-evals.sh             Eval fixture structural validation
@@ -50,7 +52,7 @@ bin/                     Shell utilities
   db-schema.sh             SQLite schema dump
 
 eval/                    Evaluation fixtures and prompts
-  prompts/                 5 eval prompts with scoring rubrics
+  prompts/                 7 eval prompts with scoring rubrics
   fixtures/                HTML/Astro fixtures (compliant + non-compliant)
   rubric.md                24-point scoring rubric (8 dimensions x 0-3)
   expected-properties.md   Required/forbidden CSS per primitive
@@ -113,7 +115,7 @@ The site-builder agent wires all 5 knowledge skills. The css-auditor and css-dia
 - Eval: `eval/prompts/<name>.md` + `eval/fixtures/<name>.html|.astro`
 - Manifest: `.claude-plugin/plugin.json` (name, version, description, author, homepage, repository, license, keywords)
 - Settings: `settings.json` — only `agent` key is supported by Claude Code
-- Escape hatches: `escapes.md` in project root — registered intentional deviations (see `css-design-system/references/escape-hatch-registry.md`)
+- Escape hatches: `escapes.md` in project root — registered intentional deviations, parsed directly by both axiom gates. Canonical format is the **Active escapes** table keyed on `(Target glob, ELA_### axiom, Lines)` + inclusive ISO `Expires`; `Lines` is `-` (whole file) or `9`/`9,10`/`9-11` (line-scoped). An unexpired match is suppressed, an expired or unregistered one fails. No permanent escapes — use a far-future date. Parser: `bin/lib/escapes.sh`; format: `escapes.md.template` and `css-design-system/references/escape-hatch-registry.md`. `ESCAPES_TODAY=YYYY-MM-DD` pins "today" for reproducible CI; `ESCAPES_FILE` overrides the path.
 - The `commands/` directory is unused — all former commands live as skills in `skills/<name>/SKILL.md` per `skills.md:14-17`
 
 ## Development Workflow

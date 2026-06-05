@@ -1,6 +1,6 @@
 # Content Layer API — Deep Reference
 
-The Content Layer API (Astro 5) is a unified system for defining, loading, validating, and querying content from any source — local files, databases, APIs, or custom sources.
+The Content Layer API (introduced in Astro 5) is a unified system for defining, loading, validating, and querying content from any source — local files, databases, APIs, or custom sources. In **Astro 6 it is the only content collections system** — the original Astro 2.0 collections API, the `legacy.collections` flag, and the implicit backwards-compatibility shim are all removed, so every collection must declare a `loader`.
 
 ---
 
@@ -8,12 +8,15 @@ The Content Layer API (Astro 5) is a unified system for defining, loading, valid
 
 ```typescript
 // content.config.ts (project root — NOT src/content/config.ts)
-import { defineCollection, z } from 'astro:content';
+import { defineCollection } from 'astro:content';
+import { z } from 'astro/zod';   // Astro 6: z is imported from astro/zod
 
 export const collections = { /* ... */ };
 ```
 
-**Important:** In Astro 5, this file lives at the project root as `content.config.ts` (or `.mjs`). The Astro 4 location `src/content/config.ts` is legacy.
+**Important:** This file lives at the project root as `content.config.ts` (or `.mjs`). The Astro 4 location `src/content/config.ts` is removed in Astro 6 (it raised a `LegacyContentConfigError`).
+
+> **Astro 6 Zod import.** The `z` re-export from `astro:content` and the `astro:schema` alias are deprecated — import `z` from `astro/zod` instead. This also keeps you on the exact Zod version (Zod 4) that Astro uses internally.
 
 ---
 
@@ -22,7 +25,8 @@ export const collections = { /* ... */ };
 ### With Built-in Loaders
 
 ```typescript
-import { defineCollection, z } from 'astro:content';
+import { defineCollection } from 'astro:content';
+import { z } from 'astro/zod';
 import { glob, file } from 'astro/loaders';
 
 // Markdown/MDX files from a directory
@@ -95,7 +99,9 @@ Custom loaders connect any data source to Astro's content system.
 interface Loader {
   name: string;
   load: (context: LoaderContext) => Promise<void>;
-  schema?: ZodSchema;  // Optional: override collection schema
+  schema?: ZodSchema;  // Optional: a Zod schema object to override the collection schema
+  // Astro 6: to derive a schema dynamically (e.g. from an API), use createSchema()
+  // instead — the old function-form `schema: () => ...` signature was removed.
 }
 
 interface LoaderContext {
@@ -157,7 +163,8 @@ export function sqliteLoader(options: SQLiteLoaderOptions): Loader {
 Usage in `content.config.ts`:
 
 ```typescript
-import { defineCollection, z } from 'astro:content';
+import { defineCollection } from 'astro:content';
+import { z } from 'astro/zod';
 import { sqliteLoader } from './src/lib/loaders/sqlite-loader';
 
 const works = defineCollection({
@@ -298,9 +305,11 @@ const blog = defineCollection({
 
 ```typescript
 z.coerce.date()                         // Auto-coerce strings to Date
-z.string().date()                       // Validate as ISO date string
+z.iso.date()                            // Validate as ISO date string (Zod 4; was z.string().date())
 z.string().regex(/^\d{4}-\d{2}-\d{2}$/) // Strict YYYY-MM-DD
 ```
+
+> **Zod 4 (Astro 6).** Many string-format helpers moved to the top-level `z` namespace: `z.string().url()` → `z.url()`, `z.string().email()` → `z.email()`, `z.string().date()` → `z.iso.date()`. The old `.string().<format>()` forms are deprecated. See the [Zod 4 changelog](https://zod.dev/v4/changelog).
 
 ### Enums for Content Types
 
@@ -322,7 +331,7 @@ z.number().nullable().default(null)
 ```typescript
 z.object({
   source: z.object({
-    url: z.string().url(),
+    url: z.url(),                  // Zod 4: top-level z.url() (was z.string().url())
     name: z.string(),
     accessed: z.coerce.date(),
   }).optional(),
@@ -333,8 +342,8 @@ z.object({
 
 ## Gotchas
 
-1. **`content.config.ts` location.** Must be at project root in Astro 5, not `src/content/config.ts`.
+1. **`content.config.ts` location.** Must be at project root, not `src/content/config.ts` (the legacy location is removed in Astro 6).
 2. **Collection entry IDs.** With `glob()`, the ID is the file path relative to `base`, without extension. With custom loaders, you set the ID explicitly.
 3. **Type generation.** Run `astro sync` to regenerate types after changing collection schemas.
 4. **Schema validation.** Zod validates at build time. Invalid data causes build errors with clear messages.
-5. **`render()` import.** In Astro 5, import `render` from `astro:content`, not as a method on the entry.
+5. **`render()` import.** Import `render` from `astro:content`, not as a method on the entry (`entry.render()` was a legacy-collections API, removed in Astro 6).

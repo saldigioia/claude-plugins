@@ -127,7 +127,7 @@ src/content/
     └── navigation.yaml
 ```
 
-**Note:** In Astro 5, the `content.config.ts` at the project root defines which directories become collections and their schemas. The `src/content/` directory is not special — it's just a conventional location for local content files.
+**Note:** The `content.config.ts` at the project root defines which directories become collections and their schemas. The `src/content/` directory is not special — it's just a conventional location for local content files. (In Astro 6, this root-level config is required; the old `src/content/config.ts` location is removed.)
 
 ### `src/styles/`
 
@@ -215,4 +215,4 @@ db/
 | `client:load` on everything | Ships unnecessary JS | Default to no directive; justify each island |
 | CSS in `public/` | Bypasses Astro's build pipeline | Put in `src/styles/` and import |
 | Barrel exports for Astro components | Astro components can't be re-exported from `.ts` | Import directly from file paths |
-| `src/content/config.ts` | Astro 4 legacy location | Move to `content.config.ts` at project root (Astro 5) |
+| `src/content/config.ts` | Removed in Astro 6 (was Astro 4 legacy location) | Move to `content.config.ts` at project root |

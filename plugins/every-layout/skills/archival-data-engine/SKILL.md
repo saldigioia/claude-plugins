@@ -126,7 +126,8 @@ export function sqliteLoader(options: SQLiteLoaderOptions): Loader {
 
 ```typescript
 // content.config.ts
-import { defineCollection, z } from 'astro:content';
+import { defineCollection } from 'astro:content';
+import { z } from 'astro/zod';
 import { sqliteLoader } from './src/lib/loaders/sqlite-loader';
 
 const works = defineCollection({

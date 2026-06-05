@@ -219,7 +219,7 @@ import { ClientRouter } from 'astro:transitions';
 </head>
 ```
 
-Astro 5 renamed this component from `ViewTransitions` to `ClientRouter`. The old name is a deprecated alias retained for backwards compatibility — use `ClientRouter` in new code.
+Use `ClientRouter`. The old `ViewTransitions` component (an Astro 4 name kept as a deprecated alias in Astro 5) was **removed in Astro 6**, so `ClientRouter` is now the only option.
 
 ### Performance Implications
 
@@ -265,7 +265,7 @@ All assets in `_astro/` are content-hashed for aggressive caching.
 
 ### Build Performance Tips
 
-1. **Content caching.** Astro 5 caches content layer data between builds. Loaders that use `digest` enable incremental updates.
+1. **Content caching.** Astro caches content layer data between builds. Loaders that use `digest` enable incremental updates.
 2. **Parallel image processing.** Astro processes images in parallel during build.
 3. **Avoid dynamic imports in frontmatter.** These create additional build chunks.
 

@@ -47,16 +47,18 @@ import sitemap from '@astrojs/sitemap';
 
 export default defineConfig({
   site: 'https://example.com',
-  output: 'hybrid',             // Static by default, opt-in SSR
+  output: 'static',             // Static by default; opt individual pages into SSR
   adapter: cloudflare(),
   trailingSlash: 'always',
   integrations: [sitemap()],
 });
 ```
 
-### Hybrid Mode — Opt-in SSR
+> **Astro 6 / Cloudflare.** The `'hybrid'` output mode was removed in Astro 5 — `output: 'static'` is the default and pages opt into on-demand rendering individually (below). The Cloudflare adapter had significant breaking changes in the release that accompanies Astro 6; see the [Cloudflare adapter upgrade guide](https://docs.astro.build/en/guides/integrations-guide/cloudflare/#upgrading-to-v13-and-astro-6).
 
-In hybrid mode, pages are static by default. Add `export const prerender = false` to make a page server-rendered:
+### Opt-in SSR per page
+
+With the default static output, add `export const prerender = false` to make an individual page server-rendered (requires an adapter):
 
 ```astro
 ---
@@ -230,7 +232,7 @@ export default defineConfig({
 | Option | Type | Default | Purpose |
 |--------|------|---------|---------|
 | `site` | `string` | — | Full URL, used for sitemap and canonical URLs |
-| `output` | `'static' \| 'server' \| 'hybrid'` | `'static'` | Rendering mode |
+| `output` | `'static' \| 'server'` | `'static'` | Rendering mode (`'hybrid'` removed in Astro 5; use `'static'` + per-page `prerender = false`) |
 | `adapter` | Adapter | — | Server adapter (Cloudflare, Node, Vercel, etc.) |
 | `trailingSlash` | `'always' \| 'never' \| 'ignore'` | `'ignore'` | URL trailing slash behavior |
 | `integrations` | `Integration[]` | `[]` | Astro integrations |

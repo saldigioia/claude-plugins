@@ -1,8 +1,8 @@
 # Every Layout Plugin
 
-Composable CSS layout primitives, Astro 5 site architecture, archival data engine, and design system tokens for Claude Code. Built on the [Every Layout](https://every-layout.dev) methodology by Andy Bell and Heydon Pickering.
+Composable CSS layout primitives, Astro 6 site architecture, archival data engine, and design system tokens for Claude Code. Built on the [Every Layout](https://every-layout.dev) methodology by Andy Bell and Heydon Pickering.
 
-**Version:** 4.2.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
+**Version:** 4.5.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
 
 ## The commitment
 
@@ -25,7 +25,7 @@ When Claude Code edits CSS, HTML, or Astro files with this plugin enabled, it ap
 
 It also provides:
 
-- **Astro 5 project architecture** — content collections, layouts, routing, performance budgets
+- **Astro 6 project architecture** — content collections, layouts, routing, performance budgets
 - **Archival data patterns** — SQLite/libSQL/Drizzle/Astro DB schemas and custom loaders
 - **Framework component ports** — Astro, React, Vue, Svelte, Tailwind, and vanilla CSS
 - **Design system tokens** — color theming with `light-dark()`, fluid type, escape hatch registry, accessibility patterns
@@ -59,6 +59,23 @@ bash /path/to/every-layout-plugin/bin/js-budget.sh dist
 ```
 
 Both exit non-zero on violation. Wire them as required status checks.
+
+### Registering intentional exceptions (`escapes.md`)
+
+Copy `escapes.md.template` to `escapes.md` in your project root. Both gates read
+it directly and decide per violation:
+
+- a registered, **unexpired** escape is **suppressed** — the gate prints
+  `… — suppressed by ESC_…` and stays green;
+- an **expired** escape **fails** the gate with `escape expired`;
+- a violation with **no** escape **fails** as normal.
+
+Each row carries a target glob, the `ELA_###` axiom, an optional line scope
+(`-` for the whole file, or `9`/`9,10`/`9-11`), an inclusive ISO expiry, an
+owner, and a justification — so every waiver is bounded and accountable rather
+than a silent `--no-verify`. CI can pin "today" with `ESCAPES_TODAY=YYYY-MM-DD`
+for reproducible runs. Format and field rules: `escapes.md.template` and
+[`skills/css-design-system/references/escape-hatch-registry.md`](skills/css-design-system/references/escape-hatch-registry.md).
 
 ## Contents
 

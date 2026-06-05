@@ -10,7 +10,10 @@ Custom loaders bridge external data sources to Astro's Content Layer API.
 interface Loader {
   name: string;
   load: (context: LoaderContext) => Promise<void>;
-  schema?: ZodSchema;
+  schema?: ZodSchema;          // A Zod schema object
+  // Astro 6: the function-form `schema: () => ...` signature was removed.
+  // To derive a schema dynamically (e.g. by introspecting an API), use the
+  // new `createSchema()` property instead.
 }
 
 interface LoaderContext {
@@ -90,7 +93,8 @@ export function sqliteLoader(options: SQLiteLoaderOptions): Loader {
 
 ```typescript
 // content.config.ts
-import { defineCollection, z } from 'astro:content';
+import { defineCollection } from 'astro:content';
+import { z } from 'astro/zod';
 import { sqliteLoader } from './src/lib/loaders/sqlite-loader';
 
 const works = defineCollection({

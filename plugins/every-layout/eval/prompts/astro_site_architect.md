@@ -3,6 +3,15 @@
 ## Purpose
 Evaluate Astro site setup and architecture against the astro-site-architect skill.
 
+## Fixtures
+
+Run this prompt against these fixture files:
+
+| Fixture | Expected Score | Grade |
+|---------|----------------|-------|
+| `eval/fixtures/astro-layout-compliant.astro` | 9-10/10 | A |
+| `eval/fixtures/astro-layout-non-compliant.astro` | 2-4/10 | F |
+
 ## Prompt Template
 
 ```

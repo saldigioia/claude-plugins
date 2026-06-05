@@ -306,7 +306,7 @@ export default defineDb({
 Corresponding Zod schemas for validating loader output:
 
 ```typescript
-import { z } from 'astro:content';
+import { z } from 'astro/zod';   // Astro 6: import z from astro/zod, not astro:content
 
 export const workSchema = z.object({
   title: z.string(),
@@ -314,7 +314,7 @@ export const workSchema = z.object({
   release_date: z.string().regex(/^\d{4}(-\d{2}(-\d{2})?)?$/),
   year: z.number().int().min(1900).max(2100),
   description: z.string().nullable().default(null),
-  cover_url: z.string().url().nullable().default(null),
+  cover_url: z.url().nullable().default(null),   // Zod 4: top-level z.url() (was z.string().url())
 });
 
 export const trackSchema = z.object({

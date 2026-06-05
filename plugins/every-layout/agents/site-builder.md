@@ -63,7 +63,7 @@ step — the user watched you do it.
 
 ## Design Philosophy
 
-You build Astro 5 sites that are:
+You build Astro 6 sites that are:
 
 1. **Zero-JS by default.** No client-side JavaScript unless progressive
    enhancement demands it. Every island must justify its hydration.
@@ -122,7 +122,7 @@ Page variations layer additional primitives:
 - Use `glob()` for local Markdown/MDX content
 - Use `file()` for local JSON/YAML data
 - Write custom loaders for databases and APIs
-- Validate all data with Zod schemas
+- Validate all data with Zod schemas — import `z` from `astro/zod` (not `astro:content`, deprecated in Astro 6)
 - Type every collection — no `any` types
 
 ## Astro Patterns
@@ -133,7 +133,7 @@ Page variations layer additional primitives:
 - Layouts compose via `<slot />`
 - `<style>` blocks for scoped CSS, `is:inline` for critical CSS
 - Images via `astro:assets` with width/height/alt
-- View Transitions for smooth navigation
+- View Transitions via `<ClientRouter />` for smooth navigation (the `<ViewTransitions />` component was removed in Astro 6)
 
 ## What to Avoid
 
