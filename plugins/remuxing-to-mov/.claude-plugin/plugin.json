@@ -1,0 +1,18 @@
+{
+  "name": "remuxing-to-mov",
+  "version": "1.0.0",
+  "description": "Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. Five-rung escalation ladder (pure copy → PCM audio → genpts → elementary-stream timeline rebuild → scoped re-encode) with probe/diagnose/verify scripts, a dual-track PCM-access + bit-exact-original audio default, field-coded (PAFF) H.264 glitch repair, and decoded-pixel-identity verification of every output. Every codec/container fact verified empirically against a named ffmpeg version; the source file is never touched.",
+  "author": {
+    "name": "Rare Data Club"
+  },
+  "homepage": "https://github.com/saldigioia/claude-plugins/tree/main/plugins/remuxing-to-mov",
+  "repository": "https://github.com/saldigioia/claude-plugins",
+  "license": "MIT",
+  "keywords": [
+    "video", "remux", "mov", "quicktime", "ffmpeg",
+    "lossless", "stream-copy", "mpeg-ts", "broadcast",
+    "interlaced", "paff", "timestamps", "hevc", "hvc1",
+    "dolby-vision", "hdr10", "closed-captions", "dual-track",
+    "archival-video", "provenance"
+  ]
+}
