@@ -10,9 +10,24 @@
 set -euo pipefail
 IN="${1:?usage: diagnose.sh INPUT}"
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-paff.sh"   # shared PAFF detection
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never the source
 
 echo "== diagnosing: $IN =="
+
+# Field-coded (PAFF) check up front — it changes every verdict below: for PAFF,
+# genpts is guilty-until-proven and the reliable fix is the field-rate rebuild.
+eval "$(pf_detect "$IN")"
+if [ "$PF_FIELD_RATE" = unknown ]; then
+  RB="scripts/rebuild-paff.sh \"$IN\" OUT.mov <FIELD_RATE> <TIMESCALE>  (pick from the field-rate table)"
+else
+  RB="scripts/rebuild-paff.sh \"$IN\" OUT.mov $PF_FIELD_RATE $PF_TIMESCALE"
+fi
+if [ "$PF_PAFF" = yes ]; then
+  echo "** FIELD-CODED (PAFF) H.264: coded-pic rate ${PF_CODED_RATE}/s ~= 2x frame rate ${PF_NOMINAL_FPS}/s."
+  echo "** Bias all verdicts toward the field-rate rebuild; genpts is guilty-until-proven. **"
+fi
 
 # (1) decode-to-null: separates real decode damage from timestamp defects.
 echo "-- (1) decode-to-null integrity --"
@@ -35,8 +50,14 @@ if ffmpeg -nostdin -v error -i "$IN" -map 0:v:0 -map "0:a?" -c copy "$TMP/t.mkv"
 else
   echo "   MKV mux FAILED:"; sed 's/^/     /' "$TMP/mkv.err" | tail -3
   if grep -qiE 'timestamp.*unset|unknown timestamp' "$TMP/mkv.err"; then
-    echo ">> VERDICT: MISSING TIMESTAMPS. Try Rung-2 genpts (remux.sh --genpts);"
-    echo "   if it still glitches, full rebuild: scripts/rebuild-paff.sh."
+    if [ "$PF_PAFF" = yes ]; then
+      echo ">> VERDICT: MISSING TIMESTAMPS on FIELD-CODED (PAFF) H.264."
+      echo "   Skip genpts (guilty-until-proven on PAFF). Rebuild at the field rate:"
+      echo "   $RB"
+    else
+      echo ">> VERDICT: MISSING TIMESTAMPS. Try Rung-2 genpts (remux.sh --genpts);"
+      echo "   if it still glitches, full rebuild: $RB"
+    fi
     exit 0
   fi
   mkv_ok=0
@@ -54,10 +75,20 @@ echo "   first 5000 packets: duplicate(equal) DTS=${ndup:-0}  backward DTS=${nba
 if [ "${nmono:-0}" -ge 10 ] || [ "${ndup:-0}" -gt 0 ] || [ "${nback:-0}" -gt 0 ]; then
   echo ">> VERDICT: NON-MONOTONIC / DUPLICATE DTS (broken timeline, common on a"
   echo "   field-coded stream muxed on a non-integer timebase). Full rebuild at the"
-  echo "   field rate: scripts/rebuild-paff.sh IN OUT.mov 60000/1001 60000"
+  echo "   field rate: $RB"
 elif [ "${mkv_ok:-1}" -eq 1 ]; then
-  echo ">> VERDICT: timing looks sound -> plain copy (Rung 0): scripts/remux.sh."
-  echo "   (If MOV still glitches despite this, rebuild anyway: rebuild-paff.sh.)"
+  if [ "$PF_PAFF" = yes ]; then
+    echo ">> VERDICT: timing PASSES the mux tests, but this is FIELD-CODED (PAFF)"
+    echo "   H.264 — the strict-mux test proves timestamps are present and monotonic,"
+    echo "   NOT that the timeline is seekable. That gap is exactly where the silent"
+    echo "   corruption lives. Treat plain copy / genpts as provisional:"
+    echo "     reliable:  $RB"
+    echo "     or verify a copy with the scrub gate before trusting it:"
+    echo "                scripts/verify.sh \"$IN\" OUT.mov   (fails on a glitchy scrub)"
+  else
+    echo ">> VERDICT: timing looks sound -> plain copy (Rung 0): scripts/remux.sh."
+    echo "   (If MOV still glitches despite this, rebuild anyway: rebuild-paff.sh.)"
+  fi
 else
-  echo ">> VERDICT: timestamps problematic (MKV refused) -> rebuild: scripts/rebuild-paff.sh."
+  echo ">> VERDICT: timestamps problematic (MKV refused) -> rebuild: $RB"
 fi

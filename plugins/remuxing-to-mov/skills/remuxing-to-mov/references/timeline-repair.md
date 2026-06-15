@@ -25,6 +25,24 @@ ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,field_order
 - `tt` + mediainfo `Scan type, store method: Separated fields` → **PAFF /
   field-coded** (each frame = two field pictures). The fragile profile.
 
+**Programmatic tell (no mediainfo required):** field-coded PAFF shows a
+**coded-picture rate ≈ 2× the container frame rate** — each field picture is its
+own access unit, so ~60 AU/s on 29.97p content (or ~50 on 25p) is the signature.
+`probe.sh` measures this from a bounded packet window (demux only) and is what
+routes PAFF straight to the field-rate rebuild instead of genpts. `field_order`
+tt/bb corroborates but is not required — some captures report `unknown` while
+still being field-coded, so the rate ratio is the decisive test.
+
+```
+# coded-picture rate over the first 240 packets (no decode)
+ffprobe -v error -select_streams v:0 -read_intervals "%+#240" \
+  -show_entries packet=pts_time,dts_time -of csv=p=0 IN \
+  | awk -F, '{t=$1; if(t=="N/A"||t==""){t=$2}; if(t=="N/A"||t=="")next;
+      if(!s){mn=mx=t;s=1}else{if(t<mn)mn=t;if(t>mx)mx=t}; n++}
+      END{if(s&&mx>mn)printf "%.3f AU/s\n",(n-1)/(mx-mn)}'
+# compare to avg_frame_rate; ratio ~2.0 = PAFF.
+```
+
 ## `-field_order` and `fiel` (verified, ffmpeg 6.1.1)
 
 - **Do not add `-field_order tt`** to a copy mux — it's an encoder-side option
@@ -73,13 +91,27 @@ flood of `non monotonically increasing dts` in step (1)'s decode-to-null output.
 
 ## Repair ladder
 
-**Rung 2 — regenerate timestamps (try first; `remux.sh --genpts`):**
+**Rung 2 — regenerate timestamps (`remux.sh --genpts`):**
 ```
 ffmpeg -nostdin -fflags +genpts -i IN -map 0:v:0 -map 0:a:0 \
   -c:v copy -c:a copy \            # -c:a pcm_s16le if MP2/MP1/DTS
   -movflags +faststart -f mov OUT.mov
 ```
 Harmless on a clean file (only fills what's absent). Play through and scrub.
+
+**Guilty-until-proven on field-coded (PAFF) H.264.** This is the trap behind the
+corrupted-file post-mortem: genpts produced a file that *passed* the strict
+MKV-mux test and played start-to-finish, but **mux-valid ≠ seekable** — the
+strict-mux test only proves timestamps are present and monotonic, not that the
+container's seek index/edit list lands correctly. On a player scrub it tore. So
+for PAFF, do **not** ship genpts output on the strength of the mux test:
+- prefer Rung 3 (field-rate rebuild) directly — `probe.sh`/`diagnose.sh` route
+  there automatically; or
+- if you do use genpts, gate the result through `verify.sh`'s **scrub test**
+  (accurate off-keyframe seeks + keyframe-spacing check) before deleting the
+  source. An ffmpeg keyframe-accurate seek (`-ss` before `-i`) stayed clean on
+  the broken file — it snaps to a keyframe — so it does not substitute for the
+  scrub test.
 
 **Rung 3 — full timeline rebuild (`rebuild-paff.sh IN OUT RATE [TS]`):**
 Discard container timestamps and re-derive at the true field rate. Video stays

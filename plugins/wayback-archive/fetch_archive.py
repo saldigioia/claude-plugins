@@ -81,8 +81,19 @@ class ProxyConfig:
     port_max: int = 8020
     _next_port: int = field(default=8001, repr=False)
 
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.username and self.password)
+
     def next_proxy_url(self) -> str:
         """Round-robin through ports for even distribution."""
+        if not self.is_configured:
+            raise RuntimeError(
+                "Proxy is not configured. Set the Oxylabs env vars "
+                "(OXYLABS_ISP_USER / OXYLABS_ISP_PASS for ISP; "
+                "OXYLABS_DC_USER / OXYLABS_DC_PASS for DC) via a .env file "
+                "or shell export before invoking the proxy fetch path."
+            )
         port = self._next_port
         self._next_port = self.port_min + (
             (self._next_port - self.port_min + 1) % (self.port_max - self.port_min + 1)
@@ -92,17 +103,21 @@ class ProxyConfig:
         return f"http://{user}:{pw}@{self.host}:{port}"
 
 
-# Default proxy configs — override via env vars
+# Proxy configs are populated from the environment only. No literal defaults
+# are hard-coded — that prevented sharing the plugin without leaking one
+# developer's Oxylabs credentials into every checkout. If the env vars are
+# not set, ``ProxyConfig.is_configured`` is False and ``next_proxy_url``
+# raises a clear error instead of silently routing over someone else's keys.
 ISP_PROXY = ProxyConfig(
     host="isp.oxylabs.io",
-    username=os.environ.get("OXYLABS_ISP_USER", "salthecowboy_Yyegj"),
-    password=os.environ.get("OXYLABS_ISP_PASS", "Kif0dl2=24P~lk9"),
+    username=os.environ.get("OXYLABS_ISP_USER", ""),
+    password=os.environ.get("OXYLABS_ISP_PASS", ""),
 )
 
 DC_PROXY = ProxyConfig(
     host="dc.pr.oxylabs.io",
-    username=os.environ.get("OXYLABS_DC_USER", "salthecowboy_5MnlE"),
-    password=os.environ.get("OXYLABS_DC_PASS", "EbS1WC5~adK8Tw"),
+    username=os.environ.get("OXYLABS_DC_USER", ""),
+    password=os.environ.get("OXYLABS_DC_PASS", ""),
 )
 
 # ── URL Classification ────────────────────────────────────────────────────
@@ -547,6 +562,14 @@ async def run(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     proxy_config = ISP_PROXY if proxy_type == "isp" else DC_PROXY
+    if not proxy_config.is_configured:
+        log.error(
+            "Proxy type '%s' is not configured. Set the matching Oxylabs env "
+            "vars before invoking the proxy fetch path, or run with proxy "
+            "disabled (direct Wayback only).",
+            proxy_type,
+        )
+        raise SystemExit(2)
 
     # Semaphores
     direct_sem = asyncio.Semaphore(10)  # Direct Wayback — generous, no proxy cost

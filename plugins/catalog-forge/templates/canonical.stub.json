@@ -1,0 +1,20 @@
+{
+  "schema_version": "canonical-3.1",
+  "slug": "__SLUG__",
+  "folder_name": "__FOLDER__",
+  "name": "__NAME__",
+  "color": null,
+  "color_token": null,
+  "collection": "__COLLECTION__",
+  "era": "__ERA__",
+  "date": null,
+  "sources": [],
+  "images": [],
+  "citations": {},
+  "provenance": {
+    "generated_at": "__NOW__",
+    "generator": "catalog scaffold",
+    "rubric": "canonical-3.1",
+    "_status": "STUB — not finalized. Acquire imagery, trace sources, then run catalog-finalize."
+  }
+}

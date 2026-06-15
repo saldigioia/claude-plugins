@@ -31,7 +31,35 @@ from urllib.parse import urlparse, unquote
 
 import requests
 
+from .resilience import CircuitBreaker
+
 log = logging.getLogger(__name__)
+
+# Module-level breaker so every call site in a stage shares the same host
+# failure state. Without this, the cascade retries assets.yeezysupply.com
+# (a dead host) for 30s per URL × hundreds of URLs, blocking the whole
+# download stage. Three consecutive connection-level failures per host
+# are enough evidence that the host is not resolving / not responding.
+_HOST_BREAKER = CircuitBreaker(max_retries=3)
+
+
+def _host_of(url: str) -> str:
+    """Lowercased hostname for breaker keying; empty string for bad URLs."""
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return ""
+    return host.lower().rstrip(".")
+
+
+def reset_host_breaker() -> None:
+    """Reset the module-level circuit breaker (useful between stages/tests)."""
+    _HOST_BREAKER.reset()
+
+
+def host_breaker_stats() -> dict:
+    """Return observability stats for the module-level breaker."""
+    return _HOST_BREAKER.get_stats()
 
 # Image validation
 IMAGE_MAGIC = {
@@ -148,9 +176,23 @@ def download_via_cdn_tool(
     """
     Pipe URLs through the CDN quality probe tool for best-quality download.
     Returns list of downloaded file paths.
+
+    URLs whose host has already tripped the circuit breaker are dropped
+    before the tool is invoked — the external ``cdn_tool`` binary has no
+    knowledge of breaker state and would otherwise block on dead hosts.
     """
     if not urls or not cdn_tool.exists():
         return []
+
+    # Drop URLs whose host has tripped.
+    filtered = [u for u in urls if not (h := _host_of(u)) or not _HOST_BREAKER.should_skip(h)]
+    if not filtered:
+        log.debug("download_via_cdn_tool: all %d URLs' hosts have tripped, skipping", len(urls))
+        return []
+    if len(filtered) < len(urls):
+        log.debug("download_via_cdn_tool: dropped %d tripped-host URLs",
+                  len(urls) - len(filtered))
+    urls = filtered
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -186,15 +228,36 @@ def download_direct(
     session: requests.Session,
     timeout: tuple[int, int] = (10, 30),
 ) -> bool:
-    """Try downloading a URL directly via HTTP."""
+    """Try downloading a URL directly via HTTP.
+
+    Short-circuits if the target host's circuit breaker has tripped — this
+    prevents the ``assets.yeezysupply.com`` style hang where a dead host
+    costs timeout-full seconds per URL across an entire product batch.
+    Connection-level failures (ConnectionError, timeouts) feed the breaker;
+    HTTP-level 4xx/5xx do not — those are per-URL, not per-host.
+    """
+    host = _host_of(url)
+    if host and _HOST_BREAKER.should_skip(host):
+        log.debug("skipping %s: host %s tripped", url, host)
+        return False
     try:
         resp = session.get(url, timeout=timeout)
         if resp.status_code == 200 and is_valid_image(
             resp.content, resp.headers.get("content-type", "")
         ):
             dest.write_bytes(resp.content)
+            if host:
+                _HOST_BREAKER.record_success(host)
             return True
+    except (requests.ConnectionError, requests.Timeout) as e:
+        log.debug("direct download connection failed for %s: %s", url, e)
+        if host:
+            pause = _HOST_BREAKER.record_failure(host)
+            if pause > 0:
+                log.info("host %s paused for %.0fs after repeated failures", host, pause)
+                time.sleep(min(pause, 5.0))  # cap in-cascade sleep; breaker will skip next time
     except requests.RequestException as e:
+        # HTTP-level errors (4xx/5xx) are not host-level problems.
         log.debug("direct download failed for %s: %s", url, e)
     except OSError as e:
         log.warning("direct download write failed for %s: %s", dest, e)
@@ -263,7 +326,13 @@ def download_wayback_image(
     session: requests.Session,
     retries: int = 3,
 ) -> bool:
-    """Download a single image from the Wayback Machine with retries."""
+    """Download a single image from the Wayback Machine with retries.
+
+    Wayback is the fallback after direct CDN fails; we deliberately do NOT
+    wire this path through the host breaker, because ``web.archive.org`` is
+    the one host you can trust to stay reachable in this pipeline — tripping
+    it would cascade into a near-total outage.
+    """
     for attempt in range(retries):
         try:
             resp = session.get(wb_url, timeout=(10, 60), allow_redirects=True)

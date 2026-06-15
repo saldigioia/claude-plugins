@@ -1,0 +1,8 @@
+{
+  "name": "catalog-forge",
+  "version": "0.2.0",
+  "description": "Verify, enrich, finalize, and promote canonical-3.1 product catalogs against a truth-root archive. A skill + a curator subagent + commands over the existing 4-axis verifier and collection pipeline, with a hook that locks POS truth. Mechanical steps auto-apply; judgment stays curator-gated.",
+  "author": { "name": "Sal", "email": "salthecowboy@proton.me" },
+  "license": "MIT",
+  "keywords": ["catalog", "canonical-3.1", "archive", "verification", "curation", "provenance"]
+}

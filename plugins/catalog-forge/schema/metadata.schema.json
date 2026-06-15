@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "metadata.schema.json",
+  "title": "metadata (POS truth sidecar)",
+  "description": "Read-only point-of-sale record (FTK/FanFire/etc.). The pipeline NEVER writes it; this schema only catches gross drift — a missing id/name or non-object JSON. Everything else passes (additionalProperties:true) because POS records vary by platform and era.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["internal_id", "name"],
+  "properties": {
+    "internal_id": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 }
+  }
+}

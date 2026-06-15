@@ -40,16 +40,30 @@ ffmpeg -v error -i OUT -map 0:v:0 -c copy -f streamhash -hash md5 -
 # A MISMATCH here is INCONCLUSIVE, not a failure: TS sources get SPS/PPS
 # re-placed and Rung-3 rebuilds repacketize, so identical video can hash
 # differently at the packet level. Fall through to (b).
-# (b) decoded spot-identity: first ~300 frames, hash column only
-ffmpeg -v error -i F -map 0:v:0 -frames:v 300 -f framemd5 - \
-  | grep -v '^#' | awk -F', *' '{print $NF}'        # must match IN vs OUT
-# ...plus video packet-count parity (ffprobe -count_packets; demux only).
+# (b) lossless essence. H.264: VCL-payload hash — strip SPS(7)/PPS(8)/AUD(9)/
+#     SEI(6) so parameter-set placement (TS in-band vs MOV avcC) and a re-time
+#     cannot false-mismatch. Demux only. A MATCH proves lossless even when (a)
+#     and decoded framemd5 both disagree (it survives TS->MOV AND field-rate
+#     rebuilds — the exact case where framemd5 FALSE-FAILs).
+ffmpeg -v error -i IN  -map 0:v:0 -c:v copy -bsf:v filter_units=remove_types=6|7|8|9 -f streamhash -hash md5 -
+ffmpeg -v error -i OUT -map 0:v:0 -c:v copy -bsf:v h264_mp4toannexb,filter_units=remove_types=6|7|8|9 -f streamhash -hash md5 -
+#     (prepend h264_mp4toannexb, only for AVCC inputs: MP4/MOV/MKV. Omit for TS/PS.)
+#     Non-H.264: decoded framemd5 of the first ~300 frames (hash column only) +
+#     packet-count parity (ffprobe -count_packets; demux only).
 # (c) output decode spot-checks: 10 s windows at middle and tail (-f null)
 # (d) timeline clean
 ffprobe -v error -select_streams v:0 -read_intervals "%+#3000" -show_entries packet=dts -of csv=p=0 OUT \
   | awk -F, 'NR>1 && $1!="N/A" && p!="N/A" && $1<p {b++} {p=$1} END{print b+0" backward-DTS (want 0)"}'
-# (e) if the SOURCE failed the MKV strict-mux test, confirm OUT now passes it
-# (f) scrub by eye at start / middle / end
+# (e) SCRUB GATE — accurate seek to a deliberately OFF-keyframe point (-ss AFTER
+#     -i), the way a player lands mid-GOP and follows the seek index/edit list.
+#     A keyframe-snap seek (-ss before -i) stays clean on a broken PAFF timeline,
+#     so it is NOT a substitute. Any decode error here = FAIL (catch it before
+#     deleting the source). Pick the midpoint between two keyframes as the target.
+ffmpeg -v error -ss KF_BEFORE -i OUT -ss DELTA_TO_MIDPOINT -t 4 -map 0:v:0 -f null -
+#     plus a keyframe-spacing sanity check: a single GOP over a multi-minute file
+#     is effectively not seekable. (verify.sh step (e) automates all of this.)
+# (f) if the SOURCE failed the MKV strict-mux test, confirm OUT now passes it
+# (g) scrub by eye at start / middle / end — the ultimate arbiter (playable≠valid)
 ```
 
 **Exhaustive tier (`--full`) — whole-file decoded-pixel identity:**
@@ -58,6 +72,13 @@ ffprobe -v error -select_streams v:0 -read_intervals "%+#3000" -show_entries pac
 ffmpeg -v error -i IN  -map 0:v:0 -c:v rawvideo -f md5 -
 ffmpeg -v error -i OUT -map 0:v:0 -c:v rawvideo -f md5 -   # must match
 ```
+
+For **field-coded (PAFF) H.264 this positional rawvideo md5 FALSE-FAILs** — the
+rebuilt file presents a different frame COUNT/order (field-vs-frame, edit list),
+so the byte streams differ even when lossless. There, compare the *sorted
+multiset* of frame hashes instead (order/count-tolerant) and treat the cheap-tier
+VCL hash as the authoritative proof — never FAIL a field-coded stream on a
+positional decode. `verify.sh --full` does exactly this split automatically.
 
 Reserve `--full` for: final archival sign-off, settling a REVIEW verdict from
 the cheap tier (e.g. packet counts differ and no Rung-3 rebuild explains it),
@@ -69,7 +90,12 @@ NOT md5 full `framemd5` lines — they include dts/pts/duration columns and
 FALSE-mismatch after any re-timing rebuild (rebuild-paff.sh changes the
 timeline). Compare only the hash column. Likewise raw-bitstream MD5
 false-mismatches on TS sources (SPS/PPS re-placement) — that is why a
-streamhash mismatch only escalates, never fails.
+streamhash mismatch only escalates, never fails. **For field-coded (PAFF)
+H.264, decoded comparison fails even on the hash column** — the decoder presents
+a different frame count/order, so a first-N or positional compare mismatches a
+lossless rebuild. Use the **VCL-payload hash** (SPS/PPS/AUD/SEI stripped via
+`filter_units`) as the arbiter; it compares the coded picture data directly and
+is invariant to both parameter-set placement and re-timing.
 
 ## Container-valid ≠ QuickTime-playable
 
@@ -87,6 +113,42 @@ A correct mux can still fail to play; don't chase a phantom "bad mux".
 
 For genuine playback of the "no/unverified" rows you're at Rung 4 (transcode —
 see `delivery-encode.md`), or keep the original container for archival.
+
+## Mux-valid ≠ seekable (the silent-corruption gap)
+
+A file can pass every *mux* test — it opens, plays start to finish, passes the
+strict MKV-mux test, shows monotonic DTS — and still tear the instant a player
+scrubs. "Timestamps present and monotonic" and "the container's seek index /
+edit list lands correctly" are different properties, and the gap between them is
+where a genpts'd field-coded (PAFF) remux corrupts silently. Two cheap automated
+proxies close it (both in `verify.sh` step (e)):
+
+- **Scrub gate** — accurate seeks (`-ss` AFTER `-i`) to deliberately off-keyframe
+  targets, the way a GUI scrub lands mid-GOP and follows the index/edit list. A
+  keyframe-accurate seek (`-ss` before `-i`) snaps to a keyframe and stays clean
+  on the broken file, so it does NOT test this. Use the accurate form.
+- **Keyframe-spacing sanity** — a single GOP (or absurdly sparse keyframes) over a
+  multi-minute file means a scrub must decode from far back: effectively not
+  seekable.
+
+A real player is still the final arbiter ("playable ≠ valid"), but these catch
+the case unaided — before the source is deleted.
+
+## Optional preservation checks (`--signaling`, `--audio`)
+
+Losslessness and a clean timeline don't prove the *non-pixel* signaling survived.
+Two opt-in `verify.sh` checks cover the rest:
+
+- `--signaling` compares color/HDR tags (primaries/transfer/space/range), the
+  HEVC `hvc1` tag, HDR mastering/CLL side data, and closed-caption presence
+  (source vs output). Drift → REVIEW (some normalization on copy is benign).
+- `--audio` checks the dual-track deliverable: the preserved original track must
+  be **bit-exact** vs the source (else FAIL) and the PCM access track must equal
+  the decoded original and stay aligned (else REVIEW) — the alignment QC that
+  `dual-track.sh` prints, automated.
+
+`auto.sh` builds the lossless ladder; add these flags when the source carries
+HDR, captions, or you shipped the dual-track build.
 
 ## Workflow safety (lessons that cost real files)
 

@@ -1,0 +1,5 @@
+{
+  "schema_version": "catalog-forge-config-1.0",
+  "_comment": "Minimal config. The collections and their rules live in the truth root (the schema's `collection` enum + verify_all.py) — the single source. catalog-forge keeps NO copy of that. This file holds only the default truth-root path; override per call with --truth-root.",
+  "truth_root_default": "/Volumes/PRO-G40/collections"
+}

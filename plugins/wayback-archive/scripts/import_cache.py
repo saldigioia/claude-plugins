@@ -1,29 +1,51 @@
 #!/usr/bin/env python3
 """
-import_cache.py — ingest a local HTML directory as already-fetched.
+import_cache.py — ingest a local HTML / image directory as already-fetched.
 
 Useful when someone hands you a scrape (or you made one yourself) for the
-same target the pipeline is about to crawl. Copies HTML files into the
-fetch stage's output directory under the conventional `_safe_filename`
-form, appends one record per file to `fetch_results.jsonl`, and
-optionally updates the ledger directly. After importing, running the
-fetch stage with its standard `resume=True` behavior will skip the
-imported files and only fetch what's still missing.
+same target the pipeline is about to crawl. Two modes:
 
-URL resolution per file (first-win):
-  1. `<link rel="canonical" href="...">` from the first 64 KiB of the body
-  2. filename-reverse if the filename starts with a known config.domains
-     host (replaces `_` with `/` — works for the standard Shopify slug
-     shape like `www.site.com_products_foo.html`)
-  3. skip (reported in stats)
+  HTML mode (``--cache`` / ``--html-dir``):
+    Copies HTML files into the fetch stage's output directory under the
+    conventional ``_safe_filename`` form, appends one record per file to
+    ``fetch_results.jsonl``, and optionally updates the ledger directly.
+    After importing, running the fetch stage with its standard
+    ``resume=True`` behavior will skip the imported files and only fetch
+    what's still missing.
+
+    URL resolution per file (first-win):
+      1. ``<link rel="canonical" href="...">`` from the first 64 KiB of body
+      2. filename-reverse if the filename starts with a known config.domains
+         host (replaces ``_`` with ``/`` — works for the standard Shopify
+         slug shape like ``www.site.com_products_foo.html``)
+      3. skip (reported in stats)
+
+  Image mode (``--image-dir``):
+    Attributes each image file in a directory to a product slug using the
+    same ``resolve_image_to_slug`` cascade the match stage uses (direct
+    hit → __ split → SKU prefix → substring → token-set overlap → fuzzy).
+    Hardlinks (or copies, with ``--copy-images``) matched files into the
+    project's ``products/<slug>/`` tree so they appear as already-
+    downloaded. Unattributed images are reported but not moved — inspect
+    the residual list to decide whether to hand-attribute them.
 
 Usage:
+    # HTML import
     python3 scripts/import_cache.py --config projects/<name>/config.yaml \
-                                    --cache /path/to/local/html/dir
+                                    --html-dir /path/to/local/html/dir
+
+    # Image orphan attribution (the yeezygap use case)
+    python3 scripts/import_cache.py --config projects/<name>/config.yaml \
+                                    --image-dir /path/to/shopify_images
+
     # Preview without touching disk:
-    python3 scripts/import_cache.py --config <cfg> --cache <dir> --dry-run
-    # Also update the ledger immediately (otherwise deferred until run_fetch):
-    python3 scripts/import_cache.py --config <cfg> --cache <dir> --update-ledger
+    python3 scripts/import_cache.py --config <cfg> --html-dir <dir> --dry-run
+
+    # Also update the ledger immediately (HTML mode; otherwise deferred):
+    python3 scripts/import_cache.py --config <cfg> --html-dir <dir> --update-ledger
+
+The legacy ``--cache`` flag is kept as an alias for ``--html-dir`` so
+existing scripts continue to work.
 """
 from __future__ import annotations
 
@@ -42,10 +64,13 @@ sys.path.insert(0, str(REPO_ROOT))
 from wayback_archiver.site_config import load_config
 from wayback_archiver import ledger as ledger_mod
 from wayback_archiver.env import load_env
+from wayback_archiver.match import resolve_image_to_slug, build_sku_to_slug_map
 
 load_env()
 
 from fetch_archive import _safe_filename  # noqa: E402
+
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".avif"}
 
 _CANONICAL_RE = re.compile(
     rb'<link[^>]*\brel\s*=\s*["\']?canonical["\']?[^>]*\bhref\s*=\s*["\']?([^"\'>\s]+)',
@@ -166,43 +191,189 @@ def import_cache(cache_dir: Path, config, dry_run: bool = False) -> dict:
     return stats
 
 
+def _load_known_slugs(config) -> tuple[set[str], dict[str, str]]:
+    """Return (slug_set, sku_map) from the project's metadata file.
+
+    The slug set seeds ``resolve_image_to_slug``; the SKU map lets it
+    match filenames that lead with a style code (``GX9662_front.jpg``).
+    Missing metadata isn't fatal — falls back to scanning products_dir.
+    """
+    slugs: set[str] = set()
+    sku_map: dict[str, str] = {}
+    meta_path = config.metadata_file
+    if meta_path.exists():
+        try:
+            with meta_path.open(encoding="utf-8") as f:
+                meta = json.load(f)
+            if isinstance(meta, dict):
+                slugs.update(meta.keys())
+                sku_map = build_sku_to_slug_map(meta)
+        except (OSError, json.JSONDecodeError):
+            pass
+    # Fallback / supplement: existing product dirs on disk.
+    if config.products_dir.exists():
+        for child in config.products_dir.iterdir():
+            if child.is_dir():
+                slugs.add(child.name)
+    return slugs, sku_map
+
+
+def import_images(
+    image_dir: Path,
+    config,
+    dry_run: bool = False,
+    copy: bool = False,
+    strategy: str = "aggressive",
+) -> dict:
+    """Attribute images in ``image_dir`` to product slugs and stage them.
+
+    Matched files are hardlinked (or copied, with ``copy=True``) into
+    ``products/<slug>/`` so the download stage treats them as already
+    acquired. Unattributed files are left in place and listed in the
+    returned stats under ``residuals``.
+    """
+    slugs, sku_map = _load_known_slugs(config)
+    if not slugs:
+        return {
+            "error": (
+                "no known slugs in metadata or products/ — run the match "
+                "stage at least once before attributing orphans"
+            )
+        }
+
+    if not dry_run:
+        config.ensure_project_dirs()
+
+    candidates = [
+        p for p in image_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
+    ]
+
+    stats: dict = {
+        "total": len(candidates),
+        "attributed": 0,
+        "already_present": 0,
+        "residual": 0,
+        "by_slug": {},
+        "residuals": [],
+        "dry_run": dry_run,
+        "strategy": strategy,
+        "mode": "copy" if copy else "hardlink",
+    }
+
+    for src in candidates:
+        slug = resolve_image_to_slug(
+            src.name, slugs, sku_map=sku_map, strategy=strategy
+        )
+        if not slug:
+            stats["residual"] += 1
+            if len(stats["residuals"]) < 50:  # cap for readability
+                stats["residuals"].append(src.name)
+            continue
+
+        dst_dir = config.products_dir / slug
+        dst = dst_dir / src.name
+        if dst.exists() and dst.stat().st_size == src.stat().st_size:
+            stats["already_present"] += 1
+            continue
+        stats["attributed"] += 1
+        stats["by_slug"][slug] = stats["by_slug"].get(slug, 0) + 1
+
+        if dry_run:
+            continue
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            if copy:
+                shutil.copy2(src, dst)
+            else:
+                # Hardlink avoids duplicating bytes; falls back to copy if
+                # the source and dest are on different filesystems.
+                try:
+                    dst.hardlink_to(src)
+                except (OSError, AttributeError):
+                    shutil.copy2(src, dst)
+        except OSError as e:
+            stats["residual"] += 1
+            stats["residuals"].append(f"{src.name} (stage error: {e})")
+            stats["attributed"] -= 1
+            stats["by_slug"][slug] -= 1
+
+    return stats
+
+
 def main():
     p = argparse.ArgumentParser(
-        description="Ingest a local HTML cache into a wayback-archive project's fetch output."
+        description="Ingest a local HTML or image cache into a wayback-archive project."
     )
     p.add_argument("--config", required=True, help="Path to site config YAML")
-    p.add_argument("--cache", required=True, help="Directory containing .html files to import")
+    # Legacy --cache is an alias for --html-dir.
+    p.add_argument("--cache", "--html-dir", dest="html_dir", default=None,
+                   help="Directory containing .html files to import (legacy alias: --cache)")
+    p.add_argument("--image-dir", dest="image_dir", default=None,
+                   help="Directory containing image files to attribute to slugs "
+                        "and stage under products/<slug>/.")
+    p.add_argument("--match-strategy", default="aggressive",
+                   choices=("strict", "aggressive"),
+                   help="Image-mode only: strictness of resolve_image_to_slug.")
+    p.add_argument("--copy-images", action="store_true",
+                   help="Image-mode only: copy instead of hardlink. Use when "
+                        "the image dir is on a different filesystem.")
     p.add_argument("--dry-run", action="store_true",
                    help="Report what would be imported without touching disk.")
     p.add_argument("--update-ledger", action="store_true",
-                   help="Also update the ledger directly (otherwise deferred until run_fetch).")
+                   help="HTML mode only: also update the ledger directly.")
     p.add_argument("--json", action="store_true", help="Emit only JSON to stdout.")
     args = p.parse_args()
+
+    if not args.html_dir and not args.image_dir:
+        print(json.dumps({
+            "error": "at least one of --html-dir (or --cache) / --image-dir is required"
+        }), file=sys.stderr)
+        sys.exit(2)
 
     config_path = Path(args.config)
     if not config_path.exists():
         print(json.dumps({"error": f"config not found: {config_path}"}), file=sys.stderr)
         sys.exit(2)
-    cache_dir = Path(args.cache)
-    if not cache_dir.is_dir():
-        print(json.dumps({"error": f"not a directory: {cache_dir}"}), file=sys.stderr)
-        sys.exit(2)
-
     config = load_config(config_path)
-    stats = import_cache(cache_dir, config, args.dry_run)
 
-    if args.update_ledger and not args.dry_run and ledger_mod.exists(config.project_path):
-        results_path = config.fetch_output_dir.parent / "fetch_results.jsonl"
-        if results_path.exists():
-            sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from run_stage import _import_fetch_results  # type: ignore[attr-defined]
-            with ledger_mod.connect(config.project_path) as conn:
-                _import_fetch_results(conn, results_path)
-            stats["ledger_synced"] = True
+    combined: dict = {}
+
+    if args.html_dir:
+        cache_dir = Path(args.html_dir)
+        if not cache_dir.is_dir():
+            print(json.dumps({"error": f"not a directory: {cache_dir}"}), file=sys.stderr)
+            sys.exit(2)
+        html_stats = import_cache(cache_dir, config, args.dry_run)
+        combined["html"] = html_stats
+
+        if args.update_ledger and not args.dry_run and ledger_mod.exists(config.project_path):
+            results_path = config.fetch_output_dir.parent / "fetch_results.jsonl"
+            if results_path.exists():
+                sys.path.insert(0, str(Path(__file__).resolve().parent))
+                from run_stage import _import_fetch_results  # type: ignore[attr-defined]
+                with ledger_mod.connect(config.project_path) as conn:
+                    _import_fetch_results(conn, results_path)
+                html_stats["ledger_synced"] = True
+
+    if args.image_dir:
+        img_dir = Path(args.image_dir)
+        if not img_dir.is_dir():
+            print(json.dumps({"error": f"not a directory: {img_dir}"}), file=sys.stderr)
+            sys.exit(2)
+        combined["images"] = import_images(
+            img_dir, config,
+            dry_run=args.dry_run,
+            copy=args.copy_images,
+            strategy=args.match_strategy,
+        )
 
     if args.json:
-        print(json.dumps(stats, indent=2))
-    else:
+        print(json.dumps(combined, indent=2))
+        return
+
+    if "html" in combined:
+        stats = combined["html"]
         print(f"Imported {stats['imported']} / {stats['total']} HTML files "
               f"({stats['bytes']/1e6:.1f} MB) into {config.fetch_output_dir}")
         print(f"  Canonical URL: {stats['canonical_used']}  "
@@ -215,6 +386,23 @@ def main():
                 print(f"    {t}: {c}")
         if stats.get("ledger_synced"):
             print("  Ledger synced.")
+
+    if "images" in combined:
+        istats = combined["images"]
+        if "error" in istats:
+            print(f"Image import failed: {istats['error']}")
+            sys.exit(3)
+        print(
+            f"Attributed {istats['attributed']} / {istats['total']} images via "
+            f"{istats['strategy']} matcher ({istats['mode']}); "
+            f"{istats['already_present']} already present, "
+            f"{istats['residual']} residual."
+        )
+        if istats["by_slug"]:
+            top = sorted(istats["by_slug"].items(), key=lambda x: -x[1])[:10]
+            print("  Top slugs by count:")
+            for slug, c in top:
+                print(f"    {slug}: {c}")
 
 
 if __name__ == "__main__":

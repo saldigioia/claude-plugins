@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "curation.schema.json",
+  "title": "curation (curator log sidecar)",
+  "description": "The curator's per-product log. Catches gross drift only (a missing internal_id/era). The judgment fields (same_product_as, resolution, notes) are the curator's and pass freely via additionalProperties:true.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["internal_id", "era"],
+  "properties": {
+    "internal_id": { "type": "string", "minLength": 1 },
+    "era": { "type": "string", "minLength": 1 }
+  }
+}

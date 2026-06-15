@@ -42,7 +42,11 @@ i=0
 while [ "$i" -lt "$NA" ]; do
   ffmpeg -nostdin -y -i "$IN" -map "0:a:$i" -c:a pcm_s16le "$WORK/a$i.wav"
   AIN+=(-i "$WORK/a$i.wav"); AMAP+=(-map "$((i+1)):0")
-  AMETA+=("-metadata:s:a:$i" "language=eng")
+  # PRESERVE the real per-track language; default to eng only if the source has
+  # none (PS/.mpg carry none). Hard-coding eng would silently relabel FR/ES/commentary.
+  lang=$(ffprobe -v error -select_streams "a:$i" -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  case "$lang" in ""|und|unknown) lang=eng;; esac
+  AMETA+=("-metadata:s:a:$i" "language=$lang")
   i=$((i+1))
 done
 [ "$NA" -gt 0 ] || echo "note: no audio streams found; rebuilding video only"

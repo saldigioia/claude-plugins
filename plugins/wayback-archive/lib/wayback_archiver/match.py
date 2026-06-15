@@ -33,6 +33,15 @@ _SKU_PREFIX_RE = re.compile(r'^([A-Z0-9]{6,12})[_\-.]')
 # Below this the risk of cross-attribution is too high to justify the match.
 _FUZZY_SLUG_THRESHOLD = 0.85
 
+# Token-set overlap threshold — applied before the difflib fallback so that
+# order-permuted filenames match their slug. Example: the filename stem
+# ``530135-97-crossbody-bag`` and the slug ``black-crossbody-bag-530135``
+# share the strong numeric token ``530135`` and the words ``crossbody`` and
+# ``bag``; substring containment misses this but token overlap catches it.
+_STRONG_TOKEN_MIN_LEN = 5       # a single shared token this long is enough
+_TOKEN_JACCARD_FLOOR = 0.6       # else require ≥60% token-set overlap
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
 
 def normalize_for_match(text: str) -> str:
     """Normalize a string for fuzzy matching."""
@@ -186,6 +195,59 @@ def _canonical_image_stem(url_or_filename: str) -> str:
     return name
 
 
+def _tokens(text: str) -> set[str]:
+    """Split on any non-[a-z0-9] run and return distinct lowercase tokens."""
+    return set(_TOKEN_RE.findall(text.lower()))
+
+
+def _token_overlap_match(
+    candidate: str,
+    slugs: set[str],
+) -> str | None:
+    """Return the best slug whose token-set overlaps with the candidate stem.
+
+    Two-tier match:
+      1. Any shared token ≥ _STRONG_TOKEN_MIN_LEN chars is a win
+         (numeric product codes like ``530135`` and long words like
+         ``crossbody`` are strong signals — one match is sufficient).
+      2. Otherwise require Jaccard similarity ≥ _TOKEN_JACCARD_FLOOR
+         across the remaining tokens.
+
+    Ties are broken by the highest Jaccard score. Returns None if nothing
+    clears the bar.
+    """
+    cand_tokens = _tokens(candidate)
+    if not cand_tokens:
+        return None
+
+    best_slug: str | None = None
+    best_score = 0.0
+    for slug in slugs:
+        slug_tokens = _tokens(slug)
+        if not slug_tokens:
+            continue
+        shared = cand_tokens & slug_tokens
+        if not shared:
+            continue
+        # Tier 1: any strong shared token short-circuits to a win.
+        if any(len(tok) >= _STRONG_TOKEN_MIN_LEN for tok in shared):
+            # Among strong-match candidates, still prefer the one with the
+            # highest Jaccard to avoid spurious single-token collisions.
+            union = len(cand_tokens | slug_tokens)
+            score = len(shared) / union if union else 0.0
+            if score > best_score:
+                best_slug = slug
+                best_score = score
+            continue
+        # Tier 2: Jaccard floor.
+        union = len(cand_tokens | slug_tokens)
+        score = len(shared) / union if union else 0.0
+        if score >= _TOKEN_JACCARD_FLOOR and score > best_score:
+            best_slug = slug
+            best_score = score
+    return best_slug
+
+
 def resolve_image_to_slug(
     url_or_filename: str,
     slug_set: set[str] | list[str],
@@ -241,7 +303,14 @@ def resolve_image_to_slug(
         if candidate and (slug.startswith(candidate) or candidate in slug):
             return slug
 
-    # 5. Fuzzy fallback (aggressive only).
+    # 5. Token-set overlap — catches reordered filenames where the SKU or
+    #    descriptive tokens moved position relative to the slug. Cheap,
+    #    order-invariant, and more precise than a raw difflib ratio.
+    token_hit = _token_overlap_match(candidate, slugs)
+    if token_hit:
+        return token_hit
+
+    # 6. Fuzzy fallback (aggressive only).
     if strategy == "aggressive":
         best = difflib.get_close_matches(
             candidate, slugs, n=1, cutoff=_FUZZY_SLUG_THRESHOLD

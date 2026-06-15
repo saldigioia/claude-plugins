@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "image_sources.schema.json",
+  "title": "image_sources (reseller-substitute manifest)",
+  "description": "The reseller citation layer. Catches gross drift only; accepts both the single-source (`source` + `citation`) and multi-source (`sources[]`) shapes via additionalProperties:true. Its real guarantee: every listed image has a filename, so every reseller image stays traceable.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["internal_id", "images"],
+  "properties": {
+    "internal_id": { "type": "string", "minLength": 1 },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["file"],
+        "properties": { "file": { "type": "string", "minLength": 1 } }
+      }
+    }
+  }
+}
