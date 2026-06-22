@@ -17,6 +17,44 @@ ffprobe -v error -select_streams v:0 -read_intervals "%+20" \
 Measure against the file you will actually cut (a trimmed file has different
 keyframe positions than its source).
 
+## Open-GOP seam glitch — not every keyframe is safe to cut in front of
+
+The keyframe rule has a sharp edge. **QuickTime distinguishes two kinds of
+random-access frame** (verified against the QuickTime File Format spec):
+
+- A **full sync sample** (`stss`) — the spec's words: *"self-contained … 
+  independent of preceding frames."* A **closed-GOP / IDR** keyframe. Safe to
+  start a segment on.
+- A **partial sync sample** (`stps`) — an **open-GOP** I-frame. A random-access
+  point, but the frames around it display *earlier* (`ctts` composition offsets)
+  and depend on the **previous** GOP (`sdtp` flag *EarlierDisplayTimesAllowed*).
+  **Not** self-contained at a join.
+
+If a segment **starts on an open-GOP (partial-sync) I-frame**, its leading
+B-frames still carry motion + residual that point into the GOP you deleted.
+Decoded **alone**, the decoder fills the missing reference with black → looks
+fine. Decoded **after another segment**, it applies that leftover prediction to
+the *previous segment's last frame* → **one garbage frame at the seam**. The
+artifact exists *only* in the join — neither segment shows it alone — which is
+the tell that it is a *seam* (prediction) problem, not a *content* problem.
+
+> Bites any keyframe-accurate copy-cut/concat at an open-GOP / non-IDR boundary —
+> MPEG-2 **or** H.264, not show- or codec-specific.
+
+- **Tell, before cutting:** in display (PTS) order at the intended start, a `B`
+  frame appears *before* the first `I`. `scripts/gop-probe.sh INPUT CUT_TIME`
+  automates this and prints the nearest **closed-GOP** keyframe to use instead.
+- **Check, after concat:** `scripts/seam-check.sh JOINED.mov SEAM_TIME` decodes
+  continuously **through** the join (never seeking onto it — that hides the
+  artifact) and flags a one-frame flash by continuity (the frames before and
+  after match each other but not the spike). `--png DIR` exports the straddling
+  frames; eyeballing them is the final word (a glitch can be valid bitstream).
+- **Fix, stay lossless:** restart the segment on the next **closed-GOP** keyframe
+  (`gop-probe.sh` prints it), input-seek so audio+video cut together, and confirm
+  the skipped span holds no wanted content. If an *exact* open-GOP timestamp is
+  required, **smart-cut** the boundary GOP (below) — re-encode ~1 s to close it,
+  copy the rest.
+
 ## Order of operations (critical for field-coded H.264)
 
 **Fix the timeline first, then trim the clean file.** Never input-`-ss` a broken
@@ -66,8 +104,9 @@ after (see `ingest-compatibility.md`).
 
 ## Join same-source parts
 
-Segmented captures with identical codec parameters concat cleanly (each part
-starts on a closed-GOP I-frame):
+Segmented captures with identical codec parameters concat cleanly **when each
+part starts on a closed-GOP I-frame** — verify that assumption with
+`scripts/gop-probe.sh PART` (open-GOP parts will flash at the joins, above):
 ```
 printf "file '01.mpg'\nfile '02.mpg'\n" > parts.txt
 ffmpeg -nostdin -f concat -safe 0 -i parts.txt -map 0:v:0 -map 0:a:0 -c copy \
@@ -86,5 +125,10 @@ editing case that forces any re-encode.
 
 - Copy-concatenating PAFF H.264 at non-IDR joins can glitch at the seams; if it
   does, smart-cut the seam GOPs or run the `timeline-repair.md` rebuild first.
+  (This is the open-GOP seam glitch above, compounded by field coding — the cut
+  lands on a partial-sync sample *and* mid-field-pair.)
 - The concat demuxer requires consistent codec parameters across all entries;
   mixed resolutions/codecs won't copy-concat.
+- **Always run `scripts/seam-check.sh JOINED.mov <seam_times>` after a copy-cut
+  concat.** A clean error scan does not clear the join — the open-GOP flash is
+  valid bitstream; the continuity/eyeball test is what catches it.

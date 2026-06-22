@@ -1,7 +1,7 @@
 ---
 name: remuxing-to-mov
-description: Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a .mov container without re-encoding. Use this skill whenever the user wants to put a capture into MOV, mentions remuxing / -c copy / stream copy to MOV or QuickTime, is dealing with a glitchy, stuttering, or field-coded/interlaced (PAFF) H.264 remux, needs to cut/trim/concatenate video without re-encoding, is preserving color/HDR/captions/audio through a container change, or is deciding whether a re-encode is truly unavoidable. Prefer this skill over ad-hoc ffmpeg even when the user only says "convert to .mov" — the default is always lossless copy, never a re-encode.
-allowed-tools: Bash, Read, Write
+description: Losslessly remux broadcast/web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. Use when converting or remuxing a capture to .mov/QuickTime (-c copy / stream copy), fixing a glitchy, stuttering, or field-coded/interlaced (PAFF) H.264 remux, losslessly cutting/trimming/concatenating, preserving color/HDR/captions/audio through a container change, or deciding whether a re-encode is unavoidable. Default is always lossless copy, never a re-encode.
+allowed-tools: Bash Read Write
 ---
 
 # Remuxing to MOV (lossless-first)
@@ -15,7 +15,14 @@ MOV allow. Step off it only when a *named* constraint forces you to.
 
 ## Workflow
 
-**One-shot (hands-off):** `scripts/auto.sh IN OUT.mov` runs probe → pick the
+**Shortcut — the everyday path** (`/remuxing-to-mov:mov FILE`, or "convert FILE to
+mov"): `scripts/mov.sh IN [OUT.mov]` does a lossless video copy + QuickTime
+technique (`hvc1`/faststart) and builds the dual-track (PCM access + original
+preserved) **only when** the source audio won't play in QuickTime
+(AC-3/E-AC-3/DTS/MP2); else a plain copy. Verifies, never re-encodes, never touches
+the source; output defaults to `<input>.mov`. Use the ladder below for control.
+
+**One-shot ladder (hands-off):** `scripts/auto.sh IN OUT.mov` runs probe → pick the
 lowest rung → remux/rebuild → verify → escalate on a bad verdict, in one call. It
 routes field-coded (PAFF) straight to the rebuild, **never re-encodes** (Rung 4
 stays a human decision), and never touches the source. Exit 0 = verified, 10 =
@@ -88,7 +95,7 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 
 | Situation | Rule |
 |---|---|
-| "Convert this to .mov" | `scripts/remux.sh IN OUT.mov` — lossless copy, never a re-encode |
+| "Convert this to .mov" (the everyday ask) | `scripts/mov.sh IN` (or `/remuxing-to-mov:mov IN`) — copy video, dual-track audio only if QuickTime needs it, verified. `remux.sh` is the bare Rung-0 copy underneath |
 | HEVC file won't open in QuickTime | Retag, don't re-encode: `ffmpeg -i IN -c copy -tag:v hvc1 OUT.mov` |
 | Plays locally, slow start over network | `ffmpeg -i IN -c copy -movflags +faststart OUT.mov` (moov was at EOF) |
 | Video plays, audio silent in QuickTime | Audio QT can't decode (AC-3/E-AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm` |
@@ -97,7 +104,8 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 | Mux fails `Could not find tag for codec …` | A subtitle/data stream MOV can't carry (subrip, DVB, teletext, SCTE) — map explicitly `-map 0:v:0 -map 0:a`; text subs → sidecar or `mov_text` (verified 8.1.1: `-map 0` copy with SRT fails at header write) |
 | Mux fails `… only supported in MP4` | AV1 / FLAC / Opus / TrueHD: route to MP4 or keep MKV; FLAC → `-c:a alac` bridge |
 | `duration too long for timebase` | `-video_track_timescale` from the field-rate table in `references/timeline-repair.md` |
-| Trim/cut requested | Copy cuts are keyframe-bound (`references/cutting-concat.md`); frame-exact = smart-cut, the one edit that re-encodes |
+| Trim/cut requested | Copy cuts are keyframe-bound (`references/cutting-concat.md`); check the cut point is a **closed**-GOP keyframe first (`scripts/gop-probe.sh IN CUT_TIME`); frame-exact = smart-cut, the one edit that re-encodes |
+| Garbled/"random" frame at a cut or concat **seam** | Open-GOP (partial-sync) boundary: the segment started on an open-GOP I-frame whose leading B-frames referenced the deleted GOP. `scripts/gop-probe.sh` before cutting, `scripts/seam-check.sh JOINED SEAM` after; restart on a closed-GOP keyframe |
 | Source has several audio tracks | `remux.sh` keeps `a:0` only — add `--all-audio`; first mapped track = the QuickTime default |
 | Missing/wrong audio language tag | `-metadata:s:a:0 language=eng` (PS/`.mpg` sources carry none) |
 | Chapters in the source | Survive `-c copy` into MOV — ffmpeg adds a QT chapter text track (verified 8.1.1) |
@@ -139,39 +147,33 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 | Worked examples from a real broadcast job (copy-cut + QC driver scripts; paths/timestamps hardcoded) | `examples/README.md` |
 | Regression tests for the PAFF safeguards — run after editing any script | `tests/README.md` + `tests/regression.sh` |
 
-## Hard-won facts (verified on ffmpeg 6.1.1, 2026-06-03)
+## Hard-won facts (verified on ffmpeg 6.1.1 / 8.1.1)
 
-- **Field-coded (PAFF) H.264 routes straight to the field-rate rebuild; genpts
-  is guilty-until-proven.** genpts can pass the strict MKV-mux test (timestamps
-  present + monotonic) yet leave a timeline that is not *seekable* — it tears
-  when a player scrubs. Mux-valid and seekable are different properties, and the
-  gap between them is where PAFF corrupts silently. So: (a) `probe.sh`/
-  `diagnose.sh` detect PAFF by the coded-picture rate (≈ 2× the frame rate) and
-  bias to `rebuild-paff.sh`; (b) `verify.sh` includes a **scrub gate** —
-  accurate seeks to deliberately off-keyframe timestamps + a keyframe-spacing
-  sanity check — which fails a glitchy timeline *before* the source is deleted
-  (an ffmpeg-style keyframe seek stays clean on the broken file, so it is not
-  enough); (c) decoded `framemd5` FALSE-FAILs field-coded streams (field vs
-  frame packaging), so the **Annex-B packet hash** is the lossless arbiter
-  there, not a decoded-pixel compare. A real player remains the final word —
-  "playable ≠ valid" — but these automated proxies catch the case unaided.
-- **MP2 *does* mux into MOV** (tag `.mp2`) — but it is non-standard and QuickTime
-  is not expected to play it, so decode to PCM for a playable file. The reason
-  is playability, not container incompatibility.
-- ffmpeg writes **no `fiel` atom** on copy; field order survives via the
-  bitstream. `-field_order tt` is ignored on copy (does not hard-fail).
-- `colr` is written **by default**; `+write_colr` is redundant (harmless).
-- HDR10 `mdcv`/`clli` live **only in the HEVC SEI**, not as container boxes.
-- **Dolby Vision survives `-c copy` on ffmpeg ≥5.0** for single-layer profiles
-  (P5/P8) with `-tag:v hvc1`; dual-layer Profile 7 still needs conversion.
-- **QuickTime AC-3/E-AC-3 native playback is unverified** — confirm on the
-  target macOS before relying on copy for a *playable* file.
-- **ffmpeg's MOV muxer hard-rejects AV1, FLAC, Opus, and TrueHD** ("only
-  supported in MP4", verified ffmpeg 8.1.1, 2026-06-10) — no `-strict` escape.
-  Write-side ffmpeg policy, not a container limit — but QuickTime won't play
-  them either, so route to MP4 or keep MKV. FLAC alone has a bit-exact MOV
-  bridge (`-c:a alac`); TrueHD has no escape hatch. MP3 *does* copy into MOV
-  and QuickTime plays it. Details: `references/ingest-compatibility.md` +
-  `references/codec-landscape.md`.
+The non-obvious traps the scripts are built around — deep detail in the
+referenced files.
 
-`scripts/probe.sh` surfaces the version-dependent items at runtime.
+- **Field-coded (PAFF) H.264 → field-rate rebuild; genpts is
+  guilty-until-proven.** genpts can pass the strict MKV-mux test (timestamps
+  present + monotonic) yet leave a timeline that tears on scrub: mux-valid ≠
+  seekable, and that gap is where PAFF corrupts silently. So `probe.sh`/
+  `diagnose.sh` detect PAFF (coded-picture rate ≈ 2× frame rate) and route to
+  `rebuild-paff.sh`; `verify.sh` adds a **scrub gate** (an ffmpeg keyframe seek
+  alone stays clean on the broken file, so it is not enough). Decoded `framemd5`
+  FALSE-FAILs field-coded streams, so the **Annex-B packet hash** is the lossless
+  arbiter there. "Playable ≠ valid" — a real player is the final word.
+  → `references/timeline-repair.md`
+- **Not every keyframe is a safe cut (open-GOP seam glitch).** A segment starting
+  on a partial-sync I-frame (`stps`, vs a full sync sample `stss`) keeps leading
+  B-frames referencing the deleted GOP → one garbage frame at the seam, though
+  each segment is clean alone. `gop-probe.sh` flags the boundary (a `B` before the
+  first `I` in display order); `seam-check.sh` catches the flash. Fix: restart on
+  a closed-GOP keyframe, or smart-cut (the one edit that re-encodes).
+  → `references/cutting-concat.md`
+- **Version- and container-gated** (all surfaced by `probe.sh` at runtime):
+  Dolby Vision survives `-c copy` only on ffmpeg ≥5.0 (single-layer P5/P8 +
+  `-tag:v hvc1`; Profile 7 needs conversion); MOV's muxer hard-rejects
+  AV1/FLAC/Opus/TrueHD ("only supported in MP4" — FLAC has a bit-exact `-c:a alac`
+  bridge, MP3 copies fine); MP2 muxes but QuickTime won't play it (decode to PCM);
+  AC-3/E-AC-3 QuickTime playback is unverified (confirm on the Mac); `colr` is
+  written by default; HDR10 `mdcv`/`clli` live in the HEVC SEI, not container
+  boxes. → `references/ingest-compatibility.md`, `references/codec-landscape.md`

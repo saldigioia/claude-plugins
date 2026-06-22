@@ -5,6 +5,23 @@ Losslessly remux broadcast and web video (`.ts`, `.mpg`/`.vob`, `.mkv`, broken
 last resort, scoped as narrowly as possible (audio-only, or one GOP), never the
 whole video.
 
+## Quick start
+
+```bash
+scripts/doctor.sh                  # one-time: is this ffmpeg capable?
+scripts/mov.sh IN.ts               # the everyday one: QuickTime-ready, dual-track only if needed, verified
+scripts/auto.sh IN.ts OUT.mov      # the lossless ladder, hands-off (single-track audio)
+scripts/batch.sh DIR --out OUTDIR  # a whole folder, with provenance + resume
+```
+
+In Claude Code these are also a slash command — **`/remuxing-to-mov:mov FILE`**
+(or just ask to "convert FILE to mov") runs `mov.sh`: proper QuickTime technique
+(`hvc1`/faststart), plus a dual-track PCM-access + bit-exact-original build
+automatically **only when** the source audio (AC-3/E-AC-3/DTS/MP2) won't play in
+QuickTime. Output defaults to `<input>.mov` beside the source. Nothing here
+re-encodes video or touches the source; exit codes `0` = verified, `10` = REVIEW,
+`1` = FAIL.
+
 ## What it does
 
 - **Five-rung escalation ladder** — stop at the first rung that produces a
@@ -27,10 +44,13 @@ whole video.
 ```
 skills/remuxing-to-mov/
   SKILL.md                 workflow, escalation ladder, instant-answer card
-  scripts/                 probe, remux, diagnose, rebuild-paff, dual-track, verify
+  scripts/                 doctor, probe, diagnose, mov + auto (one-shot drivers),
+                           remux, rebuild-paff, dual-track, verify, batch,
+                           gop-probe, seam-check, playable-check
   references/              codec/container tables, timeline repair, color/HDR,
                            cutting/concat, dual-track QC, container internals
   examples/                worked driver scripts from a real broadcast job
+  tests/                   self-contained regression harness (run after edits)
 ```
 
 Every codec/container compatibility claim in the references is verified

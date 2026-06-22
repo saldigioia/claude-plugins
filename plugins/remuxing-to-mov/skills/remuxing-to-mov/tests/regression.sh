@@ -209,13 +209,23 @@ o=$(bash "$SC/batch.sh" "$BD" --out "$BO" 2>&1)
 has "$o" "skipped=2" "re-run is idempotent (skips already-OK, unchanged)"
 
 echo
-echo "== 13. Phase 5: playable-check is macOS-gated (clean skip on Linux); auto --playable ignores SKIP =="
+echo "== 13. Phase 5: playable-check is platform-gated (skips on Linux, runs AVFoundation on macOS); auto --playable handles either verdict =="
 o=$(bash "$SC/playable-check.sh" "$CP" 2>&1); rc=$?
-has "$o" "SKIP" "playable-check skips on non-macOS"
-[ "$rc" -eq 3 ] && ok "playable-check exit 3 (skip) on Linux" || no "playable-check exit $rc (want 3)"
+if [ "$(uname -s)" = Darwin ]; then
+  # On a Mac the macOS-only path is live: it opens the file through AVFoundation
+  # (qlmanage) and reports OK (exit 0) or FAIL (exit 1) — never the Linux SKIP.
+  { case "$o" in *"playable-check: OK"*|*"playable-check: FAIL"*) true;; *) false;; esac; } \
+    && ok "playable-check runs the AVFoundation path on macOS (OK/FAIL, not SKIP)" \
+    || no "playable-check did not run the macOS path (out=$o)"
+  { [ "$rc" -eq 0 ] || [ "$rc" -eq 1 ]; } \
+    && ok "playable-check exit 0/1 (ran) on macOS" || no "playable-check exit $rc (want 0 or 1) on macOS"
+else
+  has "$o" "SKIP" "playable-check skips on non-macOS"
+  [ "$rc" -eq 3 ] && ok "playable-check exit 3 (skip) on Linux" || no "playable-check exit $rc (want 3)"
+fi
 o=$(bash "$SC/auto.sh" "$S" "$WORK/pc.mov" --playable 2>&1); rc=$?
 { [ "$rc" -eq 0 ] && case "$o" in *">> DONE"*) true;; *) false;; esac; } \
-  && ok "auto --playable keeps OK when playability is unknown (SKIP)" || no "auto --playable mishandled SKIP (rc=$rc)"
+  && ok "auto --playable completes OK on a playable copy (SKIP on Linux, OK on macOS)" || no "auto --playable mishandled the playability verdict (rc=$rc)"
 
 echo
 echo "== 14. Rung-3 rebuild preserves per-track audio language (review finding #4) =="
@@ -226,6 +236,104 @@ ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=600 -f lavfi -i sine=900
 bash "$SC/rebuild-paff.sh" "$ML" "$MLO" 30000/1001 30000 >/dev/null 2>&1
 langs=$(ffprobe -v error -select_streams a -show_entries stream_tags=language -of csv=p=0 "$MLO" 2>/dev/null | tr '\n' ',')
 case "$langs" in fra,spa,) ok "rebuild-paff preserves real languages (fra,spa), not eng,eng";; *) no "languages not preserved: $langs";; esac
+
+echo
+echo "== 15. Open-GOP seam glitch: gop-probe detects, seam-check catches the flash =="
+# gop-probe detector logic (crafted frame table: open-GOP I @1.0 with leading B's)
+cat > "$WORK/gop.csv" <<'CSV'
+1,0.000000,I
+0,0.040000,B
+0,0.080000,B
+0,0.120000,P
+0,0.840000,B
+0,0.880000,P
+1,1.000000,I
+0,0.920000,B
+0,0.960000,B
+0,1.120000,P
+1,2.000000,I
+0,2.040000,B
+0,2.080000,P
+CSV
+o=$(GOP_PROBE_CSV="$WORK/gop.csv" bash "$SC/gop-probe.sh" DUMMY 2>&1)
+has "$o" "open(partial-sync)=1" "gop-probe flags the open-GOP keyframe"
+o=$(GOP_PROBE_CSV="$WORK/gop.csv" bash "$SC/gop-probe.sh" DUMMY 1.3 2>&1); rc=$?
+{ [ "$rc" -eq 10 ] && case "$o" in *"OPEN GOP"*"2.000000"*) true;; *) false;; esac; } \
+  && ok "cut on open boundary -> RISKY (exit 10) + recommends nearest closed keyframe" || no "open-cut handling wrong (rc=$rc)"
+o=$(GOP_PROBE_CSV="$WORK/gop.csv" bash "$SC/gop-probe.sh" DUMMY 0.5 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && case "$o" in *"SAFE"*) true;; *) false;; esac; } && ok "cut on closed boundary -> SAFE (exit 0)" || no "closed-cut handling wrong (rc=$rc)"
+# no false positive on real H.264 IDR media
+IDR="$WORK/idr.mp4"; ff -f lavfi -i testsrc2=s=160x120:r=25 -t 3 -c:v libx264 -g 25 -pix_fmt yuv420p "$IDR"
+o=$(bash "$SC/gop-probe.sh" "$IDR" 2>&1); has "$o" "All keyframes are closed" "gop-probe: real H.264 IDR -> no false positive"
+
+# seam-check: a one-frame garbage flash vs a legit hard cut vs a clean continuous join
+FL="$WORK/flash.mp4"; ff -f lavfi -i testsrc2=s=160x120:r=25 -t 4 -vf "drawbox=x=0:y=0:w=iw:h=ih:color=red@1.0:t=fill:enable='eq(n,50)'" -c:v libx264 -g 25 -x264opts scenecut=0 -pix_fmt yuv420p "$FL"
+o=$(bash "$SC/seam-check.sh" "$FL" 2.0 2>&1); rc=$?
+{ [ "$rc" -eq 1 ] && case "$o" in *FLASH*) true;; *) false;; esac; } && ok "seam-check catches a one-frame flash (exit 1)" || no "seam-check missed the flash (rc=$rc)"
+ff -f lavfi -i "mandelbrot=s=160x120:rate=25" -t 2 -c:v libx264 -g 25 -x264opts scenecut=0 -pix_fmt yuv420p "$WORK/lA.mp4"
+ff -f lavfi -i "testsrc=s=160x120:rate=25"     -t 2 -c:v libx264 -g 25 -x264opts scenecut=0 -pix_fmt yuv420p "$WORK/lB.mp4"
+printf "file '%s'\nfile '%s'\n" "$WORK/lA.mp4" "$WORK/lB.mp4" > "$WORK/lj.txt"
+ff -f concat -safe 0 -i "$WORK/lj.txt" -c copy "$WORK/ljoin.mp4"
+o=$(bash "$SC/seam-check.sh" "$WORK/ljoin.mp4" 2.0 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && case "$o" in *"intended/sustained cut"*) true;; *) false;; esac; } \
+  && ok "seam-check does NOT false-flag a legitimate hard cut" || no "seam-check false-flagged a legit cut (rc=$rc)"
+# clean continuous join: split an ALL-IDR clip (every frame a keyframe) so the
+# segments abut with no overlap regardless of how ffmpeg's -to/-ss round. (A -g 25
+# clip splits unevenly on some ffmpeg builds — segment A overruns the 1.0s keyframe
+# that segment B seeks back to, producing a real 2-frame overlap that seam-check
+# rightly flags. All-IDR removes that fixture artifact without weakening the check.)
+CIDR="$WORK/cidr.mp4"; ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v libx264 -g 1 -keyint_min 1 -x264opts scenecut=0 -pix_fmt yuv420p "$CIDR"
+ff -ss 0 -to 1.0 -i "$CIDR" -c copy "$WORK/sa.mp4"; ff -ss 1.0 -i "$CIDR" -c copy "$WORK/sb.mp4"
+printf "file '%s'\nfile '%s'\n" "$WORK/sa.mp4" "$WORK/sb.mp4" > "$WORK/cj.txt"
+ff -f concat -safe 0 -i "$WORK/cj.txt" -c copy "$WORK/cjoin.mp4"
+sadur=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$WORK/sa.mp4" 2>/dev/null)
+o=$(bash "$SC/seam-check.sh" "$WORK/cjoin.mp4" "${sadur:-1.0}" 2>&1); rc=$?
+[ "$rc" -eq 0 ] && ok "seam-check: clean continuous join -> CLEAN (exit 0)" || no "seam-check false-positive on a clean join (rc=$rc)"
+
+echo
+echo "== 16. /mov shortcut: dual-track only when the audio isn't QuickTime-native =="
+MOV="$SC/mov.sh"
+AUD_N="$WORK/m_native.mkv"; AUD_X="$WORK/m_mp2.ts"
+ff -f lavfi -i testsrc2=size=320x240:rate=30000/1001 -f lavfi -i sine=frequency=440 -t 6 \
+   -c:v libx264 -g 30 -bf 2 -pix_fmt yuv420p -c:a aac "$AUD_N"
+ff -f lavfi -i testsrc2=size=320x240:rate=30000/1001 -f lavfi -i sine=frequency=440 -t 6 \
+   -c:v libx264 -g 30 -bf 2 -pix_fmt yuv420p -c:a mp2 "$AUD_X"
+acods () { ffprobe -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$1" 2>/dev/null | paste -sd, -; }
+
+# QuickTime-native audio (AAC) -> single copied track, NO needless PCM access track
+bash "$MOV" "$AUD_N" "$WORK/m_n.mov" >/dev/null 2>&1 || true
+[ "$(acods "$WORK/m_n.mov")" = aac ] && ok "native AAC -> single copied track (dual-track skipped)" \
+  || no "native AAC audio shape wrong: $(acods "$WORK/m_n.mov")"
+
+# not-native audio (MP2) -> dual-track: PCM access (a:0) + original preserved (a:1)
+bash "$MOV" "$AUD_X" "$WORK/m_x.mov" >/dev/null 2>&1 || true
+case "$(acods "$WORK/m_x.mov")" in
+  pcm_*,mp2) ok "MP2 -> dual-track: PCM access + original (a:0=$(acods "$WORK/m_x.mov" | cut -d, -f1))";;
+  *)         no "MP2 dual-track shape wrong: $(acods "$WORK/m_x.mov")";;
+esac
+# the preserved track 2 IS the original bitstream, bit-exact (streamhash match)
+sh_src=$(ffmpeg -nostdin -v error -i "$AUD_X"        -map 0:a:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1)
+sh_out=$(ffmpeg -nostdin -v error -i "$WORK/m_x.mov" -map 0:a:1 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1)
+{ [ -n "$sh_src" ] && [ "$sh_src" = "$sh_out" ]; } && ok "dual-track: original (track 2) preserved bit-exact" \
+  || no "dual-track original not bit-exact (src=$sh_src out=$sh_out)"
+
+# --always-dual upgrades native AAC -> dual-track as well
+bash "$MOV" "$AUD_N" "$WORK/m_ad.mov" --always-dual >/dev/null 2>&1 || true
+case "$(acods "$WORK/m_ad.mov")" in pcm_*,aac) ok "--always-dual: native AAC -> dual-track too";; *) no "--always-dual shape wrong: $(acods "$WORK/m_ad.mov")";; esac
+
+# no-audio source -> video-only, no fabricated dual track
+bash "$MOV" "$S" "$WORK/m_na.mov" >/dev/null 2>&1 || true
+[ -z "$(acods "$WORK/m_na.mov")" ] && ok "no-audio source -> video-only output (no false dual)" \
+  || no "no-audio produced audio: $(acods "$WORK/m_na.mov")"
+
+# default output naming beside the source; source left untouched
+cp "$AUD_X" "$WORK/clip.ts"; bash "$MOV" "$WORK/clip.ts" >/dev/null 2>&1 || true
+{ [ -f "$WORK/clip.mov" ] && [ -f "$WORK/clip.ts" ]; } && ok "default OUT = <base>.mov beside source; source untouched" \
+  || no "default output naming / source-safety failed"
+
+# never writes onto the source
+bash "$MOV" "$WORK/clip.ts" "$WORK/clip.ts" >/dev/null 2>&1; rc=$?
+[ "$rc" -ne 0 ] && ok "refuses source == output" || no "did not refuse source==output"
 
 echo
 echo "===================================================================="

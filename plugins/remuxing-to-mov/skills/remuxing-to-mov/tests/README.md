@@ -41,6 +41,13 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     never deletes sources, and resumes idempotently (skips already-OK, unchanged).
 13. **Phase 5** — `playable-check.sh` skips cleanly on non-macOS (exit 3) and
     `auto.sh --playable` keeps OK when playability is unknown.
+14. **Review fix #4** — `rebuild-paff.sh` preserves real per-track audio language
+    (fra/spa), not a hard-coded `eng`.
+15. **Open-GOP seam glitch** — `gop-probe.sh` flags an open-GOP (partial-sync) cut
+    point and names the nearest closed-GOP keyframe (exit 10), clears a closed one,
+    and false-positives on neither real H.264 IDR media; `seam-check.sh` catches a
+    one-frame flash (by before/after continuity), does NOT flag a legitimate hard
+    cut, and passes a clean continuous join.
 
 ## Synthesis limit (why some things aren't tested directly)
 
@@ -52,3 +59,10 @@ seek. The harness therefore validates the surrounding machinery (seekability
 sanity, gate execution, hash invariance, detector math) rather than re-creating
 the corruption. A **real capture played in a real player** remains the final
 arbiter — the skill's standing "playable ≠ valid" rule.
+
+The same applies to the **open-GOP seam glitch**: libx264/x265 won't emit true
+leading B-frames on synthetic content, so `gop-probe.sh`'s detector is unit-tested
+against a crafted frame table (`GOP_PROBE_CSV`) plus a real-media no-false-positive
+check, and `seam-check.sh` is tested against a synthesized one-frame flash, a
+legitimate hard cut, and a clean join. A real capture + eyeballing the seam frames
+remains the decisive test.

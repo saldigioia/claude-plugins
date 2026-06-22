@@ -1,7 +1,7 @@
 {
   "name": "remuxing-to-mov",
-  "version": "1.0.0",
-  "description": "Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. Five-rung escalation ladder (pure copy → PCM audio → genpts → elementary-stream timeline rebuild → scoped re-encode) with probe/diagnose/verify scripts, a dual-track PCM-access + bit-exact-original audio default, field-coded (PAFF) H.264 glitch repair, and decoded-pixel-identity verification of every output. Every codec/container fact verified empirically against a named ffmpeg version; the source file is never touched.",
+  "version": "1.1.0",
+  "description": "Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. One-command /mov shortcut picks the technique automatically (dual-track only when the audio needs it). Five-rung escalation ladder (pure copy → PCM audio → genpts → elementary-stream timeline rebuild → scoped re-encode) with probe/diagnose/verify scripts, a dual-track PCM-access + bit-exact-original audio default, field-coded (PAFF) H.264 glitch repair, and decoded-pixel-identity verification of every output. Every codec/container fact verified empirically against a named ffmpeg version; the source file is never touched.",
   "author": {
     "name": "Rare Data Club"
   },

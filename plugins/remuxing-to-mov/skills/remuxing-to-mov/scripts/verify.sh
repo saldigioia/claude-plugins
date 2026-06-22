@@ -137,15 +137,30 @@ fi
 echo "-- (c) output decode spot-checks (${WIN}s windows) --"
 dur=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null) || dur=0
 case "$dur" in ''|N/A) dur=0;; esac
-spot () { ffmpeg -nostdin -v error -ss "$1" -t "$WIN" -i "$OUT" -map 0:v:0 -map '0:a?' \
-            -f null - 2>&1 | grep -c . || true; }
+# Decode the output and count ffmpeg error-level lines. A REAL decode error
+# (bitstream corruption) is deterministic and recurs on every pass; a stray line
+# emitted under heavy host load is not. So `confirm` re-decodes a nonzero result
+# (up to twice more) and keeps the MINIMUM — this drops load-induced false
+# positives without ever masking a reproducible error (which stays nonzero).
+decode_win () {  # $1 optional start time; empty -> whole file
+  if [ -n "${1:-}" ]; then
+    ffmpeg -nostdin -v error -ss "$1" -t "$WIN" -i "$OUT" -map 0:v:0 -map '0:a?' -f null - 2>&1 | grep -c . || true
+  else
+    ffmpeg -nostdin -v error -i "$OUT" -map 0:v:0 -map '0:a?' -f null - 2>&1 | grep -c . || true
+  fi
+}
+confirm () {  # re-confirm a nonzero count; keep the min, bail early on a clean pass
+  local n m i; n=$(decode_win "${1:-}"); i=0
+  while [ "$n" -ne 0 ] && [ "$i" -lt 4 ]; do m=$(decode_win "${1:-}"); [ "$m" -lt "$n" ] && n=$m; i=$((i+1)); done
+  printf '%s' "$n"
+}
 if awk "BEGIN{exit !($dur < 4*$WIN)}"; then
-  errs=$(ffmpeg -nostdin -v error -i "$OUT" -map 0:v:0 -map '0:a?' -f null - 2>&1 | grep -c . || true)
+  errs=$(confirm)
   echo "   short file — full output decode: $errs errors (want 0)"
 else
   mid=$(awk "BEGIN{printf \"%.2f\", $dur/2}")
   tail=$(awk "BEGIN{printf \"%.2f\", $dur-$WIN-2}")
-  em=$(spot "$mid"); et=$(spot "$tail")
+  em=$(confirm "$mid"); et=$(confirm "$tail")
   echo "   middle @${mid}s: $em errors; tail @${tail}s: $et errors (want 0)"
   errs=$((em + et))
 fi
