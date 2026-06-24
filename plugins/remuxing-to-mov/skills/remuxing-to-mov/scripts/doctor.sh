@@ -31,6 +31,15 @@ if [ "$FFMPEG" = yes ]; then
   BSF_FU=$(has_bsf filter_units); BSF_H264=$(has_bsf h264_mp4toannexb); BSF_HEVC=$(has_bsf hevc_mp4toannexb)
 fi
 
+# Platform / hardware / optional helpers — REPORT-ONLY (informational; never gates
+# the verdict or exit). The lossless path is stream-copy: it neither encodes nor
+# decodes video, so hardware acceleration (e.g. VideoToolbox) does NOT speed it up.
+# This is surfaced only for a Rung-4 re-encode and for playable-check.sh (macOS).
+OS=$(uname -s 2>/dev/null || echo unknown); ARCH=$(uname -m 2>/dev/null || echo unknown)
+HWA=""; [ "$FFMPEG" = yes ] && HWA=$(ffmpeg -hide_banner -hwaccels 2>/dev/null || true)
+VTB=no; grep -qiw videotoolbox <<<"$HWA" && VTB=yes
+T_MINFO=$(have_bin mediainfo); T_MP4BOX=$(have_bin MP4Box); T_MP4DUMP=$(have_bin mp4dump)
+
 # REQUIRED to do anything useful; RECOMMENDED degrades a specific check if absent.
 required_ok=yes
 for v in "$FFMPEG" "$FFPROBE" "$MUX_MOV" "$MUX_NULL"; do [ "$v" = yes ] || required_ok=no; done
@@ -42,9 +51,10 @@ status=READY; [ "$required_ok" = yes ] || status=BLOCKED
 { [ "$status" = READY ] && { [ "$vcl_ok" = no ] || [ "$MUX_SHASH" = no ]; }; } && status=DEGRADED
 
 if [ "$KV" -eq 1 ]; then
-  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_STATUS=%s\n' \
+  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\n' \
     "$FFMPEG" "$FFPROBE" "${VER:-na}" "$MUX_MOV" "$MUX_NULL" "$MUX_SHASH" "$MUX_FMD5" \
-    "$BSF_FU" "$BSF_H264" "$BSF_HEVC" "$vcl_ok" "$dv_copy" "$status"
+    "$BSF_FU" "$BSF_H264" "$BSF_HEVC" "$vcl_ok" "$dv_copy" \
+    "$OS" "$ARCH" "$VTB" "$T_MINFO" "$T_MP4BOX" "$T_MP4DUMP" "$status"
   [ "$required_ok" = yes ] || exit 1
   exit 0
 fi
@@ -68,7 +78,20 @@ if [ "$dv_copy" = yes ]; then
 else
   echo "  Dolby Vision : ffmpeg ${VER:-?} < 5.0 -> DV will NOT survive -c copy; keep MKV for DV sources."
 fi
-echo "  (Confirm AC-3/E-AC-3 QuickTime playback on the target Mac; see playable-check.sh.)"
+echo "  (E-AC-3/Dolby Digital Plus plays natively in modern QuickTime; AC-3 varies by macOS — see playable-check.sh.)"
+echo "-- platform & optional tools (report-only; never affects the verdict) --"
+echo "  os / arch        : $OS / $ARCH"
+if [ "$VTB" = yes ]; then
+  echo "  VideoToolbox     : available — informational only. The remux is stream-copy, so hw"
+  echo "                     accel can't speed it; applies to a Rung-4 re-encode or playable-check.sh."
+elif [ "$OS" = Darwin ]; then
+  echo "  VideoToolbox     : not in 'ffmpeg -hwaccels' (unexpected on macOS — check the ffmpeg build)"
+else
+  echo "  VideoToolbox     : n/a (macOS only)"
+fi
+echo "  mediainfo        : $([ "$T_MINFO" = yes ] && echo present || echo absent)   [optional: field-structure detail]"
+echo "  MP4Box (GPAC)    : $([ "$T_MP4BOX" = yes ] && echo present || echo absent)   [optional: container validate/inspect]"
+echo "  mp4dump (Bento4) : $([ "$T_MP4DUMP" = yes ] && echo present || echo absent)   [optional: atom dump]"
 echo
 case "$status" in
   READY)    echo ">> READY — all required and recommended capabilities present." ;;

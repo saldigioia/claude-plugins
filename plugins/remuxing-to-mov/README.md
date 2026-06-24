@@ -28,14 +28,20 @@ re-encodes video or touches the source; exit codes `0` = verified, `10` = REVIEW
   clean, verified file: pure copy → copy video + PCM audio → regenerate
   timestamps → rebuild the timeline from the elementary stream → scoped
   re-encode (the documented last resort).
-- **Glitch diagnosis** — a decode-to-null / MKV strict-mux / DTS-monotonicity
-  ladder that separates damaged captures from the timestamp defects behind
-  scrub-tearing field-coded (PAFF) H.264 remuxes.
+- **Glitch diagnosis** — a decode-to-null / MKV strict-mux / DTS-monotonicity /
+  forward-gap ladder that separates damaged captures from the timestamp defects
+  behind scrub-tearing PAFF remuxes and gap-collapse audio desync.
 - **Dual-track default deliverable** — PCM "access" track that always plays in
   QuickTime + the original audio copied bit-exact as track 2 for provenance.
+- **Discontinuity resync** — a discontinuous source (dropped-frame gaps) desyncs
+  raw PCM on a blind copy; `resync.sh` re-times the audio to the picture while the
+  video stays bit-identical (an explicit, human-invoked fix).
+- **Opt-in QuickTime metadata** — `metadata.sh` embeds title/description/etc. in the
+  proper QuickTime `mdta` format and drops the generic chapter "menu"; never applied
+  automatically (the default deliverable is metadata-free).
 - **Verification of every output** — decoded-pixel identity (timestamp-agnostic
-  MD5) plus backward-DTS scan; playable ≠ valid ≠ lossless, so all three are
-  checked.
+  MD5), a scrub gate, and an A/V duration-parity (sync) gate; playable ≠ valid ≠
+  lossless ≠ in-sync, so all are checked.
 - **Safety rails** — atomic output (`.part` → `mv`), refusal to overwrite the
   source in place, intermediates never auto-deleted, `-nostdin` everywhere.
 
@@ -45,8 +51,8 @@ re-encodes video or touches the source; exit codes `0` = verified, `10` = REVIEW
 skills/remuxing-to-mov/
   SKILL.md                 workflow, escalation ladder, instant-answer card
   scripts/                 doctor, probe, diagnose, mov + auto (one-shot drivers),
-                           remux, rebuild-paff, dual-track, verify, batch,
-                           gop-probe, seam-check, playable-check
+                           remux, rebuild-paff, resync, dual-track, metadata, verify,
+                           batch, gop-probe, seam-check, playable-check
   references/              codec/container tables, timeline repair, color/HDR,
                            cutting/concat, dual-track QC, container internals
   examples/                worked driver scripts from a real broadcast job

@@ -71,6 +71,14 @@ read -r ndup nback < <(ffprobe -v error -select_streams v:0 -read_intervals "%+#
     END{print (du+0), (bk+0)}')
 echo "   first 5000 packets: duplicate(equal) DTS=${ndup:-0}  backward DTS=${nback:-0}"
 
+# (4) forward-gap (discontinuity) scan — timestamps that are present AND monotonic
+# but JUMP forward (dropped frames). Steps (1)-(3) and the MKV mux all PASS these;
+# only a delta scan finds them. They are the class that silently desyncs raw PCM
+# audio on a blind copy (MOV PCM can't hold a gap) — the remux-sync post-mortem.
+echo "-- (4) discontinuity (forward-gap) scan --"
+eval "$(disc_scan "$IN")"
+echo "   forward gaps: ${DISC_COUNT:-0}  (dropped ~${DISC_MISSING:-0}s; frame=${DISC_FRAMEDUR:-?}s)"
+
 # --- verdict ---
 if [ "${nmono:-0}" -ge 10 ] || [ "${ndup:-0}" -gt 0 ] || [ "${nback:-0}" -gt 0 ]; then
   echo ">> VERDICT: NON-MONOTONIC / DUPLICATE DTS (broken timeline, common on a"
@@ -85,10 +93,24 @@ elif [ "${mkv_ok:-1}" -eq 1 ]; then
     echo "     reliable:  $RB"
     echo "     or verify a copy with the scrub gate before trusting it:"
     echo "                scripts/verify.sh \"$IN\" OUT.mov   (fails on a glitchy scrub)"
+  elif [ "${DISC_COUNT:-0}" -gt 0 ]; then
+    echo ">> VERDICT: DISCONTINUOUS SOURCE — ${DISC_COUNT} forward timestamp gap(s),"
+    echo "   first @ ${DISC_FIRST}s (~${DISC_MISSING}s dropped). Video timing is otherwise"
+    echo "   sound, so the mux 'succeeds' — but a blind -c copy COLLAPSES these gaps in"
+    echo "   raw PCM audio, sliding it out of sync with the picture. Do NOT plain-copy"
+    echo "   PCM here. Gap-fill the audio (video stays bit-identical):"
+    echo "     scripts/resync.sh \"$IN\" OUT.mov"
+    echo "   Then confirm: scripts/verify.sh \"$IN\" OUT.mov  (the duration-parity gate)."
   else
     echo ">> VERDICT: timing looks sound -> plain copy (Rung 0): scripts/remux.sh."
     echo "   (If MOV still glitches despite this, rebuild anyway: rebuild-paff.sh.)"
   fi
 else
   echo ">> VERDICT: timestamps problematic (MKV refused) -> rebuild: $RB"
+fi
+# A discontinuous source still needs an audio gap-fill even when the video path is
+# a rebuild (PAFF / non-monotonic) — flag it so it isn't missed on those branches.
+if [ "${DISC_COUNT:-0}" -gt 0 ] && { [ "${nmono:-0}" -ge 10 ] || [ "${ndup:-0}" -gt 0 ] || [ "${nback:-0}" -gt 0 ] || [ "$PF_PAFF" = yes ]; }; then
+  echo "   ALSO: ${DISC_COUNT} discontinuit(ies) present — if any audio track is raw PCM,"
+  echo "   gap-fill it (scripts/resync.sh) so audio stays pinned through the rebuild."
 fi

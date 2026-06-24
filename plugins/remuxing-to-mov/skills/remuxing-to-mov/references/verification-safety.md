@@ -107,7 +107,8 @@ A correct mux can still fail to play; don't chase a phantom "bad mux".
 | MPEG-2 4:2:0 | Yes | Yes |
 | MPEG-2 4:2:2 (422@HL) | Yes | Generally no |
 | Dolby Vision HEVC | Yes (ffmpeg ≥5.0, single-layer) | Device/app-dependent |
-| AC-3 / E-AC-3 | Yes | Unverified (historically not native) |
+| AC-3 | Yes | Yes on modern macOS (older: spotty) |
+| E-AC-3 (Dolby Digital Plus) | Yes | Yes — native in modern QuickTime |
 | DTS / DTS-HD MA | Yes | No |
 | MP2 | Yes (non-standard) | Not expected |
 

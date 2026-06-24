@@ -126,6 +126,8 @@ dout=$(bash "$SC/doctor.sh" --kv 2>&1); drc=$?
 [ "$drc" -eq 0 ] && ok "doctor.sh exits 0 (required caps present)" || no "doctor.sh exit $drc"
 has "$dout" "DOC_STATUS=" "doctor emits DOC_STATUS"
 hasnt "$dout" "DOC_STATUS=BLOCKED" "doctor not BLOCKED in a working env"
+has "$dout" "DOC_OS=" "doctor reports platform (DOC_OS)"
+has "$dout" "DOC_VIDEOTOOLBOX=" "doctor reports VideoToolbox availability (report-only)"
 # clean non-PAFF H.264 copy must NOT false-FAIL when the VCL path is forced off
 out=$(RTM_FORCE_NO_VCL=1 bash "$SC/verify.sh" "$S" "$CP" 2>&1); rc=$?
 { [ "$rc" -ne 1 ]; } && ok "degraded verify of clean copy does not FAIL (rc=$rc)" || no "degraded verify false-FAILed a clean copy"
@@ -334,6 +336,87 @@ cp "$AUD_X" "$WORK/clip.ts"; bash "$MOV" "$WORK/clip.ts" >/dev/null 2>&1 || true
 # never writes onto the source
 bash "$MOV" "$WORK/clip.ts" "$WORK/clip.ts" >/dev/null 2>&1; rc=$?
 [ "$rc" -ne 0 ] && ok "refuses source == output" || no "did not refuse source==output"
+
+echo
+echo "== 17. discontinuity handling: detect forward gaps, QC the desync, resync fixes it =="
+# SYNTHESIS LIMIT (read this): a true broadcast discontinuity — a forward DTS gap that
+# survives into a decodable file where raw PCM then collapses it on copy — cannot be
+# minted by libx264 in a sandbox; the encoder/muxer normalizes timestamps to contiguous
+# (same class of limit as PAFF and CEA-608 elsewhere in this harness). So we pin each
+# MECHANISM, which IS synthesizable: the gap-scan math (via the DISC_DTS_FILE injection
+# hook, exactly as the gop-probe tests inject a CSV), the duration-parity QC (via a real
+# audio-short-of-video output), and resync (video bit-identity + a sync-clean result).
+
+# (a) disc_scan math: clean cadence -> 0 gaps; 3 injected forward jumps -> 3
+awk 'BEGIN{for(i=0;i<300;i++)printf "%.6f\n", i*0.033367}' > "$WORK/clean.dts"
+awk 'BEGIN{t=0;for(i=0;i<300;i++){printf "%.6f\n",t;t+=0.033367;if(i==80||i==160||i==240)t+=0.12}}' > "$WORK/gappy.dts"
+eval "$(DISC_DTS_FILE="$WORK/clean.dts" DISC_FRAMEDUR_IN=0.033367 disc_scan)"
+[ "${DISC_COUNT:-x}" = 0 ] && ok "disc_scan: clean cadence -> 0 gaps" || no "disc_scan false-positive on clean cadence (${DISC_COUNT:-?})"
+eval "$(DISC_DTS_FILE="$WORK/gappy.dts" DISC_FRAMEDUR_IN=0.033367 disc_scan)"
+{ [ "${DISC_COUNT:-0}" = 3 ] && awk "BEGIN{exit !(${DISC_MISSING:-0}>0.3 && ${DISC_MISSING:-0}<0.4)}"; } \
+  && ok "disc_scan: 3 injected forward gaps -> count 3, missing ~0.36s" || no "disc_scan miscount (${DISC_COUNT:-?}/${DISC_MISSING:-?})"
+
+# (b) diagnose routes a discontinuous source to resync. Use a DTS-clean MP4 carrier
+# (no B-frames, no MPEG-TS muxer DTS artifacts) so diagnose's steps 1-3 pass and it
+# reaches the discontinuity branch; the gappy DTS is injected into its step-4 scan.
+ff -f lavfi -i testsrc2=s=320x240:r=25 -t 4 -c:v libx264 -g 25 -bf 0 -pix_fmt yuv420p "$WORK/dclean.mp4"
+out=$(DISC_DTS_FILE="$WORK/gappy.dts" DISC_FRAMEDUR_IN=0.033367 bash "$SC/diagnose.sh" "$WORK/dclean.mp4" 2>&1)
+has "$out" "DISCONTINUOUS SOURCE" "diagnose flags a discontinuous source"
+has "$out" "resync.sh" "diagnose routes the fix to resync.sh"
+
+# (c) duration-parity gate: audio short of video -> sync REVIEW; matched -> consistent, no false flag
+ff -f lavfi -i testsrc2=s=320x240:r=30000/1001 -t 6 -c:v libx264 -g 30 -pix_fmt yuv420p -an "$WORK/dv6.mov"
+ff -f lavfi -i sine=1000 -t 5.4 -c:a aac "$WORK/da54.m4a"; ff -f lavfi -i sine=1000 -t 6 -c:a aac "$WORK/da6.m4a"
+ff -i "$WORK/dv6.mov" -i "$WORK/da54.m4a" -map 0:v:0 -map 1:a:0 -c copy "$WORK/dshort.mov"
+ff -i "$WORK/dv6.mov" -i "$WORK/da6.m4a"  -map 0:v:0 -map 1:a:0 -c copy "$WORK/dmatch.mov"
+out=$(bash "$SC/verify.sh" "$WORK/dv6.mov" "$WORK/dshort.mov" 2>&1)
+has "$out" "sync REVIEW" "duration-parity: audio short of video -> sync REVIEW"
+out=$(bash "$SC/verify.sh" "$WORK/dv6.mov" "$WORK/dmatch.mov" 2>&1)
+has "$out" "durations consistent" "duration-parity: matched A/V -> consistent"
+hasnt "$out" "sync REVIEW" "duration-parity: matched A/V -> no false sync flag"
+
+# (d) resync: video stays bit-identical and the output is sync-clean
+ff -f lavfi -i testsrc2=s=320x240:r=30000/1001 -f lavfi -i sine=440 -t 6 -c:v libx264 -g 30 -pix_fmt yuv420p -c:a aac -shortest "$WORK/rsrc.ts"
+out=$(bash "$SC/resync.sh" "$WORK/rsrc.ts" "$WORK/rs.mov" 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && case "$out" in *">> DONE"*) true;; *) false;; esac; } \
+  && ok "resync -> DONE (video lossless + audio synced)" || no "resync verdict wrong (rc=$rc)"
+[ -f "$WORK/rsrc.ts" ] && ok "resync never deletes the source" || no "resync deleted the source"
+bash "$SC/resync.sh" "$WORK/rsrc.ts" "$WORK/rsrc.ts" >/dev/null 2>&1; rc=$?
+[ "$rc" -ne 0 ] && ok "resync refuses source == output" || no "resync did not refuse source==output"
+
+echo
+echo "== 18. E-AC-3 native + OPT-IN QuickTime metadata (never auto-tagged) =="
+acods18 () { ffprobe -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$1" 2>/dev/null | grep . | paste -sd, -; }
+# E-AC-3 (Dolby Digital Plus) is QuickTime-native -> single copied track, NOT dual
+ff -f lavfi -i testsrc2=s=320x240:r=25 -f lavfi -i sine=440 -t 3 -c:v libx264 -pix_fmt yuv420p -c:a eac3 "$WORK/e.ts"
+bash "$SC/mov.sh" "$WORK/e.ts" "$WORK/e.mov" >/dev/null 2>&1 || true
+[ "$(acods18 "$WORK/e.mov")" = eac3 ] && ok "E-AC-3 -> single copied track (QuickTime-native)" || no "E-AC-3 shape wrong: $(acods18 "$WORK/e.mov")"
+# AC-3 still dual-track (the reclassification must not over-reach)
+ff -f lavfi -i testsrc2=s=320x240:r=25 -f lavfi -i sine=440 -t 3 -c:v libx264 -pix_fmt yuv420p -c:a ac3 "$WORK/a3.ts"
+bash "$SC/mov.sh" "$WORK/a3.ts" "$WORK/a3.mov" >/dev/null 2>&1 || true
+case "$(acods18 "$WORK/a3.mov")" in pcm_*,ac3) ok "AC-3 -> still dual-track (PCM access + original)";; *) no "AC-3 dual-track lost: $(acods18 "$WORK/a3.mov")";; esac
+# OPT-IN proof: mov.sh with NO metadata flags embeds NOTHING
+mt=$(ffprobe -v error -show_entries format_tags -of default=noprint_wrappers=1 "$WORK/e.mov" 2>/dev/null | grep -c 'com.apple.quicktime' || true)
+[ "${mt:-0}" -eq 0 ] && ok "no metadata flags -> nothing auto-embedded (opt-in honored)" || no "mov.sh auto-embedded metadata ($mt tags)"
+
+# metadata.sh on a file that HAS a chapter 'menu'
+ff -f lavfi -i testsrc2=s=320x240:r=25 -f lavfi -i sine=440 -t 3 -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$WORK/mbase.mov"
+printf ';FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1500\ntitle=One\n' > "$WORK/ch.txt"
+ff -i "$WORK/mbase.mov" -i "$WORK/ch.txt" -map_metadata 1 -map_chapters 1 -c copy "$WORK/mch.mov"
+hasdata () { ffprobe -v error -show_entries stream=codec_type -of csv=p=0 "$1" 2>/dev/null | grep -c '^data' || true; }
+[ "$(hasdata "$WORK/mch.mov")" -ge 1 ] && ok "fixture: chapters add a generic data 'menu' track" || no "fixture lacks the chapter data track"
+out=$(bash "$SC/metadata.sh" "$WORK/mch.mov" "$WORK/mtag.mov" --title "T" --description "D" --author "A" 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && case "$out" in *">> OK"*) true;; *) false;; esac; } && ok "metadata.sh embeds + round-trips (>> OK)" || no "metadata.sh verdict wrong (rc=$rc)"
+[ "$(hasdata "$WORK/mtag.mov")" -eq 0 ] && ok "metadata.sh strips the chapter 'menu' (no data track)" || no "chapter menu not stripped"
+ffprobe -v error -show_entries format_tags -of default=noprint_wrappers=1 "$WORK/mtag.mov" 2>/dev/null | grep -q 'com.apple.quicktime.title=T' \
+  && ok "metadata written in proper QuickTime mdta keys" || no "QuickTime mdta key missing"
+sv=$(ffmpeg -nostdin -v error -i "$WORK/mch.mov"  -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1)
+ov=$(ffmpeg -nostdin -v error -i "$WORK/mtag.mov" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1)
+{ [ -n "$sv" ] && [ "$sv" = "$ov" ]; } && ok "metadata.sh keeps video bit-identical" || no "metadata.sh altered the video"
+bash "$SC/metadata.sh" "$WORK/mbase.mov" "$WORK/none.mov" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && ok "metadata.sh: no fields -> exit 2 (embeds nothing on its own)" || no "metadata.sh no-fields guard (rc=$rc)"
+bash "$SC/metadata.sh" "$WORK/mbase.mov" "$WORK/mbase.mov" --title T >/dev/null 2>&1; rc=$?
+[ "$rc" -ne 0 ] && ok "metadata.sh: refuses source == output" || no "metadata.sh same-file guard"
 
 echo
 echo "===================================================================="

@@ -43,7 +43,9 @@ REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
    archival sign-off, to settle a REVIEW verdict, or once per new
    pipeline/source type. Never default to a full double decode. Add `--signaling`
    (color/HDR tags + captions) or `--audio` (dual-track fidelity) when the source
-   carries HDR/captions or you shipped the dual-track build.
+   carries HDR/captions or you shipped the dual-track build. Every run also checks
+   **A/V duration parity** — a discontinuous source whose PCM gaps collapsed on
+   copy reads short here, the cheap catch for sync drift.
 
 ## The escalation ladder — stop at the first rung that works
 
@@ -82,10 +84,16 @@ tears on scrub, it is almost always **timestamps, not the video** — run
 2. MKV strict-mux test (Matroska refuses the bad/absent timestamps MOV silently
    swallows — this is the decisive test);
 3. backward-DTS (non-monotonic timing; **blind to *missing* timestamps**, which
-   only step 2 catches — a "0" here does not by itself clear the file).
+   only step 2 catches — a "0" here does not by itself clear the file);
+4. forward-gap (discontinuity) scan — *present and monotonic* timestamps that
+   **jump forward** (dropped frames). Steps 1–3 and the mux all pass these; only
+   a delta scan finds them, and they are what desyncs raw PCM audio on a blind
+   copy (the video keeps the gap; MOV PCM can't, so it collapses).
 
 Verdict → action: damaged → re-capture; missing TS → Rung 2 then Rung 3;
-non-monotonic DTS → Rung 3. **Field-coded (PAFF) H.264 is routed straight to
+non-monotonic DTS → Rung 3; **discontinuous source → `scripts/resync.sh` (video
+bit-identical, audio gap-filled), then the verify parity gate**. **Field-coded
+(PAFF) H.264 is routed straight to
 Rung 3 regardless of the timing verdict** — genpts is guilty-until-proven there,
 because the strict-mux test proves timestamps are *present and monotonic*, not
 that the timeline is *seekable*, and that gap is where PAFF corrupts silently.
@@ -98,8 +106,9 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 | "Convert this to .mov" (the everyday ask) | `scripts/mov.sh IN` (or `/remuxing-to-mov:mov IN`) — copy video, dual-track audio only if QuickTime needs it, verified. `remux.sh` is the bare Rung-0 copy underneath |
 | HEVC file won't open in QuickTime | Retag, don't re-encode: `ffmpeg -i IN -c copy -tag:v hvc1 OUT.mov` |
 | Plays locally, slow start over network | `ffmpeg -i IN -c copy -movflags +faststart OUT.mov` (moov was at EOF) |
-| Video plays, audio silent in QuickTime | Audio QT can't decode (AC-3/E-AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm` |
+| Video plays, audio silent in QuickTime | Audio QT can't play (AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm`. **E-AC-3 (Dolby Digital Plus) plays natively — just copy it** |
 | Glitches/tears only on scrub | Timestamps, not the video → `scripts/diagnose.sh` |
+| Audio drifts out of sync over a long capture (leads/lags the picture) | Discontinuous source: dropped frames the video keeps but raw PCM collapses on copy. `scripts/diagnose.sh` finds the forward gaps → `scripts/resync.sh IN OUT.mov` (video bit-identical, audio gap-filled) → `verify.sh` parity gate confirms |
 | Field-coded (PAFF) H.264 (coded-pic rate ≈ 2× frame rate) | genpts is guilty-until-proven → rebuild at the field rate (`scripts/rebuild-paff.sh`); confirm with `scripts/verify.sh` (its scrub gate fails a glitchy timeline) |
 | Mux fails `Could not find tag for codec …` | A subtitle/data stream MOV can't carry (subrip, DVB, teletext, SCTE) — map explicitly `-map 0:v:0 -map 0:a`; text subs → sidecar or `mov_text` (verified 8.1.1: `-map 0` copy with SRT fails at header write) |
 | Mux fails `… only supported in MP4` | AV1 / FLAC / Opus / TrueHD: route to MP4 or keep MKV; FLAC → `-c:a alac` bridge |
@@ -109,8 +118,9 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 | Source has several audio tracks | `remux.sh` keeps `a:0` only — add `--all-audio`; first mapped track = the QuickTime default |
 | Missing/wrong audio language tag | `-metadata:s:a:0 language=eng` (PS/`.mpg` sources carry none) |
 | Chapters in the source | Survive `-c copy` into MOV — ffmpeg adds a QT chapter text track (verified 8.1.1) |
+| Embed metadata into a .mov | `scripts/metadata.sh IN OUT --title … --description …` — proper QuickTime (`mdta`) keys, `-c copy`, drops the generic chapter "menu" + the encoder tag. **Opt-in only, never automatic**; also `mov.sh … --title …` |
 | Asked to remux a file onto itself | Never — scripts refuse; write the output beside the source under a new name |
-| New machine / CI, or "is my ffmpeg OK?" | `scripts/doctor.sh` — reports required vs degraded capabilities (muxers/bsfs) before you trust verify.sh |
+| New machine / CI, or "is my ffmpeg OK?" | `scripts/doctor.sh` — reports required vs degraded capabilities (muxers/bsfs), plus platform / VideoToolbox / optional tools (report-only), before you trust verify.sh |
 | A whole folder of captures | `scripts/batch.sh DIR --out OUTDIR` — auto.sh per file + provenance sidecars + a report; idempotent resume, never deletes sources |
 | "Will QuickTime actually play it?" (macOS) | `scripts/playable-check.sh OUT.mov` — AVFoundation render probe; the playable≠valid half ffmpeg can't prove |
 
@@ -136,11 +146,11 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 | Need | Read |
 |------|------|
 | "Will this source/codec even copy into MOV?" tables; Annex-B vs AVCC | `references/ingest-compatibility.md` |
-| Field-coded/PAFF diagnosis + the full repair ladder + field-rate table | `references/timeline-repair.md` |
+| Field-coded/PAFF diagnosis + the full repair ladder + field-rate table; discontinuity (forward-gap) desync + `resync.sh` | `references/timeline-repair.md` |
 | Lossless cut / trim / concat, and the frame-exact (smart-cut) boundary | `references/cutting-concat.md` |
 | Color/HDR signaling, embedded captions, subtitles (mov_text vs sidecar) | `references/color-hdr-subs.md` |
 | Track selection/language tags, verification methods, safety, playable≠valid | `references/verification-safety.md` |
-| Atom anatomy, MOV vs MP4, required structure, validation checks | `references/container-internals.md` |
+| Atom anatomy, MOV vs MP4, required structure, validation checks; QuickTime metadata (`mdta`) & the chapter-menu strip | `references/container-internals.md` |
 | Codec/container landscape: terminology, licensing, efficiency, audio transparency numbers, Atmos/DTS:X carriage, what each container accepts, "what is X / X vs Y" questions | `references/codec-landscape.md` |
 | Rung-4 delivery/encode recipes (x264/x265/ProRes) — NOT the lossless path | `references/delivery-encode.md` |
 | **DEFAULT deliverable**: QuickTime-ready dual-track (PCM access + original preserved), alignment-safe two-pass cutting, dual-track QC | `references/dual-track-quicktime.md` + `scripts/dual-track.sh` |
@@ -169,11 +179,21 @@ referenced files.
   first `I` in display order); `seam-check.sh` catches the flash. Fix: restart on
   a closed-GOP keyframe, or smart-cut (the one edit that re-encodes).
   → `references/cutting-concat.md`
+- **Discontinuous source → blind PCM copy desyncs (gap-collapse trap).** When a
+  capture drops frames, the video keeps the forward timestamp gap but raw PCM in
+  MOV (a contiguous sample array, no gap mechanism) collapses it on `-c copy`, so
+  audio slides progressively ahead of picture — and the mux still "succeeds." The
+  timestamps are present + monotonic, so the mux tests pass; only a forward-DTS
+  delta scan finds it (`diagnose.sh` step 4, `probe.sh`), `verify.sh`'s A/V
+  duration-parity gate catches the result, and `resync.sh` fixes it (video
+  bit-identical, audio gap-filled — an explicit, human-invoked re-time).
+  → `references/timeline-repair.md`
 - **Version- and container-gated** (all surfaced by `probe.sh` at runtime):
   Dolby Vision survives `-c copy` only on ffmpeg ≥5.0 (single-layer P5/P8 +
   `-tag:v hvc1`; Profile 7 needs conversion); MOV's muxer hard-rejects
   AV1/FLAC/Opus/TrueHD ("only supported in MP4" — FLAC has a bit-exact `-c:a alac`
   bridge, MP3 copies fine); MP2 muxes but QuickTime won't play it (decode to PCM);
-  AC-3/E-AC-3 QuickTime playback is unverified (confirm on the Mac); `colr` is
-  written by default; HDR10 `mdcv`/`clli` live in the HEVC SEI, not container
-  boxes. → `references/ingest-compatibility.md`, `references/codec-landscape.md`
+  **E-AC-3 (Dolby Digital Plus) plays natively in modern QuickTime → copied
+  single-track; AC-3 is dual-tracked for older targets**; `colr` is written by
+  default; HDR10 `mdcv`/`clli` live in the HEVC SEI, not container boxes.
+  → `references/ingest-compatibility.md`, `references/codec-landscape.md`

@@ -92,6 +92,16 @@ else
   echo "   and rebuild; see references/timeline-repair.md."
 fi
 
+echo "-- discontinuities (forward timestamp gaps) --"
+eval "$(disc_scan "$IN")"
+if [ "${DISC_COUNT:-0}" -gt 0 ]; then
+  echo "   >> ${DISC_COUNT} forward gap(s), first @ ${DISC_FIRST}s (~${DISC_MISSING}s dropped)."
+  echo "      Present + monotonic, so the mux 'succeeds' — but a blind -c copy COLLAPSES"
+  echo "      these in raw PCM audio and desyncs it. Use scripts/resync.sh, then verify."
+else
+  echo "   none (video DTS gap-free on the timing axis; safe to plain-copy)."
+fi
+
 echo "-- ffmpeg version & behavior deltas --"
 ver=$(ffmpeg -version 2>/dev/null | head -1 | grep -oE "[0-9]+\.[0-9]+" | head -1 || true)
 major=${ver%%.*}

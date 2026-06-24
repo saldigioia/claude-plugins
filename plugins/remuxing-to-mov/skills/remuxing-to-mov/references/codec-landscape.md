@@ -78,8 +78,8 @@ material), not guarantees. Action verdicts live in `ingest-compatibility.md`.
 | MP2 | lossy | ~256 kbps broadcast figure | expired | Yes, non-standard `.mp2` | Not expected |
 | Opus | lossy, best-in-class <96 kbps | royalty-free (RFC 6716) | **No** — `opus only supported in MP4`, even for copy (8.1.1). Copies into MP4 (tag `Opus`) | No (not even in MP4) |
 | Vorbis | lossy | ~160–192 kbps | royalty-free (Xiph) | version-dependent, non-standard — see below | No |
-| AC-3 | lossy | 640 kbps format max (DVD ≤448) | Dolby; decoder patents expired | Yes | Unreliable — verify |
-| E-AC-3 (+JOC/Atmos) | lossy | typ. 192–768 kbps streaming | Dolby | Yes | Not natively — verify |
+| AC-3 | lossy | 640 kbps format max (DVD ≤448) | Dolby; decoder patents expired | Yes | Modern macOS: yes (older: spotty) |
+| E-AC-3 (+JOC/Atmos) | lossy | typ. 192–768 kbps streaming | Dolby | Yes | **Yes — native** (modern QuickTime) |
 | DTS core | lossy | 754.5 / 1509.75 kbps (the "768/1536" are rounded marketing) | DTS/Xperi | Yes `dtsc` | No |
 | DTS-HD MA (+DTS:X) | **lossless** (core+XLL) | VBR to 24.5 Mbps | DTS/Xperi | Yes `dtsc` | No |
 | TrueHD (+Atmos) | **lossless** (MLP), ≤18 Mbps/8ch | Dolby | **No** — `truehd only supported in MP4` (8.1.1) | n/a |

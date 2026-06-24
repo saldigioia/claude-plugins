@@ -218,6 +218,37 @@ EOF
   fi
 fi
 
+echo "-- (f) A/V duration parity (sync) --"
+# The cheapest catch for the gap-collapse desync (remux-sync post-mortem): for one
+# program every audio track should run the same length as the video. Raw PCM that
+# had source discontinuities collapsed will read SHORT here. Demux-only (stream
+# durations), so it costs nothing. A mismatch is a sync RISK -> REVIEW (the human
+# settles it), never a silent OK. Tolerance via RTM_SYNC_TOL (default 0.25s).
+sdur () { ffprobe -v error -select_streams "$1" -show_entries stream=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1; }
+vdur=$(sdur v:0); naud=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | grep -c . || true)
+SYNC_TOL="${RTM_SYNC_TOL:-0.25}"
+if [ "${naud:-0}" -eq 0 ] || [ -z "$vdur" ] || [ "$vdur" = N/A ]; then
+  echo "   no audio or no stream durations — sync parity N/A."
+else
+  worst=0; ai=0
+  while [ "$ai" -lt "$naud" ]; do
+    ad=$(sdur "a:$ai")
+    if [ -n "$ad" ] && [ "$ad" != N/A ]; then
+      delta=$(awk "BEGIN{d=($vdur)-($ad); if(d<0)d=-d; printf \"%.3f\", d}")
+      echo "   a:$ai=${ad}s vs video ${vdur}s (Δ ${delta}s)"
+      awk "BEGIN{exit !(($delta) > ($worst))}" && worst=$delta
+    fi
+    ai=$((ai+1))
+  done
+  if awk "BEGIN{exit !(($worst) > ($SYNC_TOL))}"; then
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }A/V duration mismatch up to ${worst}s (> ${SYNC_TOL}s tol) — gap-collapse desync signature; diagnose.sh to confirm, resync.sh to fix."
+    echo "   >> mismatch ${worst}s exceeds tolerance ${SYNC_TOL}s — sync REVIEW."
+  else
+    echo "   max Δ ${worst}s within ${SYNC_TOL}s tolerance — A/V durations consistent."
+  fi
+fi
+
 if [ "$FULL" -eq 1 ]; then
   if [ "$SRC_IS_H264" -eq 1 ]; then
     echo "-- (--full) whole-file decoded multiset identity (H.264) --"

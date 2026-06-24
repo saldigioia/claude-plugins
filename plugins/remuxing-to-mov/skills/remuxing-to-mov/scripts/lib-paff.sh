@@ -64,3 +64,43 @@ pf_detect () {
   printf 'PF_CODEC=%s\nPF_FIELD=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_RATIO=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\n' \
     "${pf_codec:-na}" "${pf_field:-na}" "${pf_cr:-0}" "${pf_nf:-0}" "${pf_ratio:-0}" "$pf_paff" "$pf_fr" "$pf_ts"
 }
+
+# disc_scan — forward-timestamp-gap (discontinuity) scan of the video track.
+# A discontinuity is a FORWARD DTS jump larger than a frame: the capture dropped
+# frames and the broadcast clock skipped ahead. Stream-copy preserves these jumps
+# in the video timeline but COLLAPSES them in raw PCM audio (MOV/MP4 PCM is a
+# contiguous sample array with no gap/edit mechanism), so a blind `-c copy` of a
+# discontinuous source slides the audio progressively out of sync (see the
+# remux-sync post-mortem). This is distinct from MISSING or BACKWARD timestamps:
+# the timestamps here are present AND monotonic, so the mux tests pass — the gap
+# is forward, and only a delta scan finds it. NO decode; whole stream (a gap can
+# sit anywhere in a long capture, so this is deliberately not window-bounded).
+#
+# Usage:  eval "$(disc_scan INPUT)"
+#   -> DISC_COUNT (forward gaps) DISC_MISSING (s of dropped time) DISC_FIRST (s|na)
+#      DISC_FRAMEDUR (s)
+# Tunables: DISC_MULT (gap threshold in frame durations, default 1.5).
+# Test hook: DISC_DTS_FILE=<file of dts_time values> bypasses ffprobe;
+#            DISC_FRAMEDUR_IN=<s> supplies the frame duration for that injected list.
+disc_scan () {
+  local IN="${1:-}" mult="${DISC_MULT:-1.5}" dts fdur rf
+  if [ -n "${DISC_DTS_FILE:-}" ]; then
+    dts=$(cat "$DISC_DTS_FILE"); fdur="${DISC_FRAMEDUR_IN:-0}"
+  else
+    rf=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+    fdur=$(pf_eval_fps "${rf:-0}")
+    fdur=$(awk "BEGIN{f=${fdur:-0}+0; if(f>0) printf \"%.6f\",1/f; else print 0}")
+    dts=$(ffprobe -v error -select_streams v:0 -show_entries packet=dts_time -of csv=p=0 "$IN" 2>/dev/null)
+  fi
+  printf '%s\n' "$dts" | awk -v fdur="${fdur:-0}" -v mult="$mult" '
+    $1!="N/A" && $1!="" { t=$1+0
+      if(seen){ d=t-p; if(d>0){ nd++; dl[nd]=d; pos[nd]=p; sd+=d } }
+      p=t; seen=1 }
+    END{
+      if(nd<1){ print "DISC_COUNT=0\nDISC_MISSING=0.000\nDISC_FIRST=na"; printf "DISC_FRAMEDUR=%.6f\n", fdur+0; exit }
+      fd=fdur+0; if(fd<=0) fd=sd/nd            # no fps -> mean delta is an excellent CFR proxy
+      thr=mult*fd; cnt=0; miss=0; first="na"
+      for(i=1;i<=nd;i++) if(dl[i]>thr){ cnt++; miss+=dl[i]-fd; if(first=="na") first=sprintf("%.3f",pos[i]) }
+      printf "DISC_COUNT=%d\nDISC_MISSING=%.3f\nDISC_FIRST=%s\nDISC_FRAMEDUR=%.6f\n", cnt, miss, first, fd
+    }'
+}

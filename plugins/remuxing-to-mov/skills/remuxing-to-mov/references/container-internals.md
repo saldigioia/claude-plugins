@@ -99,6 +99,26 @@ mp4dump -a file.mov | grep -E 'ftyp|moov|mdat|avcC|hvcC|colr'
   decoded; there is no in-place fix. Recovery means a donor file with identical
   encode parameters (untrusted) or salvaging the raw elementary stream.
 
+## QuickTime metadata (mdta) vs the legacy ©-atoms
+
+Two ways to carry file metadata in a `.mov`, treated differently by QuickTime:
+
+- **Proper QuickTime format** — `udta/meta` with an `mdta` handler, a `keys` box of
+  reverse-DNS names (`com.apple.quicktime.title`, `.description`, `.author`,
+  `.creationdate`, …) and a parallel `ilst` of values. This is what Apple tools and
+  Finder read. ffmpeg writes it with `-movflags use_metadata_tags` plus
+  `-metadata com.apple.quicktime.KEY=VALUE`.
+- **Legacy ©-atoms** — bare `©nam`/`©des`/`©cmt` codes directly under `udta` (what the
+  naive `-metadata title=…` one-liner emits). QuickTime reads some, but it's the older,
+  lossier mapping.
+
+The generic "second menu" some workflows add is **not** metadata — it's a **chapter
+text track**: a `data` stream (`bin_data`, tag `text`) with `tref→chap` links from the
+A/V tracks, which QuickTime renders as a navigable chapter menu. `-map 0 -map -0:d`
+drops it (data tracks only); `-map_chapters -1` stops it being regenerated.
+`scripts/metadata.sh` does all of this (plus `-fflags +bitexact` to drop the generic
+`encoder=Lavf…` tag) — and it is **opt-in**: the remux path never tags anything.
+
 ## Tools & specs
 
 `ffprobe` (streams/format), `mediainfo` (human summary, field-structure detail),

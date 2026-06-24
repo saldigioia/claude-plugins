@@ -166,3 +166,61 @@ Common on MKV (millisecond timebase) sources. Set `-video_track_timescale` to a
 clean value (table above). If it persists after fixing the video track, the
 overflow is on another track — usually a `mov_text` subtitle inheriting the 1 ms
 timebase; sidecar the subtitle instead (see `color-hdr-subs.md`).
+
+## Discontinuous source — the gap-collapse audio desync
+
+A different failure from PAFF, and a more insidious one because *the mux
+succeeds and the picture is perfect*. When a capture **drops frames**, the source
+records a **forward timestamp discontinuity**: the clock jumps ahead and the next
+frame's DTS is more than one frame later. The timestamps stay **present and
+monotonic**, so every mux test passes — but a blind `-c copy` desyncs the audio:
+
+- **Video survives.** It carries per-frame timestamps, so the jump is preserved
+  and the video timeline still spans the true real-time duration, gaps and all.
+- **Raw PCM cannot.** PCM in MOV/MP4 is a contiguous sample array at a fixed rate
+  with no edit-list/empty-edit per drop — there is nowhere to put a gap. ffmpeg
+  packs the surviving samples end-to-end, so the audio timeline is **shorter**
+  than the video by the total dropped time, and slides progressively earlier.
+- **Packetized tracks (AC-3/DTS/MP2) drift *less* than PCM** — a frame-based codec
+  tolerates gap collapse better than a raw sample stream. A per-track duration
+  spread is the fingerprint: a clean remux has identical durations on every track.
+
+This is why "lossless stream copy" stops being safe on a discontinuous source,
+and why the container that swallowed the gaps (MOV) is *less* strict than one that
+would reject them. The mux succeeding is not evidence that sync survived.
+
+### Detect it
+
+`scripts/diagnose.sh` step 4 (and `scripts/probe.sh`) scan the video DTS for
+forward jumps larger than ~1.5 frame durations (`lib-paff.sh` `disc_scan`). The
+manual one-liner:
+
+```bash
+ffprobe -v error -select_streams v:0 -show_entries packet=dts_time -of csv=p=0 IN \
+  | awk -v f=0.033367 'NR>1{d=$1-p; if(d>1.5*f) printf "gap @ %.3f  Δ=%.3fs\n",p,d} {p=$1}'
+```
+
+`scripts/verify.sh` then runs an always-on **A/V duration-parity gate**: for one
+program every audio track should match the video length; a track that reads short
+(beyond `RTM_SYNC_TOL`, default 0.25 s) is flagged REVIEW — the cheap post-remux
+catch the original pipeline lacked.
+
+### Fix it — `scripts/resync.sh IN OUT.mov`
+
+The corrected procedure keeps the **video a bit-identical copy** and re-times the
+audio to the picture by filling the gaps:
+
+```bash
+ffmpeg -fflags +genpts -i IN \
+  -map 0:v:0 -c:v copy \
+  -map 0:a -af aresample=async=1:first_pts=0 -c:a pcm_s24le \
+  -movflags +faststart OUT.mov
+# then confirm: scripts/verify.sh IN OUT.mov   (the duration-parity gate)
+```
+
+`aresample=async=1` inserts silence at each gap so the audio stays pinned. This is
+an **explicit, human-invoked** tool, not a ladder rung, because it *re-times the
+audio* (silence added) — video stays lossless, audio does not. If you also need
+the bit-exact original audio, the only frame-accurate fix is a re-mux **from the
+still-existing source** with the same gap handling; a desynced copy can recover
+the gaps the picture timeline shows but a residual can remain at the tail.

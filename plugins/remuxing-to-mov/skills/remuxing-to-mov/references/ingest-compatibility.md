@@ -44,8 +44,8 @@ auto` applies this table automatically.
 
 | Codec | Muxes into MOV by copy? | QuickTime plays it? | Action |
 |-------|-------------------------|---------------------|--------|
-| AC-3 (Dolby Digital) | Yes (verified) | Not natively — verify | `-c:a copy` muxes; QuickTime AC-3 playback is unreliable |
-| E-AC-3 / E-AC-3 JOC (DD+/Atmos) | Yes (verified) | Not natively — verify | `-c:a copy` (Atmos object metadata is in-band, preserved) |
+| AC-3 (Dolby Digital) | Yes (verified) | Yes on modern macOS; spotty on older | `-c:a copy` muxes & plays on current QuickTime; the plugin dual-tracks it for older targets |
+| E-AC-3 / E-AC-3 JOC (DD+/Atmos) | Yes (verified) | **Yes — native** (modern QuickTime/macOS) | `-c:a copy`, single track — QuickTime plays Dolby Digital Plus natively. Atmos object metadata is in-band, preserved |
 | AAC | Yes | Yes | `-c:a copy` |
 | ALAC | Yes | Yes | `-c:a copy` |
 | PCM (`lpcm`) | Yes | Yes | `-c:a copy` |
