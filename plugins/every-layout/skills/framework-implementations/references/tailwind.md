@@ -55,7 +55,7 @@ module.exports = plugin(function({ addComponents, addUtilities, theme }) {
   addComponents({
     '.center': {
       boxSizing: 'content-box',
-      maxInlineSize: 'var(--center-measure, 60ch)',
+      maxInlineSize: 'var(--center-measure, 65ch)',
       marginInline: 'auto',
       paddingInline: 'var(--center-gutter, 1rem)',
     },
@@ -74,6 +74,10 @@ module.exports = plugin(function({ addComponents, addUtilities, theme }) {
       gap: 'var(--cluster-space, 1rem)',
       justifyContent: 'var(--cluster-justify, flex-start)',
       alignItems: 'var(--cluster-align, center)',
+      // ELP_033 — children wrap instead of overflowing
+      '& > *': {
+        minInlineSize: '0',
+      },
     },
   });
 
@@ -88,6 +92,8 @@ module.exports = plugin(function({ addComponents, addUtilities, theme }) {
       },
       '& > :first-child': {
         flexBasis: 'var(--sidebar-width, 20rem)',
+        // ELP_033 — the content pane's --sidebar-content-min already replaces auto
+        minInlineSize: '0',
       },
       '& > :last-child': {
         flexBasis: '0',
@@ -106,6 +112,7 @@ module.exports = plugin(function({ addComponents, addUtilities, theme }) {
       '& > *': {
         flexGrow: '1',
         flexBasis: 'calc((var(--switcher-threshold, 30rem) - 100%) * 999)',
+        minInlineSize: '0', // ELP_033
       },
     },
   });
@@ -138,6 +145,10 @@ module.exports = plugin(function({ addComponents, addUtilities, theme }) {
       display: 'grid',
       gap: 'var(--grid-space, 1rem)',
       gridTemplateColumns: 'repeat(auto-fit, minmax(min(var(--grid-min, 15rem), 100%), 1fr))',
+      // ELP_033 — track floor is definite; children still need shrink permission
+      '& > *': {
+        minInlineSize: '0',
+      },
     },
   });
 
@@ -292,7 +303,7 @@ module.exports = {
   // Measure (optimal line length)
   measure: {
     narrow: '45ch',
-    default: '60ch',
+    default: '65ch',
     wide: '75ch',
   },
 
@@ -352,7 +363,7 @@ module.exports = {
     '--s3': 'calc(var(--s2) * var(--ratio))',
     '--s4': 'calc(var(--s3) * var(--ratio))',
     '--s5': 'calc(var(--s4) * var(--ratio))',
-    '--measure': '60ch',
+    '--measure': '65ch',
     '--color-dark': '#000',
     '--color-light': '#fff',
     '--border-thin': '1px',

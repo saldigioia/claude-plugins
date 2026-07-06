@@ -1,0 +1,58 @@
+<!--
+  FIXTURE: Anti-pattern — bare fraction tracks / the auto-minimum floor (ELP_033).
+
+  EXPECTED AUDIT RESULT: Score: 10-14/24
+    Intrinsic Sizing capped at 1/3: the swatch grid's bare `1fr` tracks hide a
+    minmax(auto, 1fr) floor. Each swatch carries aspect-ratio: 2/1 and a text
+    label; when the label wraps, the extra height feeds back through the
+    aspect ratio into a LARGER minimum width. In a narrow card the three
+    columns refuse to shrink, the grid overflows, and the card's
+    overflow: hidden slices off the third column. Works wide, clips narrow.
+
+  The auditor must recommend: repeat(3, minmax(0, 1fr)) on the tracks and/or
+  min-inline-size: 0 on the children (ELP_033), never a media query.
+-->
+<style>
+  .theme-grid {
+    display: grid;
+    gap: var(--s1, 1.5rem);
+    grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  }
+
+  .theme-card {
+    border: 1px solid;
+    overflow: hidden;
+  }
+
+  .swatch-grid {
+    display: grid;
+    /* VIOLATION: bare 1fr tracks == minmax(auto, 1fr) — the hidden auto floor
+       lets the aspect-ratio swatches veto shrinking (ELP_033). Should be
+       repeat(3, minmax(0, 1fr)), and/or .swatch-grid > * { min-inline-size: 0 } */
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0;
+  }
+
+  .swatch {
+    aspect-ratio: 2 / 1;
+    display: flex;
+    align-items: end;
+    padding: var(--s-2, 0.444rem);
+  }
+</style>
+
+<div class="theme-grid">
+  <section class="theme-card">
+    <h2>Paper / Ink</h2>
+    <div class="swatch-grid">
+      <div class="swatch">INK oklch(20% 0.01 90)</div>
+      <div class="swatch">PAPER oklch(99% 0.005 90)</div>
+      <div class="swatch">ACCENT oklch(60% 0.2 30)</div>
+    </div>
+    <div class="swatch-grid">
+      <div class="swatch">DIM oklch(45% 0.01 90)</div>
+      <div class="swatch">ALT oklch(92% 0.01 90)</div>
+      <div class="swatch">RULE oklch(80% 0.005 90)</div>
+    </div>
+  </section>
+</div>

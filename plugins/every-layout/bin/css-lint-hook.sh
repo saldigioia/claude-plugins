@@ -22,6 +22,12 @@
 
 set -uo pipefail
 
+# Shared primitive-parameter allowlist (also used by css-strict.sh and
+# ports-lint.sh) — the single place inline-styleable custom properties live.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/primitive-params.sh
+. "$SCRIPT_DIR/lib/primitive-params.sh"
+
 FILE="${1:-}"
 [ -z "$FILE" ] && exit 0
 [ -f "$FILE" ] || exit 0
@@ -50,6 +56,14 @@ case "$FILE" in
       | while IFS= read -r line; do
           echo "ARBITRARY PX VALUE: $line — use modular scale token (--s-5 through --s5)"
         done || true
+
+    # 4. Bare 1fr tracks — hidden minmax(auto, 1fr) floor clips at narrow widths (ELP_033)
+    grep -nE 'grid-template[a-z-]*\s*:[^;]*1fr' "$FILE" 2>/dev/null \
+      | grep -v 'minmax(' \
+      | head -3 \
+      | while IFS= read -r line; do
+          echo "BARE 1fr TRACK: $line — bare 1fr is minmax(auto, 1fr); use minmax(0, 1fr) or a definite minimum (ELP_033)"
+        done || true
     ;;
 
   *.astro|*.tsx|*.jsx|*.vue|*.svelte)
@@ -59,10 +73,10 @@ case "$FILE" in
     #    ELC_CLUSTER, ELC_FRAME, ELC_IMPOSTER, ELC_GRID, ELC_CENTER,
     #    ELC_CONTAINER, ELC_BOX, ELC_REEL, ELC_ICON). Everything else is
     #    bespoke CSS outside @layer — ELA_002.
-    awk '
+    awk -v allowed_list="$PRIMITIVE_PARAMS" '
       BEGIN {
-        split("--space --threshold --min --max --sidebar-min --ratio --measure --min-height --gutter --with-sidebar", a, " ")
-        for (i in a) allowed[a[i]] = 1
+        n = split(allowed_list, a, " ")
+        for (i = 1; i <= n; i++) allowed[a[i]] = 1
         violations = 0
       }
       {
@@ -89,7 +103,7 @@ case "$FILE" in
             if (!(prop in allowed)) {
               snippet = decl
               if (length(snippet) > 80) snippet = substr(snippet, 1, 80)
-              printf "[ELA_002] %s:%d\n    %s\n    Bespoke inline style in template — move to @layer components or use a primitive-parameter custom property (--space, --threshold, --min, --max, --sidebar-min, --ratio, --measure, --min-height, --gutter, --with-sidebar)\n", FILENAME, NR, snippet
+              printf "[ELA_002] %s:%d\n    %s\n    Bespoke inline style in template — move to @layer components or use a primitive-parameter custom property (see bin/lib/primitive-params.sh)\n", FILENAME, NR, snippet
               violations++
             }
           }

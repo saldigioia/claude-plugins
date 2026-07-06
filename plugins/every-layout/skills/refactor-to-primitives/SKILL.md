@@ -6,11 +6,6 @@ description: >
   produces step-by-step diffs, and verifies the result against principles.
 disable-model-invocation: true
 allowed-tools: Read Write Edit Grep Glob
-paths:
-  - "**/*.css"
-  - "**/*.scss"
-  - "**/*.astro"
-  - "**/*.html"
 argument-hint: "<file path or code block to refactor>"
 ---
 

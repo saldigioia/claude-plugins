@@ -4,15 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Frame Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
-    .frame-demo { max-inline-size: 400px; }
-    .placeholder { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; width: 800px; height: 600px; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
+    .frame-demo { max-inline-size: 25rem; }
+    .placeholder { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; inline-size: 50rem; block-size: 37.5rem; }
     .pass { color: green; }
     .fail { color: red; }
+    .frame-tall-demo { max-inline-size: 12.5rem; }
+    .placeholder-oversized { inline-size: 75rem; block-size: 75rem; }
+    .frame-empty-demo { border: 1px dashed #ccc; }
+    .frame-narrow-demo { max-inline-size: 9.375rem; border: 1px dashed #ccc; }
   </style>
 </head>
 <body>
@@ -39,7 +43,7 @@
   <section class="test-section">
     <h2>Test 3: Tall Frame (9:16)</h2>
     <p>Portrait-orientation frame.</p>
-    <div class="frame" style="--n: 9; --d: 16; max-inline-size: 200px">
+    <div class="frame frame-tall-demo" style="--n: 9; --d: 16">
       <div class="placeholder">9:16</div>
     </div>
     <p class="pass">✓ Pass if frame is taller than wide (portrait)</p>
@@ -58,7 +62,7 @@
     <h2>Test 5: Overflow Clipping</h2>
     <p>Content larger than the frame should be clipped.</p>
     <div class="frame frame-demo" style="--n: 4; --d: 3">
-      <div class="placeholder" style="width: 1200px; height: 1200px">Large content (should be clipped)</div>
+      <div class="placeholder placeholder-oversized">Large content (should be clipped)</div>
     </div>
     <p class="pass">✓ Pass if oversized content is hidden/clipped by the frame</p>
   </section>
@@ -66,7 +70,7 @@
   <section class="test-section">
     <h2>Test 6: Empty Frame</h2>
     <p>Frame with no children should maintain aspect ratio.</p>
-    <div class="frame frame-demo" style="border: 1px dashed #ccc">
+    <div class="frame frame-demo frame-empty-demo">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if empty frame maintains 16:9 ratio</p>
@@ -75,7 +79,7 @@
   <section class="test-section">
     <h2>Test 7: Frame in Narrow Container</h2>
     <p>Frame should shrink proportionally in narrow containers.</p>
-    <div style="max-inline-size: 150px; border: 1px dashed #ccc">
+    <div class="frame-narrow-demo">
       <div class="frame">
         <div class="placeholder">Narrow</div>
       </div>

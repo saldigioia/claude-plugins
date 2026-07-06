@@ -89,6 +89,10 @@ Reference guide for validating primitive implementations.
   justify-content: var(--justify);
   align-items: var(--align);
 }
+
+.cluster > * {
+  min-inline-size: 0;
+}
 ```
 
 ### Forbidden Properties
@@ -115,6 +119,7 @@ Reference guide for validating primitive implementations.
 .with-sidebar > :first-child {
   flex-basis: var(--side-width);
   flex-grow: 1;
+  min-inline-size: 0; /* ELP_033 — the content pane's explicit --content-min already replaces auto */
 }
 
 .with-sidebar > :last-child {
@@ -147,6 +152,7 @@ Reference guide for validating primitive implementations.
 .switcher > * {
   flex-grow: 1;
   flex-basis: calc((var(--threshold) - 100%) * 999);
+  min-inline-size: 0; /* ELP_033 */
 }
 ```
 
@@ -170,7 +176,7 @@ Reference guide for validating primitive implementations.
   min-block-size: var(--min-height);
 }
 
-.cover > [data-centered] {
+.cover > .principal {
   margin-block: auto;
 }
 ```
@@ -197,12 +203,17 @@ Reference guide for validating primitive implementations.
     minmax(min(var(--min), 100%), 1fr)
   );
 }
+
+.grid > * {
+  min-inline-size: 0; /* ELP_033 */
+}
 ```
 
 ### Forbidden Properties
 - Fixed column counts
 - `@media` queries for column changes
 - Percentage values in minmax minimum
+- Bare `1fr` tracks — every fraction track needs a definite minimum or 0 (`minmax(0, 1fr)`); bare `1fr` is `minmax(auto, 1fr)` and clips at narrow widths (ELP_033)
 
 ### Custom Properties
 - `--min`

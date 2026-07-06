@@ -1,0 +1,18 @@
+<!-- Gate fixture — ELA_002 scanning of .html files (css-strict.sh).
+     EXPECTED AUDIT RESULT: exactly 2 ELA_002 violations —
+       1. margin-left inside the <style> block (physical property; the block
+          is extracted with line numbers preserved)
+       2. the bespoke inline color on the div (only primitive-parameter
+          custom properties may ride in a style attribute)
+     The stack section's inline custom property is a primitive parameter
+     (ELC_STACK instance API) and must be accepted. -->
+<style>
+  .legacy-panel {
+    margin-left: var(--s1);
+  }
+</style>
+
+<section class="stack" style="--space: var(--s2)">
+  <div style="color: red">Bespoke inline color — must fail</div>
+  <p>Parameterized spacing above is legitimate.</p>
+</section>

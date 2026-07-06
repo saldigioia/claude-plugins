@@ -1,0 +1,29 @@
+/* Gate fixture — ELA_003 0-2-0 specificity cap (css-strict.sh).
+   EXPECTED: exactly 2 ELA_003 violations —
+     `.a .b .c`                  (0-3-0: three chained classes)
+     `.widget.active.highlight`  (0-3-0: compound class chain)
+   The canonical Cover selector must PASS: functional pseudo-class wrappers
+   (:not/:is/:where/:has) and their arguments are excluded from the count by
+   design, so `.cover > :first-child:not(.principal)` scores 0-2-0. */
+
+.a .b .c {
+  color: var(--br-color-text, #000);
+}
+
+.widget.active.highlight {
+  color: var(--br-color-text, #000);
+}
+
+.cover > :first-child:not(.principal) {
+  margin-block-start: 0;
+}
+
+/* Double wrapper with an attribute selector inside — the argument must not
+   count, so this is class + pseudo-class = 0-2-0 and must PASS. */
+.cover > :last-child:not(.principal):not([data-centered]) {
+  margin-block-end: 0;
+}
+
+.box[data-invert] {
+  color: var(--br-color-text, #000);
+}

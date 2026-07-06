@@ -96,6 +96,9 @@ Memory lines for quick recall of principles and primitives.
 ### Font-Display Contract (ELP_032)
 > Use font-display: optional when --measure uses ch units; if brand fonts must show on first paint, tune size-adjust and ascent-override to match the fallback.
 
+### Neutralized Auto-Minimum (ELP_033)
+> Bare 1fr hides an auto floor; minmax(0, 1fr) and min-inline-size: 0 let content wrap instead of clip.
+
 ---
 
 ## Container Query Hooks

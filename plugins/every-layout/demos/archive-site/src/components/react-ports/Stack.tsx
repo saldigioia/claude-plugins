@@ -1,6 +1,15 @@
 /**
  * Stack Component
  * Vertical spacing between sibling elements
+ *
+ * Styling lives in CSS (demos/archive-site/src/styles/primitives.css /
+ * demos/every-layout.css) — this component only emits the `.stack`
+ * className plus --custom-property parameters (ELA_005). It never injects
+ * a <style> tag and never builds a declaration object.
+ *
+ * To split a stack, put `data-split-after` on the child after which the
+ * split happens: `.stack > [data-split-after] { margin-block-end: auto }`.
+ * There is no numeric splitAfter prop — the DOM attribute is the API.
  */
 
 import React, { forwardRef } from 'react';
@@ -11,38 +20,22 @@ export const Stack = forwardRef<HTMLElement, StackProps>(({
   as: Component = 'div',
   space = 'var(--s1)',
   recursive = false,
-  splitAfter,
   className = '',
   style,
   ...props
 }, ref) => {
-  const styles: React.CSSProperties = {
-    '--space': space,
-    display: 'flex',
-    flexDirection: 'column',
-    justifyContent: 'flex-start',
-    ...style,
-  } as React.CSSProperties;
-
-  const childStyles = `
-    .stack > * { margin-block: 0; }
-    .stack > * + * { margin-block-start: var(--space, 1.5rem); }
-    ${recursive ? '.stack * + * { margin-block-start: var(--space, 1.5rem); }' : ''}
-    ${splitAfter ? `.stack > :nth-child(${splitAfter}) { margin-block-end: auto; }` : ''}
-  `;
+  const vars = { '--space': space } satisfies Record<string, string>;
 
   return (
-    <>
-      <style>{childStyles}</style>
-      <Component
-        ref={ref as any}
-        className={`stack ${className}`.trim()}
-        style={styles}
-        {...props}
-      >
-        {children}
-      </Component>
-    </>
+    <Component
+      ref={ref as any}
+      className={`stack ${className}`.trim()}
+      data-recursive={recursive ? '' : undefined}
+      style={{ ...vars, ...style }}
+      {...props}
+    >
+      {children}
+    </Component>
   );
 });
 

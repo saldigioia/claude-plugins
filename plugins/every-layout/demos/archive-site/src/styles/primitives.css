@@ -16,10 +16,22 @@
   margin-block-start: var(--space, 1.5rem);
 }
 
+/* Port-variant hooks — the React port (Stack.tsx) sets [data-recursive] for
+   its `recursive` boolean prop and [data-split-after] on the child after
+   which the stack should split, instead of shipping per-instance CSS. */
+.stack[data-recursive] * + * {
+  margin-block-start: var(--space, 1.5rem);
+}
+
+.stack > [data-split-after] {
+  margin-block-end: auto;
+}
+
 /* ELC_BOX */
 .box {
   padding: var(--padding, var(--s1));
-  border: var(--border-thin, 1px) solid;
+  border-width: var(--border-width, var(--border-thin, 1px));
+  border-style: solid;
   outline: var(--border-thin, 1px) transparent;
   outline-offset: calc(var(--border-thin, 1px) * -1);
 }
@@ -46,8 +58,12 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space, 1rem);
-  justify-content: flex-start;
-  align-items: center;
+  justify-content: var(--justify, flex-start);
+  align-items: var(--align, center);
+}
+
+.cluster > * {
+  min-inline-size: 0; /* ELP_033 */
 }
 
 /* ELC_SIDEBAR */
@@ -60,12 +76,17 @@
 .with-sidebar > :first-child {
   flex-basis: var(--side-width, 20rem);
   flex-grow: 1;
+  min-inline-size: 0; /* ELP_033 */
 }
 
 .with-sidebar > :last-child {
   flex-basis: 0;
   flex-grow: 999;
   min-inline-size: var(--content-min, 50%);
+}
+
+.with-sidebar[data-no-stretch] {
+  align-items: flex-start;
 }
 
 /* ELC_SWITCHER */
@@ -78,6 +99,7 @@
 .switcher > * {
   flex-grow: 1;
   flex-basis: calc((var(--threshold, 30rem) - 100%) * 999);
+  min-inline-size: 0; /* ELP_033 */
 }
 
 /* ELC_COVER */
@@ -92,15 +114,16 @@
   margin-block: var(--space, var(--s1));
 }
 
-.cover > :first-child:not(.principal) {
+.cover > :first-child:not(.principal):not([data-centered]) {
   margin-block-start: 0;
 }
 
-.cover > :last-child:not(.principal) {
+.cover > :last-child:not(.principal):not([data-centered]) {
   margin-block-end: 0;
 }
 
-.cover > .principal {
+.cover > .principal,
+.cover > [data-centered] {
   margin-block: auto;
 }
 
@@ -111,13 +134,17 @@
   grid-template-columns: repeat(auto-fit, minmax(min(var(--min, 15rem), 100%), 1fr));
 }
 
+.grid > * {
+  min-inline-size: 0; /* ELP_033 */
+}
+
 .grid[data-ragged] {
   align-items: start;
 }
 
 /* ELC_FRAME */
 .frame {
-  aspect-ratio: var(--ratio, 16/9);
+  aspect-ratio: var(--ratio, calc(var(--n, 16) / var(--d, 9)));
   overflow: hidden;
   display: flex;
   justify-content: center;

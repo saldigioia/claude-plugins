@@ -4,14 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Reel Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
-    .demo-box { background: #e0e0e0; padding: 1rem; min-block-size: 80px; display: flex; align-items: center; justify-content: center; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
+    .demo-box { background: #e0e0e0; padding: 1rem; min-block-size: 5rem; display: flex; align-items: center; justify-content: center; }
     .pass { color: green; }
     .fail { color: red; }
+    .reel-empty-demo { border: 1px dashed #ccc; min-block-size: 3.125rem; }
   </style>
 </head>
 <body>
@@ -20,7 +21,7 @@
   <section class="test-section">
     <h2>Test 1: Empty Reel</h2>
     <p>Reel with no children should render without errors.</p>
-    <div class="reel" style="border: 1px dashed #ccc; min-height: 50px">
+    <div class="reel reel-empty-demo">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if empty Reel renders</p>
@@ -109,5 +110,19 @@
     <p class="pass">✓ Pass if items have varying widths based on content</p>
   </section>
 
+
+  <section class="test-section">
+    <h2>Test 9: Keyboard Scroll Access</h2>
+    <p>The reel must be reachable and scrollable by keyboard: <code>tabindex="0"</code> + <code>role="region"</code> + <code>aria-label</code> (accessibility tier 1).</p>
+    <div class="reel" tabindex="0" role="region" aria-label="Keyboard access test reel" style="--item-width: 12rem">
+      <div class="demo-box">One</div>
+      <div class="demo-box">Two</div>
+      <div class="demo-box">Three</div>
+      <div class="demo-box">Four</div>
+      <div class="demo-box">Five</div>
+      <div class="demo-box">Six</div>
+    </div>
+    <p class="pass">✓ Pass if Tab focuses the reel and Arrow keys scroll it</p>
+  </section>
 </body>
 </html>

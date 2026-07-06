@@ -29,6 +29,34 @@
       padding: 0.1em 0.3em;
       border-radius: 3px;
     }
+    .demo-invert-box {
+      margin-block-start: var(--s0);
+    }
+    .demo-surface {
+      background: #f0f0f0;
+    }
+    .demo-frame-box {
+      max-inline-size: 18.75rem;
+      background: #333;
+    }
+    .demo-frame-label {
+      color: white;
+      text-align: center;
+    }
+    .demo-imposter-surface {
+      position: relative;
+      block-size: 10rem;
+      background: #f0f0f0;
+    }
+    .demo-container-box {
+      border: 1px solid #ccc;
+      padding: var(--s0);
+    }
+    .demo-footer {
+      margin-block-start: var(--s3);
+      padding-block-start: var(--s0);
+      border-block-start: 1px solid #ccc;
+    }
   </style>
 </head>
 <body>
@@ -59,7 +87,7 @@
           <div class="box">
             Regular Box
           </div>
-          <div class="box" data-invert style="margin-top: 1rem">
+          <div class="box demo-invert-box" data-invert>
             Inverted Box
           </div>
         </div>
@@ -71,7 +99,7 @@
         <h2>Center (ELC_CENTER)</h2>
         <p>Horizontal centering with max-width constraint.</p>
         <div class="demo">
-          <div class="center" style="--measure: 40ch; background: #f0f0f0">
+          <div class="center demo-surface" style="--measure: 40ch">
             This content is centered and constrained to 40ch maximum width with gutters.
           </div>
         </div>
@@ -126,7 +154,7 @@
         <h2>Cover (ELC_COVER)</h2>
         <p>Vertical centering with optional header/footer.</p>
         <div class="demo">
-          <div class="cover" style="--min-height: 20rem; background: #f0f0f0">
+          <div class="cover demo-surface" style="--min-height: 20rem">
             <header>Header</header>
             <h3 data-centered>Centered Principal Element</h3>
             <footer>Footer</footer>
@@ -155,8 +183,8 @@
         <h2>Frame (ELC_FRAME)</h2>
         <p>Aspect ratio container for media.</p>
         <div class="demo">
-          <div class="frame" style="--n: 16; --d: 9; max-width: 300px; background: #333">
-            <div style="color: white; text-align: center">16:9 Frame</div>
+          <div class="frame demo-frame-box" style="--n: 16; --d: 9">
+            <div class="demo-frame-label">16:9 Frame</div>
           </div>
         </div>
         <code>.frame { --n: 16; --d: 9 }</code>
@@ -183,7 +211,7 @@
         <h2>Imposter (ELC_IMPOSTER)</h2>
         <p>Superimposed/overlay positioning.</p>
         <div class="demo">
-          <div style="position: relative; height: 10rem; background: #f0f0f0">
+          <div class="demo-imposter-surface">
             <div class="imposter demo-item">Centered Overlay</div>
           </div>
         </div>
@@ -210,14 +238,14 @@
         <h2>Container (ELC_CONTAINER)</h2>
         <p>Container query context.</p>
         <div class="demo">
-          <div class="container" style="border: 1px solid #ccc; padding: 1rem">
+          <div class="container demo-container-box">
             This element can now be queried with @container
           </div>
         </div>
         <code>.container { container-type: inline-size }</code>
       </section>
 
-      <footer style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #ccc">
+      <footer class="demo-footer">
         <p>Based on "Every Layout" by Andy Bell and Heydon Pickering</p>
       </footer>
     </div>

@@ -2,7 +2,7 @@
 
 Composable CSS layout primitives, Astro 6 site architecture, archival data engine, and design system tokens for Claude Code. Built on the [Every Layout](https://every-layout.dev) methodology by Andy Bell and Heydon Pickering.
 
-**Version:** 4.5.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
+**Version:** 4.6.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
 
 ## The commitment
 
@@ -21,7 +21,7 @@ Adoption = contract. Exceptions live in `escapes.md` with expiry dates, not in s
 
 ## What this plugin gives you
 
-When Claude Code edits CSS, HTML, or Astro files with this plugin enabled, it applies 13 composable layout primitives (Stack, Box, Center, Cluster, Sidebar, Switcher, Cover, Grid, Frame, Reel, Imposter, Icon, Container) and 32 numbered design principles — no media queries, logical properties only, modular-scale spacing, zero-JS by default.
+When Claude Code edits CSS, HTML, or Astro files with this plugin enabled, it applies 13 composable layout primitives (Stack, Box, Center, Cluster, Sidebar, Switcher, Cover, Grid, Frame, Reel, Imposter, Icon, Container) and 33 numbered design principles — no media queries, logical properties only, modular-scale spacing, zero-JS by default.
 
 It also provides:
 
@@ -60,6 +60,14 @@ bash /path/to/every-layout-plugin/bin/js-budget.sh dist
 
 Both exit non-zero on violation. Wire them as required status checks.
 
+To run **this plugin's own gates** (dogfooding, or CI for this repo), there is a single entry point:
+
+```bash
+bash bin/ci.sh
+```
+
+It syntax-checks every script in `bin/`, runs the escape-engine acceptance tests, the eval structural validation, and the CSS strict gate against the demo site — exiting non-zero if anything fails.
+
 ### Registering intentional exceptions (`escapes.md`)
 
 Copy `escapes.md.template` to `escapes.md` in your project root. Both gates read
@@ -81,13 +89,13 @@ for reproducible runs. Format and field rules: `escapes.md.template` and
 
 | Directory | What's inside |
 |---|---|
-| `skills/` | 13 skills — **5 knowledge** (`css-layout-engine`, `css-design-system`, `framework-implementations`, `astro-site-architect`, `archival-data-engine`) auto-invoke when Claude edits matching files; **8 workflow** (`/strict-check`, `/audit-layout`, `/diagnose-layout`, `/choose-primitive`, `/refactor-to-primitives`, `/generate-port`, `/plan-migration`, `/measure-budget`) are user-invoked |
+| `skills/` | 13 skills — **5 knowledge** (`css-layout-engine`, `css-design-system`, `framework-implementations`, `astro-site-architect`, `archival-data-engine`) that Claude loads automatically when relevant; their `paths` globs scope each skill to the file types it covers; **8 workflow** (`/strict-check`, `/audit-layout`, `/diagnose-layout`, `/choose-primitive`, `/refactor-to-primitives`, `/generate-port`, `/plan-migration`, `/measure-budget`) are user-invoked |
 | `agents/` | 3 subagents: `site-builder` (Sonnet, autonomous Astro builder), `css-auditor` (Haiku, read-only scorer), `css-diagnostician` (Haiku, primitive behavior explainer) |
 | `hooks/` | PostToolUse CSS linter that flags physical properties, arbitrary px, and media queries on every CSS write |
-| `bin/` | Axiom gates (`css-strict.sh`, `js-budget.sh`), git-hook installer, CSS lint/audit/budget scripts, Astro typecheck, eval runner, SQLite schema dump |
+| `bin/` | Axiom gates (`css-strict.sh` — scans `.html`/`.astro` too, `js-budget.sh`), CSS-in-JS detector (`ports-lint.sh`), CI entry point (`ci.sh`), acceptance batteries (`test-escapes.sh`, `test-gates.sh`), git-hook installer, CSS lint/audit/budget scripts, Astro typecheck, eval runner, SQLite schema dump |
 | `demos/archive-site/` | Reference implementation: Astro + SQLite archive site using all 5 knowledge skills, plus React-port examples |
 | `eval/` | 24-point scoring rubric, 15 fixtures (compliant, anti-pattern, archival-schema, astro-layout), 7 scoring prompts |
-| `stress-tests/` | 13 HTML files, one per primitive, 8 test cases each |
+| `stress-tests/` | 13 HTML files, one per primitive, 8–9 test cases each |
 | `escapes.md.template` | Template for the intentional-exception registry (axiom waivers with expiry dates) |
 
 ## Quick usage
@@ -108,7 +116,7 @@ for reproducible runs. Format and field rules: `escapes.md.template` and
 
 **Automatic (no slash):**
 - Ask Claude "how should I lay out X?" — the layout-engine skill auto-invokes
-- Edit any `.css` / `.astro` / `.tsx` file — the matching knowledge skill loads via `paths` globs
+- Work on `.css` / `.astro` / `.tsx` files — each knowledge skill's `paths` globs scope it to the file types where it applies, and Claude loads it when the work is relevant (scoping, not an on-edit trigger)
 
 ## Architecture & conventions
 

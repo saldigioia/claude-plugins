@@ -66,7 +66,7 @@ interface Props {
 }
 
 const {
-  max = 'var(--measure, 60ch)',
+  max = 'var(--measure, 65ch)',
   gutters = 'var(--s1, 1rem)',
   intrinsic = false,
   andText = false,
@@ -131,6 +131,9 @@ const {
     gap: var(--space);
     justify-content: var(--justify);
     align-items: var(--align);
+  }
+  .cluster > :global(*) {
+    min-inline-size: 0; /* ELP_033 */
   }
 </style>
 ```
@@ -304,6 +307,9 @@ const {
     display: grid;
     gap: var(--space);
     grid-template-columns: repeat(auto-fit, minmax(min(var(--min), 100%), 1fr));
+  }
+  .grid > :global(*) {
+    min-inline-size: 0; /* ELP_033 */
   }
 </style>
 ```
@@ -498,6 +504,9 @@ const id = `sidebar-${Math.random().toString(36).slice(2, 9)}`;
   .with-sidebar > :global(*) {
     flex-grow: 1;
   }
+  .with-sidebar > :global(:first-child) {
+    min-inline-size: 0; /* ELP_033 — the content pane's contentMin already replaces auto */
+  }
   .with-sidebar--no-stretch {
     align-items: flex-start;
   }
@@ -628,6 +637,7 @@ const id = `switcher-${Math.random().toString(36).slice(2, 9)}`;
   .switcher > :global(*) {
     flex-grow: 1;
     flex-basis: calc((var(--threshold) - 100%) * 999);
+    min-inline-size: 0; /* ELP_033 */
   }
 </style>
 
@@ -677,7 +687,7 @@ All Astro components accept a `class` prop and render a `<slot />` for children.
 | Component | Props | Defaults |
 |-----------|-------|----------|
 | Box | `padding`, `borderWidth`, `invert` | `var(--s1)`, `var(--border-thin, 1px)`, `false` |
-| Center | `max`, `gutters`, `intrinsic`, `andText` | `var(--measure, 60ch)`, `var(--s1, 1rem)`, `false`, `false` |
+| Center | `max`, `gutters`, `intrinsic`, `andText` | `var(--measure, 65ch)`, `var(--s1, 1rem)`, `false`, `false` |
 | Cluster | `space`, `justify`, `align` | `var(--s1, 1rem)`, `flex-start`, `center` |
 | Container | `name` | `undefined` |
 | Cover | `centered`, `space`, `minHeight`, `noPad` | `[data-centered]`, `var(--s1, 1rem)`, `100vh`, `false` |

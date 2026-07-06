@@ -29,6 +29,7 @@ When principles or approaches conflict, resolve in this order:
 - Browser delegation where possible (ELP_010)
 - Native containment patterns (ELP_019, ELP_020)
 - Subgrid alignment (ELP_021)
+- Neutralized auto-minimum — zero-floor tracks and children (ELP_033)
 
 ### 4. Composition
 - Primitive composition over monolithic components (ELP_001)
@@ -182,6 +183,7 @@ Use this checklist when auditing layout code:
 - [ ] No media queries for layout switching (unless documented exception)
 - [ ] Primitives are composed, not nested unnecessarily
 - [ ] Child-only selectors used (>)
+- [ ] If a rule lays out children with `1fr` tracks or flex, and a child can contain an image, an `aspect-ratio`, or a long unbreakable string: the track is `minmax(0|definite, …)` or the child has `min-inline-size: 0` — otherwise it will clip at some width (ELP_033)
 
 ### Values
 - [ ] All spacing from modular scale

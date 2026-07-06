@@ -223,3 +223,15 @@ See `cookbook-antipatterns.md` for detailed guides on each.
 - **Don't use Container** when intrinsic layout works (ELP_014)
 - **Don't use Stack** for horizontal layouts (use Cluster)
 - **Don't use Center** when text-align: center is sufficient
+
+---
+
+## Fixed-N Equal Columns
+
+"I need exactly N columns that never wrap and never change count" fits **neither** Grid (ELC_GRID — `auto-fit` drops columns as the container narrows) **nor** Switcher (ELC_SWITCHER — stacks below the threshold). When the count is semantic (color triplets, comparison columns), use the documented composition instead:
+
+```css
+grid-template-columns: repeat(N, minmax(0, 1fr));   /* never bare 1fr — ELP_033 */
+```
+
+Full recipe (with the child `min-inline-size: 0` rule and the reasoning): `cookbook-recipes.md` → "Fixed-N Equal Columns (Swatch Grid)".

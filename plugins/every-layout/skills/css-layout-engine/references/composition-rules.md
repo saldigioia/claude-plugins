@@ -26,6 +26,7 @@ Source: `decisions.md` §3
 | `.box *` color inheritance | `color: inherit` forces color from Box, not from grandparent | Set color tokens on the `.box` element itself, not its wrapper |
 | Grid[data-ragged] + Frame children | Frame forces equal height via aspect-ratio, defeating ragged intent | Never wrap Frame inside Grid[data-ragged]. Use bare `<img>` with `max-inline-size: 100%; block-size: auto`. |
 | Grid with 100+ items | Browser lays out all items eagerly, blocking render | Add `content-visibility: auto` + `contain-intrinsic-size` on items |
+| Fraction tracks / flex children holding `aspect-ratio` or unbreakable content | The `min-width: auto` floor blocks shrinking; the container overflows and an ancestor's `overflow: hidden` clips it ("works wide, clips narrow") | Track: `minmax(0, 1fr)` or a definite minimum. Child: `min-inline-size: 0`. (ELP_033) |
 
 ## System Variants vs. Escape Hatches
 

@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Container Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
     .demo-box { background: #e0e0e0; padding: 1rem; }
     .pass { color: green; }
     .fail { color: red; }
@@ -31,6 +31,14 @@
       .cq-named { background: #d0f0d0; }
       .cq-named::after { content: " (wide)"; }
     }
+
+    .container-40 { max-inline-size: 40rem; }
+    .container-20 { max-inline-size: 20rem; }
+    .container-named-25 { --name: sidebar; max-inline-size: 25rem; }
+    .container-named-12 { --name: sidebar; max-inline-size: 12rem; }
+    .container-outer-40 { max-inline-size: 40rem; background: #f0f0f0; padding: 1rem; }
+    .container-inner-18 { max-inline-size: 18rem; background: #e0e0e0; padding: 1rem; margin-block-start: 1rem; }
+    .container-empty-demo { border: 1px dashed #ccc; min-block-size: 3.125rem; }
   </style>
 </head>
 <body>
@@ -39,7 +47,7 @@
   <section class="test-section">
     <h2>Test 1: Basic Container Query</h2>
     <p>Child should respond to container width, not viewport.</p>
-    <div class="container" style="max-inline-size: 40rem">
+    <div class="container container-40">
       <div class="cq-card">
         <div class="layout">
           <div class="demo-box">Image area</div>
@@ -56,7 +64,7 @@
   <section class="test-section">
     <h2>Test 2: Container Query (Narrow)</h2>
     <p>Same component in a narrow container should stack.</p>
-    <div class="container" style="max-inline-size: 20rem">
+    <div class="container container-20">
       <div class="cq-card">
         <div class="layout">
           <div class="demo-box">Image area</div>
@@ -73,7 +81,7 @@
   <section class="test-section">
     <h2>Test 3: Named Container</h2>
     <p>Named container should respond to @container queries using its name.</p>
-    <div class="container" data-name style="--name: sidebar; max-inline-size: 25rem">
+    <div class="container container-named-25" data-name>
       <div class="cq-named">Sidebar content</div>
     </div>
     <p class="pass">✓ Pass if background is green and "(wide)" text appears</p>
@@ -82,7 +90,7 @@
   <section class="test-section">
     <h2>Test 4: Named Container (Narrow)</h2>
     <p>Named container below threshold should not match.</p>
-    <div class="container" data-name style="--name: sidebar; max-inline-size: 12rem">
+    <div class="container container-named-12" data-name>
       <div class="cq-named">Sidebar content</div>
     </div>
     <p class="pass">✓ Pass if background is lighter green and no "(wide)" text</p>
@@ -91,9 +99,9 @@
   <section class="test-section">
     <h2>Test 5: Nested Containers</h2>
     <p>Nested containers should create independent query contexts.</p>
-    <div class="container" style="max-inline-size: 40rem; background: #f0f0f0; padding: 1rem">
+    <div class="container container-outer-40">
       <p>Outer container (40rem)</p>
-      <div class="container" style="max-inline-size: 18rem; background: #e0e0e0; padding: 1rem; margin-block-start: 1rem">
+      <div class="container container-inner-18">
         <p>Inner container (18rem)</p>
         <div class="cq-card">
           <div class="layout">
@@ -112,7 +120,7 @@
   <section class="test-section">
     <h2>Test 6: Container with No Children</h2>
     <p>Empty container should not cause errors.</p>
-    <div class="container" style="border: 1px dashed #ccc; min-height: 50px">
+    <div class="container container-empty-demo">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if empty Container renders without errors</p>

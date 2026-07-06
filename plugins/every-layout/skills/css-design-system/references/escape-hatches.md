@@ -12,5 +12,5 @@ Source: `decisions.md` §4
 | Conditional: modular scale | Arbitrary values OK inside bespoke boundary; modular scale required for outer spacing |
 | ESC_LEGACY requires | A migration ticket. No ticket, no escape. |
 | Audit | `grep -c "@escape ESC_"` quarterly. Flag if >15% of component count. |
-| Byte limits | ESC_EDITORIAL: 5KB/instance, 20KB total. ESC_DATAVIZ: 3KB/instance, 15KB total. ESC_LEGACY: 10KB/instance, 30KB total. |
+| Byte limits | ESC_EDITORIAL: 5KB/instance, 20KB total. ESC_DATAVIZ: 3KB/instance, 15KB total. ESC_LEGACY: 10KB/instance, 30KB total. Advisory — reviewed in escape audits, not enforced by the gates. |
 | Bespoke selectors must not target | System primitive class names (`.stack`, `.center`, `.grid`, etc.) |

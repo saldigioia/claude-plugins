@@ -4,16 +4,27 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Imposter Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
     .demo-box { background: #e0e0e0; padding: 1rem; }
-    .demo-parent { position: relative; background: #f5f5f5; border: 2px solid #ccc; min-block-size: 200px; }
+    .demo-parent { position: relative; background: #f5f5f5; border: 2px solid #ccc; min-block-size: 12.5rem; }
     .demo-overlay { background: #4a90d9; color: white; padding: 1rem; }
     .pass { color: green; }
     .fail { color: red; }
+    .demo-parent-contained-1 { max-inline-size: 18.75rem; min-block-size: 9.375rem; }
+    .demo-parent-contained-2 { max-inline-size: 15.625rem; min-block-size: 9.375rem; }
+    .demo-parent-tall { min-block-size: 18.75rem; }
+    .imposter-small { max-inline-size: 6.25rem; }
+    .demo-parent-md { min-block-size: 15.625rem; }
+    .imposter-top { background: rgba(255,0,0,0.5); color: white; padding: var(--s-2); transform: translate(-50%, -100%); }
+    .imposter-bottom { background: rgba(0,128,0,0.5); color: white; padding: var(--s-2); transform: translate(-50%, 0%); }
+    .demo-parent-nested-outer { min-block-size: 12.5rem; }
+    .demo-inner-context { position: relative; background: #ffe0e0; padding: 1rem; margin: var(--s2); min-block-size: 6.25rem; }
+    .demo-parent-small { min-block-size: 6.25rem; }
+    .imposter-empty-demo { border: 2px dashed blue; min-inline-size: 3.125rem; min-block-size: 1.875rem; }
   </style>
 </head>
 <body>
@@ -32,7 +43,7 @@
   <section class="test-section">
     <h2>Test 2: Contained Imposter</h2>
     <p>data-contain should prevent overflow beyond parent.</p>
-    <div class="demo-parent" style="max-inline-size: 300px; min-block-size: 150px">
+    <div class="demo-parent demo-parent-contained-1">
       <div class="imposter demo-overlay" data-contain style="--margin: 1rem">
         <p>This overlay has a lot of content that might overflow but should be constrained by data-contain with a margin of 1rem from the parent edges.</p>
       </div>
@@ -43,7 +54,7 @@
   <section class="test-section">
     <h2>Test 3: Contained with Zero Margin</h2>
     <p>data-contain with no --margin should fill parent exactly.</p>
-    <div class="demo-parent" style="max-inline-size: 250px; min-block-size: 150px">
+    <div class="demo-parent demo-parent-contained-2">
       <div class="imposter demo-overlay" data-contain>
         <p>Content constrained to parent bounds with zero margin.</p>
       </div>
@@ -54,8 +65,8 @@
   <section class="test-section">
     <h2>Test 4: Small Content in Large Parent</h2>
     <p>Small overlay should stay centered in a large parent.</p>
-    <div class="demo-parent" style="min-block-size: 300px">
-      <div class="imposter demo-overlay" style="max-inline-size: 100px">
+    <div class="demo-parent demo-parent-tall">
+      <div class="imposter demo-overlay imposter-small">
         Small
       </div>
     </div>
@@ -65,10 +76,10 @@
   <section class="test-section">
     <h2>Test 5: Multiple Imposters</h2>
     <p>Multiple Imposters should all center on the same parent.</p>
-    <div class="demo-parent" style="min-block-size: 250px">
-      <div class="imposter" style="background: rgba(255,0,0,0.5); color: white; padding: 0.5rem; transform: translate(-50%, -100%)">Top overlay</div>
+    <div class="demo-parent demo-parent-md">
+      <div class="imposter imposter-top">Top overlay</div>
       <div class="imposter demo-overlay">Center overlay</div>
-      <div class="imposter" style="background: rgba(0,128,0,0.5); color: white; padding: 0.5rem; transform: translate(-50%, 0%)">Bottom overlay</div>
+      <div class="imposter imposter-bottom">Bottom overlay</div>
     </div>
     <p class="pass">✓ Pass if three overlays are visible at different vertical positions</p>
   </section>
@@ -76,7 +87,7 @@
   <section class="test-section">
     <h2>Test 6: Imposter with Interactive Content</h2>
     <p>Imposter with form content should be interactive.</p>
-    <div class="demo-parent" style="min-block-size: 250px">
+    <div class="demo-parent demo-parent-md">
       <p class="demo-box">Background content you cannot interact with when overlay is open.</p>
       <div class="imposter demo-overlay" data-contain style="--margin: 2rem">
         <div class="stack" style="--space: 0.5rem">
@@ -92,8 +103,8 @@
   <section class="test-section">
     <h2>Test 7: Nested Positioned Contexts</h2>
     <p>Imposter should respect its nearest positioned ancestor.</p>
-    <div class="demo-parent" style="min-block-size: 200px">
-      <div style="position: relative; background: #ffe0e0; padding: 1rem; margin: 2rem; min-block-size: 100px">
+    <div class="demo-parent demo-parent-nested-outer">
+      <div class="demo-inner-context">
         <p>Inner positioned context</p>
         <div class="imposter demo-overlay">Centered in inner context</div>
       </div>
@@ -104,8 +115,8 @@
   <section class="test-section">
     <h2>Test 8: Empty Imposter</h2>
     <p>Empty Imposter should render without errors.</p>
-    <div class="demo-parent" style="min-block-size: 100px">
-      <div class="imposter" style="border: 2px dashed blue; min-inline-size: 50px; min-block-size: 30px">
+    <div class="demo-parent demo-parent-small">
+      <div class="imposter imposter-empty-demo">
         <!-- Empty -->
       </div>
     </div>

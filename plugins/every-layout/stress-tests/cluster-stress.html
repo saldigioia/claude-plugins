@@ -4,14 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Cluster Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
-    .demo-box { background: #e0e0e0; padding: 0.5rem 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
+    .demo-box { background: #e0e0e0; padding: var(--s-2) var(--s0); }
     .pass { color: green; }
     .fail { color: red; }
+    .cluster-empty-demo { border: 1px dashed #ccc; min-block-size: 3.125rem; }
+    .cluster-justify-between { justify-content: space-between; }
+    .cluster-justify-center { justify-content: center; }
+    .cluster-align-start { align-items: flex-start; }
+    .cluster-narrow-demo { inline-size: 12.5rem; border: 1px dashed #ccc; }
+    .break-safe { overflow-wrap: break-word; }
   </style>
 </head>
 <body>
@@ -20,7 +26,7 @@
   <section class="test-section">
     <h2>Test 1: Empty Cluster</h2>
     <p>Cluster with no children should render without errors.</p>
-    <div class="cluster" style="border: 1px dashed #ccc; min-height: 50px">
+    <div class="cluster cluster-empty-demo">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if empty Cluster renders</p>
@@ -56,7 +62,7 @@
   <section class="test-section">
     <h2>Test 4: Justify Space-Between</h2>
     <p>Items should be spread across the full width.</p>
-    <div class="cluster" style="--justify: space-between">
+    <div class="cluster cluster-justify-between">
       <span class="demo-box">Left</span>
       <span class="demo-box">Center</span>
       <span class="demo-box">Right</span>
@@ -67,7 +73,7 @@
   <section class="test-section">
     <h2>Test 5: Justify Center</h2>
     <p>Items should be centered horizontally.</p>
-    <div class="cluster" style="--justify: center">
+    <div class="cluster cluster-justify-center">
       <span class="demo-box">One</span>
       <span class="demo-box">Two</span>
       <span class="demo-box">Three</span>
@@ -78,7 +84,7 @@
   <section class="test-section">
     <h2>Test 6: Align Start</h2>
     <p>Items of different heights should align to flex-start.</p>
-    <div class="cluster" style="--align: flex-start">
+    <div class="cluster cluster-align-start">
       <span class="demo-box">Short</span>
       <span class="demo-box">Tall<br>item<br>here</span>
       <span class="demo-box">Short</span>
@@ -110,5 +116,17 @@
     <p class="pass">✓ Pass if all items wrap naturally with consistent gap</p>
   </section>
 
+
+  <section class="test-section">
+    <h2>Test 9: Auto-Minimum Neutralized (ELP_033)</h2>
+    <p>A chip wider than the container must wrap its text instead of overflowing — <code>.cluster > *</code> carries <code>min-inline-size: 0</code>.</p>
+    <div class="cluster-narrow-demo">
+      <div class="cluster" style="--space: var(--s-2)">
+        <span class="demo-box">Tag</span>
+        <span class="demo-box break-safe">https://example.com/an/extremely/long/unbroken/path/segment</span>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if the long chip wraps internally and nothing escapes the dashed border</p>
+  </section>
 </body>
 </html>

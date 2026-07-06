@@ -1,6 +1,15 @@
 /**
  * Sidebar Component
  * Two-element layout with intrinsic switching
+ *
+ * Styling lives in CSS (demos/archive-site/src/styles/primitives.css /
+ * demos/every-layout.css) — this component only emits the `.with-sidebar`
+ * className plus --custom-property parameters (ELA_005). It never injects
+ * a <style> tag and never builds a declaration object.
+ *
+ * Which child is the sidebar is controlled by DOM order — the first child
+ * is the fixed-width side, the last child is the flexible content
+ * (`.with-sidebar > :first-child` / `:last-child`). There is no `side` prop.
  */
 
 import React, { forwardRef } from 'react';
@@ -9,7 +18,6 @@ import { SidebarProps } from './types';
 export const Sidebar = forwardRef<HTMLElement, SidebarProps>(({
   children,
   as: Component = 'div',
-  side = 'left',
   sideWidth = '20rem',
   contentMin = '50%',
   space = 'var(--s1)',
@@ -18,41 +26,22 @@ export const Sidebar = forwardRef<HTMLElement, SidebarProps>(({
   style,
   ...props
 }, ref) => {
-  const styles: React.CSSProperties = {
+  const vars = {
     '--side-width': sideWidth,
     '--content-min': contentMin,
     '--space': space,
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: space,
-    ...(noStretch && { alignItems: 'flex-start' }),
-    ...style,
-  } as React.CSSProperties;
-
-  const childStyles = `
-    .with-sidebar > * { flex-grow: 1; }
-    .with-sidebar > :${side === 'left' ? 'first' : 'last'}-child {
-      flex-basis: var(--side-width);
-    }
-    .with-sidebar > :${side === 'left' ? 'last' : 'first'}-child {
-      flex-basis: 0;
-      flex-grow: 999;
-      min-inline-size: var(--content-min);
-    }
-  `;
+  } satisfies Record<string, string>;
 
   return (
-    <>
-      <style>{childStyles}</style>
-      <Component
-        ref={ref as any}
-        className={`with-sidebar ${className}`.trim()}
-        style={styles}
-        {...props}
-      >
-        {children}
-      </Component>
-    </>
+    <Component
+      ref={ref as any}
+      className={`with-sidebar ${className}`.trim()}
+      data-no-stretch={noStretch ? '' : undefined}
+      style={{ ...vars, ...style }}
+      {...props}
+    >
+      {children}
+    </Component>
   );
 });
 

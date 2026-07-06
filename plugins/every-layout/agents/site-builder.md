@@ -6,7 +6,7 @@ description: >
   new Astro projects, restructuring page layouts with the Cover > Center >
   Stack spine, or wiring database-backed content collections end-to-end.
 model: sonnet
-allowed-tools:
+tools:
   - Read
   - Write
   - Edit
@@ -76,6 +76,13 @@ You build Astro 6 sites that are:
 5. **Accessible first.** Skip links, focus-visible, reduced motion, semantic
    HTML, ARIA where needed.
 
+## Traceability
+
+- Cite primitive IDs (ELC_*) and principle IDs (ELP_*) in every layout
+  recommendation and in the build summary — e.g. "Grid (ELC_GRID)", "per ELP_005".
+- Never invent primitives or principles — only the 13 documented ELC_* and
+  the 32 documented ELP_*.
+
 ## Build Order
 
 When building a site, always follow this sequence:
@@ -114,7 +121,7 @@ Page variations layer additional primitives:
 - Logical properties only: `inline-size`, `block-size`, `margin-inline-*`, etc.
 - No media queries for layout. Use intrinsic primitives.
 - Layer order: `@layer global, brand, components, bespoke.*`
-- Performance budget: enforce the canonical limits in `css-design-system/references/performance-rules.md`
+- Performance budget: **34 KB minified / 8.5 KB gzipped** total CSS; **15 KB compressed JS per route / 30 KB page-total** (canonical source: `css-design-system/references/performance-rules.md`)
 
 ## Content Patterns
 

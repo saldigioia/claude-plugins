@@ -13,7 +13,7 @@ The axioms are distilled from Andy Bell and Heydon Pickering's *Every Layout*, w
 > "Each layout in Every Layout is intrinsically responsive. That is, it will wrap and reconfigure internally to make sure the content is visible (and well-spaced) to fit any context/screen. You may feel compelled to add @media query breakpoints, but these are considered 'manual overrides' and Every Layout primitives do not depend on them."
 > — *Every Layout*, Composition (ch. 5)
 
-**Enforcement:** `bin/css-strict.sh` fails when `@media` queries target layout properties (`grid-template-*`, `flex-direction`, `width`, `display`). Intrinsic primitives (ELC_GRID auto-fit, ELC_SIDEBAR flex-basis, ELC_SWITCHER threshold) cover 95 % of cases. The rest lives in `escapes.md` with a justification.
+**Enforcement:** `bin/css-strict.sh` fails when a viewport `@media` block (min/max-width/height) contains layout properties (`grid-template-*`, `flex-direction`, `flex-basis`, `display:`, `width:`). The scan is block-aware: multi-line `@media` blocks are caught, not just single-line ones. Pixel values inside the query prelude are judged here, not by the value rules. Intrinsic primitives (ELC_GRID auto-fit, ELC_SIDEBAR flex-basis, ELC_SWITCHER threshold) cover 95 % of cases. The rest lives in `escapes.md` with a justification.
 
 **Violates:** ELP_009
 
@@ -26,7 +26,7 @@ The axioms are distilled from Andy Bell and Heydon Pickering's *Every Layout*, w
 > "Fundamentally, designing for the web is designing without seeing. You simply can't anticipate all of the visual combinations produced by the modular placement of your layout components and the circumstances and settings of each end user's setup. Instead of thinking of designing for the web as creating visual artefacts, think of it as writing programs for generating visual artefacts."
 > — *Every Layout*, Axioms (ch. 9)
 
-**Enforcement:** `bin/css-strict.sh` fails on physical properties (`width`, `height`, `margin-left/right/top/bottom`, `padding-left/right/top/bottom`). Fixed pixel values (`[0-9]+px`) outside the accepted list (`1px|2px|3px` for borders) are failures, not warnings.
+**Enforcement:** `bin/css-strict.sh` fails on physical properties (`width`, `height`, `margin-left/right/top/bottom`, `padding-left/right/top/bottom`). Fixed pixel values (`[0-9]+px`) outside the accepted list (`1px|2px|3px` for borders) are failures, not warnings. Documented gate behaviors: C-style comments are stripped before px detection; `width`/`height` with icon-sized `em`/`cap`/`ex` values are whitelisted (the ELC_ICON pattern, per ELP_024 — see `physical-properties.md` accepted exceptions); in `.html`/`.astro` files both `<style>` blocks (line numbers preserved) and inline `style=""` attributes are scanned — only the primitive-parameter custom properties in `bin/lib/primitive-params.sh` may ride inline.
 
 **Violates:** ELP_002, ELP_004
 
@@ -39,7 +39,7 @@ The axioms are distilled from Andy Bell and Heydon Pickering's *Every Layout*, w
 > "An exception-based approach to CSS lets us do most of our styling with the least of our code. [...] In Harry Roberts' ITCSS (Inverted Triangle CSS) thesis, specificity (how specific selectors are) is inversely proportional to reach (how many elements they should affect)."
 > — *Every Layout*, Axioms (ch. 9)
 
-**Enforcement:** `bin/css-strict.sh` fails when a file contains `!important`, ID selectors, or any selector exceeding the 0-2-0 specificity cap. Class-based styling is permitted only when a global rule (element or `:root` custom property) cannot express the intent.
+**Enforcement:** `bin/css-strict.sh` fails when a file contains `!important`, ID selectors, or any selector exceeding the 0-2-0 specificity cap. Two documented gate behaviors: (1) `!important` inside a `@media (prefers-reduced-motion: reduce)` block is whitelisted — that is the canonical WCAG reset, and ELP_028 outranks this axiom. (2) The cap counts classes + attributes + pseudo-classes per complex selector as a deliberate approximation: pseudo-elements, and the functional wrappers `:not()/:is()/:where()/:has()` *including their arguments*, are not counted — the cap exists to block class-chaining escalation (`.a .b .c`), and the canonical primitives (e.g. Cover's `:first-child:not(.principal)`) stay legal. Class-based styling is permitted only when a global rule (element or `:root` custom property) cannot express the intent.
 
 **Violates:** ELP_011, budget rule "Max selector specificity 0-2-0"
 
@@ -71,6 +71,10 @@ This axiom is the plugin's defining commitment. Plugins exist that promote utili
 3. Raising the budget in `performance-rules.md` with a CHANGELOG note explaining the product decision
 
 Every island must justify its hydration directive. `client:load` requires registry in `escapes.md`.
+
+Both budgets measure **gzip-compressed bytes** of the built output (`bin/js-budget.sh` gzips what it finds in the dist directory; minification is the build's job).
+
+The "no CSS-in-JS" half of this axiom is enforced by `bin/ports-lint.sh`: styled-components/emotion imports, `css\`\`` literals, `React.CSSProperties` declaration objects, runtime `<style>` injection, and bespoke (non-`--custom-property`) keys in inline style objects all fail `--strict` mode (CI) and warn via the PostToolUse hook. The compliant port shape is class + custom-property parameters only.
 
 **Violates:** ELP_028 (if animation requires JS) and the plugin's root commitment
 

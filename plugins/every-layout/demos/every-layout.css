@@ -1,0 +1,421 @@
+/**
+ * Every Layout — Vanilla CSS Toolkit
+ *
+ * This file is the canonical build artifact of the vanilla port
+ * (skills/framework-implementations/references/vanilla.md +
+ * skills/css-layout-engine/SKILL.md "CSS Recipes"). It is the single-file,
+ * dependency-free stylesheet implementing all 13 Every Layout primitives
+ * plus the modular-scale token set. Framework ports (React/Vue/Svelte/Astro)
+ * rely on the class names and custom-property contracts defined here — see
+ * demos/archive-site/src/styles/primitives.css for the Astro-site copy and
+ * demos/archive-site/src/components/react-ports/ for the React port.
+ * stress-tests/*.html link it via ../demos/every-layout.css.
+ *
+ * Based on "Every Layout" by Andy Bell and Heydon Pickering.
+ */
+
+/* ========================================
+   CUSTOM PROPERTIES (Modular Scale)
+   ======================================== */
+
+:root {
+  /* Modular Scale — ratio 1.5 (perfect fifth) */
+  --ratio: 1.5;
+  --s-5: 0.132rem;
+  --s-4: 0.198rem;
+  --s-3: 0.296rem;
+  --s-2: 0.444rem;
+  --s-1: 0.667rem;
+  --s0: 1rem;
+  --s1: 1.5rem;
+  --s2: 2.25rem;
+  --s3: 3.375rem;
+  --s4: 5.063rem;
+  --s5: 7.594rem;
+
+  /* Measure (line length) */
+  --measure: 65ch;
+
+  /* Borders */
+  --border-thin: 1px;
+}
+
+/* ========================================
+   GLOBAL RESETS (ELP_003 — universal border-box)
+   ======================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* ========================================
+   THE STACK (ELC_STACK)
+   Vertical spacing between sibling elements
+   ======================================== */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.stack > * {
+  margin-block: 0;
+}
+
+.stack > * + * {
+  margin-block-start: var(--space, 1.5rem);
+}
+
+/* Port-variant hooks — framework ports (React/Vue/Svelte) rely on these two
+   attribute-selector rules instead of re-declaring Stack spacing logic:
+   `recursive` boolean props set [data-recursive]; `data-split-after` marks
+   the child after which the stack splits to push the remainder to the end. */
+.stack[data-recursive] * + * {
+  margin-block-start: var(--space, 1.5rem);
+}
+
+.stack > [data-split-after] {
+  margin-block-end: auto;
+}
+
+/* ========================================
+   THE BOX (ELC_BOX)
+   Padded container with optional border
+   ======================================== */
+
+.box {
+  padding: var(--padding, var(--s1));
+  /* --border-width is the per-instance parameter; --border-thin the global token */
+  border-width: var(--border-width, var(--border-thin, 1px));
+  border-style: solid;
+  outline: var(--border-thin, 1px) transparent;
+  outline-offset: calc(var(--border-thin, 1px) * -1);
+}
+
+.box * {
+  color: inherit;
+}
+
+.box[data-invert] {
+  color: var(--color-light);
+  background-color: var(--color-dark);
+}
+
+/* ========================================
+   THE CENTER (ELC_CENTER)
+   Horizontal centering with max-width
+   ======================================== */
+
+.center {
+  box-sizing: content-box;
+  max-inline-size: var(--measure, 65ch);
+  margin-inline: auto;
+  padding-inline: var(--gutter, 1rem);
+}
+
+/* Intrinsic centering variant */
+.center[data-intrinsic] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Text centering variant */
+.center[data-text] {
+  text-align: center;
+}
+
+/* ========================================
+   THE CLUSTER (ELC_CLUSTER)
+   Flexible wrapping horizontal layout
+   ======================================== */
+
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space, 1rem);
+  justify-content: var(--justify, flex-start);
+  align-items: var(--align, center);
+}
+
+.cluster > * {
+  min-inline-size: 0; /* ELP_033 — wrap instead of overflowing the container */
+}
+
+/* ========================================
+   THE SIDEBAR (ELC_SIDEBAR)
+   Two-element layout with intrinsic switching
+   ======================================== */
+
+.with-sidebar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space, 1rem);
+}
+
+.with-sidebar > :first-child {
+  flex-basis: var(--side-width, 20rem);
+  flex-grow: 1;
+  min-inline-size: 0; /* ELP_033 — the content pane's --content-min already replaces auto */
+}
+
+.with-sidebar > :last-child {
+  flex-basis: 0;
+  flex-grow: 999;
+  min-inline-size: var(--content-min, 50%);
+}
+
+/* No stretch variant */
+.with-sidebar[data-no-stretch] {
+  align-items: flex-start;
+}
+
+/* ========================================
+   THE SWITCHER (ELC_SWITCHER)
+   Equal columns that switch to stack below threshold
+   ======================================== */
+
+.switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space, 1rem);
+}
+
+.switcher > * {
+  flex-grow: 1;
+  flex-basis: calc((var(--threshold, 30rem) - 100%) * 999);
+  min-inline-size: 0; /* ELP_033 */
+}
+
+/* Limit max items in row. `data-limit` is a Switcher-only attribute, so
+   scoping by the attribute alone (without also compounding the .switcher
+   class) keeps each selector at 0-2-0 (attribute + pseudo-class) instead of
+   0-3-0 — the class add-on was redundant, not semantic (ELA_003). */
+[data-limit="2"] > :nth-last-child(n+3),
+[data-limit="2"] > :nth-last-child(n+3) ~ * {
+  flex-basis: 100%;
+}
+
+[data-limit="3"] > :nth-last-child(n+4),
+[data-limit="3"] > :nth-last-child(n+4) ~ * {
+  flex-basis: 100%;
+}
+
+[data-limit="4"] > :nth-last-child(n+5),
+[data-limit="4"] > :nth-last-child(n+5) ~ * {
+  flex-basis: 100%;
+}
+
+/* ========================================
+   THE COVER (ELC_COVER)
+   Vertical centering with optional header/footer
+   ======================================== */
+
+.cover {
+  display: flex;
+  flex-direction: column;
+  min-block-size: var(--min-height, 100vh);
+  padding: var(--padding, var(--s1));
+}
+
+.cover > * {
+  margin-block: var(--space, var(--s1));
+}
+
+.cover > :first-child:not(.principal):not([data-centered]) {
+  margin-block-start: 0;
+}
+
+.cover > :last-child:not(.principal):not([data-centered]) {
+  margin-block-end: 0;
+}
+
+/* `.principal` is the canonical marker; `data-centered` is the port alias */
+.cover > .principal,
+.cover > [data-centered] {
+  margin-block: auto;
+}
+
+/* No padding variant */
+.cover[data-no-pad] {
+  padding: 0;
+}
+
+/* ========================================
+   THE GRID (ELC_GRID)
+   Responsive grid with intrinsic sizing
+   ======================================== */
+
+.grid {
+  display: grid;
+  gap: var(--space, 1rem);
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(var(--min, 15rem), 100%), 1fr)
+  );
+}
+
+.grid > * {
+  min-inline-size: 0; /* ELP_033 — track floor is definite; children still need shrink permission */
+}
+
+/* Ragged variant — preserves natural item heights (no equal-row forcing) */
+.grid[data-ragged] {
+  align-items: start;
+}
+
+/* ========================================
+   THE FRAME (ELC_FRAME)
+   Aspect ratio container for media
+   ======================================== */
+
+.frame {
+  /* two equivalent parameter APIs: --n/--d (preferred) or a single --ratio */
+  aspect-ratio: var(--ratio, calc(var(--n, 16) / var(--d, 9)));
+  overflow: hidden;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.frame > img,
+.frame > video {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+  object-position: var(--object-position, center);
+}
+
+/* ========================================
+   THE REEL (ELC_REEL)
+   Horizontal scrolling container
+   ======================================== */
+
+.reel {
+  display: flex;
+  block-size: var(--height, auto);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.reel > * {
+  flex: 0 0 var(--item-width, auto);
+}
+
+.reel > * + * {
+  margin-inline-start: var(--space, 1.5rem);
+}
+
+.reel[data-overflowing] {
+  padding-block-end: var(--s1);
+}
+
+/* No scrollbar variant */
+.reel[data-no-bar] {
+  scrollbar-width: none;
+}
+
+.reel[data-no-bar]::-webkit-scrollbar {
+  display: none;
+}
+
+/* Scroll snap variant (ELP_031) */
+.reel[data-snap] {
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline-start: var(--snap-offset, 0);
+}
+
+.reel[data-snap] > * {
+  scroll-snap-align: start;
+}
+
+/* Proximity snap variant (less strict) */
+.reel[data-snap="proximity"] {
+  scroll-snap-type: x proximity;
+}
+
+/* ========================================
+   THE IMPOSTER (ELC_IMPOSTER)
+   Superimposed/overlay positioning
+   ======================================== */
+
+.imposter {
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.imposter[data-contain] {
+  --margin: var(--s1);
+  overflow: auto;
+  max-inline-size: calc(100% - (var(--margin) * 2));
+  max-block-size: calc(100% - (var(--margin) * 2));
+}
+
+.imposter[data-fixed] {
+  position: fixed;
+}
+
+/* ========================================
+   THE ICON (ELC_ICON)
+   Inline SVG icon sizing and alignment
+   ======================================== */
+
+.icon {
+  width: 0.75em;
+  width: 1cap;
+  height: 0.75em;
+  height: 1cap;
+}
+
+.with-icon {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space, 0.5em);
+}
+
+/* ========================================
+   THE CONTAINER (ELC_CONTAINER)
+   Container query context
+   ======================================== */
+
+.container {
+  container-type: inline-size;
+  container-name: var(--container-name, layout);
+}
+
+/* ========================================
+   MOTION SAFETY (ELP_028)
+   Disable animations for users who prefer
+   reduced motion (WCAG 2.1 SC 2.3.3)
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ========================================
+   FOCUS VISIBILITY (ELP_029)
+   Keyboard-only focus rings
+   (WCAG 2.4.7 / 2.4.11)
+   ======================================== */
+
+:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 3px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}

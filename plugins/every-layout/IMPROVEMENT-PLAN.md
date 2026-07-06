@@ -1,0 +1,307 @@
+# Improvement Plan — 4.5.1 → 4.7.0
+
+Actionable sequence derived from the 2026-07-06 full plugin review plus the
+field report `layout-edits.md` (swatch-grid column-clipping / automatic
+minimum size). Each phase is independently shippable, maps to one release
+under the plugin's semver policy, and must leave every gate green
+(`bin/ci.sh`, created in Phase 1).
+
+**Ground rules**
+
+- Work happens in this tree (the reconciled 4.5.0 marketplace copy). Sync the
+  standalone repo *after* each release lands, not during.
+- Every phase ends with: run `bin/ci.sh`, update `CHANGELOG.md`, bump
+  `.claude-plugin/plugin.json` version.
+- Prefer fixing a violation over registering it; register only what is
+  intentionally kept (`escapes.md`, mandatory expiry).
+- After 4.6.0 lands, reinstall the plugin locally — the currently installed
+  marketplace copy predates 4.3.0 (still says "Astro 5").
+
+---
+
+## Phase 1 — Integration & truth fixes — release **4.5.1 (PATCH)**
+
+Small, zero-risk corrections. No behavior changes to gates.
+
+- [x] **1.1 Agent tool keys** — `agents/css-auditor.md`, `agents/css-diagnostician.md`,
+      `agents/site-builder.md`: rename frontmatter `allowed-tools:` → `tools:`
+      (agents don't support `allowed-tools`; without `tools:` they inherit ALL
+      tools, so the auditor/diagnostician "read-only" guarantee is currently
+      prompt-only). Keep YAML list form.
+      *Accept:* `claude plugin validate` passes; fork `/audit-layout` on a
+      fixture and confirm the agent has no Write/Edit.
+- [x] **1.2 settings.json** — delete the empty `{}` file (or populate with a
+      real `agent` default). Update the CLAUDE.md conventions line: supported
+      keys are `agent` **and** `subagentStatusLine`.
+- [x] **1.3 CLAUDE.md count corrections** — line 17: layout engine owns **26**
+      principles (15 + 3 + 8), **17** reference files (not 29/16).
+- [x] **1.4 README `paths` wording** — `paths:` is an availability-scoping
+      mechanism, not "auto-invoke when Claude edits matching files".
+- [x] **1.5 Remove inert `paths:`** from `skills/refactor-to-primitives/SKILL.md`
+      and `skills/plan-migration/SKILL.md` (meaningless alongside
+      `disable-model-invocation: true`).
+- [x] **1.6 strict-check report template** — `skills/strict-check/SKILL.md:63-66`:
+      add the missing `ELA_005` and `ELA_006` rows.
+- [x] **1.7 css-auditor cascade rule** — `agents/css-auditor.md`: add the
+      rubric cascade (Motion Safety or Focus Visibility 0/3 → cap 16/24;
+      both → cap 12/24; report raw + capped). Mirrors `eval/rubric.md:147-153`.
+- [x] **1.8 site-builder constraints** — `agents/site-builder.md`: add
+      "MUST cite ELC_*/ELP_* IDs in every layout recommendation; never invent
+      IDs" and inline the budget numbers (34 KB min / 8.5 KB gzip CSS;
+      15 KB route / 30 KB page JS).
+- [x] **1.9 Scale typo** — `skills/css-layout-engine/SKILL.md:55`:
+      `--s-2` → `--s-5`.
+- [x] **1.10 Icon exception documented** — `skills/css-layout-engine/references/physical-properties.md`:
+      add accepted exception #4: CSS `width`/`height` with `em`/`cap` units on
+      inline icons (ELC_ICON, per ELP_024) — matches the existing whitelist at
+      `bin/css-strict.sh:121`.
+- [x] **1.11 `bin/ci.sh`** — new single entry point: `bash -n` all `bin/*.sh`,
+      `bin/test-escapes.sh`, `bin/run-evals.sh`, `bin/css-strict.sh
+      demos/archive-site/src/styles`. Document one-line CI wiring in README.
+      (Extended in 2.9; workflow YAML belongs in the standalone repo.)
+
+---
+
+## Phase 2 — Gate hardening (enforce what axioms.md claims) — part of **4.6.0 (MINOR)**
+
+Each new check ships with a fixture proving fail + pass. New checks may
+expose latent violations → feeds Phase 3.
+
+- [x] **2.1 Multi-line `@media` detection** — `bin/css-strict.sh` (ELA_001):
+      replace the single-line regex with an awk block scanner (viewport-feature
+      `@media` … collect until matching brace … flag layout properties inside).
+      *Fixture:* `eval/fixtures/gate-media-multiline.css`.
+- [x] **2.2 Specificity 0-2-0 cap** — `bin/css-strict.sh` (ELA_003): count
+      class/attr/pseudo-class simple selectors per compound selector; fail >2.
+      POSIX awk. Sync `axioms.md` ELA_003 enforcement text to exactly what is
+      checked. *Fixture:* `eval/fixtures/gate-specificity.css`.
+- [x] **2.3 `--archival` completion** — `bin/css-strict.sh` (ELA_006):
+      implement the claimed-but-missing `@supports (not` check; rewrite the
+      nesting-depth counter to track depth across lines, ignoring
+      comments/strings. *Fixture:* `eval/fixtures/gate-archival.css`.
+- [x] **2.4 CSS-in-JS detector** — new `bin/ports-lint.sh` (ELA_005, currently
+      unenforced by anything): flag `React.CSSProperties`, `style={`/`:style=`
+      objects containing non-`--` property keys (reuse css-lint-hook's
+      primitive-parameter allowlist logic), `<style>{` in `.tsx/.jsx`,
+      `styled.`/`styled(`, `` css` ``, emotion/stitches imports. Warning-tier
+      in the PostToolUse hook; `--strict` flag hard-fails for CI.
+      *Fixtures:* compliant + violating `.tsx` samples.
+- [x] **2.5 HTML `<style>` scanning** — `bin/css-strict.sh`: accept
+      `.html`/`.astro`, extract `<style>` blocks, run the same checks. Closes
+      the blind spot that let `demos/gallery.html` violations survive.
+- [x] **2.6 Escapes date guard** — `bin/lib/escapes.sh`: validate
+      `YYYY-MM-DD` shape before the lexicographic compare; fail loudly on
+      malformed `Expires`.
+- [x] **2.7 Document the whitelists** — `axioms.md` enforcement notes: icon
+      `em`/`cap` allowance, comment stripping before px detection, WCAG
+      reduced-motion `!important` whitelist (all real, all undocumented).
+- [x] **2.8 css-lint-hook param allowlist** — extract the hardcoded
+      `--space --threshold …` list into `bin/lib/` (shared with 2.4) so new
+      primitive parameters are added in one place.
+- [x] **2.9 Extend `bin/ci.sh`** — add ports-lint, HTML-mode strict scan of
+      `demos/` + `stress-tests/`, and the new gate fixtures via
+      `bin/test-gates.sh` (new; modeled on test-escapes.sh).
+      *Accept:* full corpus green except known Phase-3 targets.
+
+---
+
+## Phase 3 — Self-compliance: ports & demos — part of **4.6.0 (MINOR)**
+
+Makes the plugin pass its own (now stronger) gates.
+
+- [x] **3.1–3.3 Rewrite React/Vue/Svelte reference ports** —
+      `skills/framework-implementations/references/{react,vue,svelte}.md`,
+      all 13 components each: emit `className="stack …"` + **custom-property-only**
+      style (`{'--space': space}` / `:style` / `style:--space`), consuming the
+      canonical stylesheet (vanilla port). Delete every `CSSProperties`/
+      `computed()` declaration object and interpolated declaration string.
+      Svelte: prefer the idiomatic `style:--space={space}` directive.
+- [x] **3.4 Codify the port rule** — `skills/framework-implementations/SKILL.md`
+      + `references/porting-guide.md`: "Ports ship classes + custom-property
+      parameters only; primitive CSS ships once as a stylesheet; bespoke
+      declarations in `style` are ELA_002 violations" (same line the lint hook
+      already draws).
+- [x] **3.5 Fix demo react-ports** —
+      `demos/archive-site/src/components/react-ports/{Stack,Sidebar,Grid}.tsx`:
+      consume `src/styles/primitives.css` classes; **delete per-instance
+      `<style>` injection** (currently unscoped → duplicated per instance, and
+      `recursive`/`splitAfter` selectors leak to every `.stack` on the page).
+      Replace `splitAfter: number` with a child-marker API:
+      `.stack > [data-split-after] { margin-block-end: auto; }`.
+- [x] **3.6 Fix demo violations** — `demos/gallery.html` lines 62, 158, 186,
+      220 (physical properties → logical; `300px` → scale token or
+      `max-inline-size` + registered escape); `demos/artsheet.html:135`
+      (remove the out-of-whitelist `!important`). artsheet's `<script>` stays
+      as documented intentional demo interactivity (js-budget doesn't measure
+      inline HTML scripts; add an inline comment stating the exemption).
+- [x] **3.7 generate-port alignment** — verify `/generate-port` emits the new
+      pattern; update `eval/prompts/framework_implementations.md` if it
+      references the old one.
+- [x] **3.8 Gate pass** — `bin/ci.sh` fully green including ports-lint and
+      HTML-mode scans.
+
+---
+
+## Phase 4 — Canonical value sweep — part of **4.6.0 (MINOR)**
+
+- [x] **4.1 Measure = 65ch everywhere (as the *fallback*)** — sweep `60ch`
+      fallback defaults → `65ch`: `cookbook-recipes.md` (20, 106, 133, 156),
+      `framework-implementations/references/vanilla.md:34`, `tailwind.md`
+      (58, 293, 355), `astro.md` (69, 680). Add the missing fallback to the
+      Center recipe in `primitives.md` (`var(--measure, 65ch)`). Explicit
+      *token settings* like `artsheet.html:27` (`--measure: 60ch`) are legal
+      overrides — keep, with a comment noting it demonstrates the override.
+- [x] **4.2 Escape byte limits** — `escape-hatches.md`: mark the per-category
+      byte limits **advisory** (nothing enforces them), or add a check to
+      `bin/css-budget.sh`. Pick one; stop implying enforcement.
+- [x] **4.3 Relocation header** — `skills/css-design-system/references/principles.md`:
+      state explicitly this file holds the relocated subset (ELP_016–018,
+      022–024) and the full catalog spans both files.
+
+---
+
+## Phase 5 — Auto-minimum bake-in (ELP_033) — headline of **4.6.0 (MINOR)**
+
+From `layout-edits.md`. Follows CLAUDE.md's "Adding a New Primitive or
+Principle" workflow end-to-end. Rule as refined: **no track keeps the `auto`
+floor** (definite minimum or 0 — bare `1fr` is the violation; the canonical
+Grid's `min(var(--min),100%)` floor stays, it *is* the column algorithm), and
+**inline-shrink primitives zero their children's auto minimum** (Sidebar's
+content-pane `--content-min` floor is explicit and therefore already immune;
+Reel/Frame exempt by design).
+
+- [x] **5.1 ELP_033** — `skills/css-layout-engine/references/principles.md`:
+      "Neutralized Auto-Minimum" in full spec format. Applies-when: fraction
+      tracks / flex children that may hold aspect-ratio, media, or unbreakable
+      content. Fails-when: intentional no-shrink (Reel `flex: 0 0 auto`,
+      Sidebar `--content-min`). Tradeoff: content may wrap tighter than its
+      min-content. Sources: field report (swatch-grid clip), CSS Grid spec
+      automatic-minimum-size, *Every Layout* Grid chapter. Testable assertion:
+      an `aspect-ratio: 2/1` child with a wrapping label inside
+      `repeat(3, minmax(0,1fr))` must not clip at any container width.
+- [x] **5.2 Recipe changes** — `skills/css-layout-engine/SKILL.md` quick
+      recipes + `references/primitives.md` full specs:
+      `.grid > *`, `.switcher > *`, `.cluster > *` get `min-inline-size: 0;`;
+      Sidebar: zero the *sidebar pane* only (`.with-sidebar > :first-child`,
+      mirror any right-sidebar variant documented in primitives.md); Grid spec
+      text explains the `auto`-floor mechanism and why the definite
+      `min(var(--min),100%)` floor already satisfies ELP_033.
+- [x] **5.3 expected-properties.md** — add required `min-inline-size: 0`
+      lines for Grid/Switcher/Cluster/Sidebar(pane); add forbidden: bare `1fr`
+      tracks in Grid recipes (must be `minmax(0|definite, 1fr)`).
+- [x] **5.4 Propagate to all 6 ports + demos** — astro/react/vue/svelte/
+      tailwind/vanilla references (post-Phase-3 shape), 
+      `demos/archive-site/src/styles/primitives.css`, `demos/gallery.html`
+      inline recipes.
+- [x] **5.5 Stress tests** — add to `grid-`, `switcher-`, `cluster-`,
+      `sidebar-stress.html`: (a) aspect-ratio child with wrapping label at
+      narrow width, (b) unbreakable-token child. Update the "8 tests each"
+      claims (`README.md:90`, CLAUDE.md stress-tests line) and any count
+      assertions in `bin/run-evals.sh`.
+- [x] **5.6 Anti-pattern #8** — `references/cookbook-antipatterns.md`:
+      "Bare fraction tracks — the auto-minimum floor" ("works wide, clips
+      narrow" signature, aspect-ratio feedback mechanism, fix, the one-line
+      reviewer heuristic). New fixture `eval/fixtures/anti-pattern-auto-min.html`
+      distilled from the real swatch-grid case; wire into run-evals.
+- [x] **5.7 Diagnostician pattern** — `agents/css-diagnostician.md` +
+      `skills/diagnose-layout/SKILL.md`: "column/child clipped at narrow
+      widths" → trace track definition (bare `1fr`?) → child min floor →
+      aspect-ratio/unbreakable content → prescribe `minmax(0|definite, …)` or
+      `min-inline-size: 0`, cite ELP_033. (Today the symptom has no
+      diagnostic path at all.)
+- [x] **5.8 Chooser + constitution + recipes** — add the reviewer heuristic to
+      `constitution.md`'s code-review checklist; `chooser.md`: guidance for
+      "fixed-N equal columns that never wrap" (the catalog hole that caused
+      the original bug) → new cookbook recipe `repeat(N, minmax(0, 1fr))` in
+      `cookbook-recipes.md`; add a hazards row to `composition-rules.md`.
+- [x] **5.9 Lint warning** — `bin/css-lint-hook.sh`: warning-tier flag for
+      bare `1fr` inside `grid-template-*` (hook-tier, not the hard gate —
+      print-rules' single-column `1fr` is legitimate). Fixture pair.
+- [x] **5.10 Memory hooks + counts** — `references/hooks.md`: add ELP_033
+      hook(s); update the "75 memory hooks" count in SKILL.md.
+- [x] **5.11 Auditor/rubric touch** — `eval/rubric.md` dimension guidance
+      (Intrinsic Sizing) mentions zero-floor tracks; css-auditor prompt lists
+      ELP_033 among checks.
+- [x] **5.12 Reel keyboard access** (pulled forward, accessibility tier-1) —
+      `primitives.md` Reel spec + `css-design-system/references/accessibility.md`:
+      scrollable Reel needs `tabindex="0"` + `role="region"` + accessible
+      name; add to reel-stress.
+- [x] **5.13 Release** — CHANGELOG 4.6.0 (Phases 2–5), version bump, full
+      `bin/ci.sh` green, sync standalone repo.
+
+---
+
+## Phase 6 — Expansion wave — release **4.7.0 (MINOR)**
+
+- [ ] **6.1 `references/native-interaction.md`** (css-layout-engine) — the
+      zero-JS interactivity catalog: `<details name>` exclusive accordions,
+      `<dialog>` + `method="dialog"`, Popover API (`popovertarget`,
+      light-dismiss), `:user-valid`/`:user-invalid` (+ validation-UX section
+      in `form-patterns.md`), `<datalist>`, `accent-color`; markup contracts,
+      focus + reduced-motion rules, Baseline date per feature. This is the
+      ELA_005 boundary-mover: it shrinks the set of things that "need" JS.
+- [ ] **6.2 `references/baseline-registry.md`** — operationalize ELA_006:
+      table of feature | Baseline date | fallback obligation | status
+      (allowed / escape-gated / watch). Seed: light-dark, logical props,
+      :focus-visible, subgrid, container queries, :has, dvh/svh,
+      cross-document view transitions, anchor positioning, scroll-driven
+      animations, interpolate-size, cqi, text-box-trim, popover, dialog,
+      details-name, :user-valid. Point `axioms.md` ELA_006 at it.
+- [ ] **6.3 Cover dvh upgrade** — fallback chain `min-block-size: 100vh;
+      min-block-size: 100dvh;` in SKILL.md, primitives.md, all ports, demos,
+      expected-properties, cover-stress.
+- [ ] **6.4 Cross-document View Transitions** — astro-site-architect
+      (`performance.md` or new reference): `@view-transition` MPA transitions
+      as the zero-JS alternative to ClientRouter's ~3 KB; reduced-motion
+      gated; when each is appropriate.
+- [ ] **6.5 Container query units** — `container-query-recipes.md`: `cqi`
+      sizing + fluid type inside ELC_CONTAINER; nested-container layout-cost
+      note. Also fix the latent bare-`1fr` tracks the review found in this
+      file (line 82) and `subgrid-patterns.md` (98, 141, 192) per ELP_033.
+- [ ] **6.6 Data durability table** — `archival-data-engine/SKILL.md`:
+      SQLite vs libSQL vs Astro DB trade-offs framed by ELA_006 (framework
+      coupling risk named explicitly).
+- [ ] **6.7 Design-system gap fills** — dark-mode shadow adaptation recipe
+      (`css-texture.md`); mixed-direction content section (`i18n-layout.md`).
+- [ ] **6.8 Eval coverage** — new prompts: `css_layout_engine.md` (core) and
+      `diagnose_layout.md` (fixture: a broken-primitive page with an
+      auto-minimum clip among the faults); update run-evals counts.
+- [ ] **6.9 `/scaffold-system` workflow skill** — greenfield entry point:
+      emits tokens file (9 mandatory `--br-*`), `@layer` declaration,
+      primitives.css, `escapes.md` from template, offers pre-commit install.
+      `disable-model-invocation: true`. Companion eval prompt.
+- [ ] **6.10 `ids.json` registry** — machine-readable ELC/ELP/ELA/EDC/ESC
+      registry (with `deprecated`/`superseded_by`); `run-evals.sh` check that
+      every ID cited anywhere exists. Mechanical teeth for the ID-immutability
+      policy.
+
+---
+
+## Phase 7 — Backlog (unscheduled; pull forward when cheap)
+
+- [ ] `bin/archival-audit.sh` — ELA_006 external-dependency sweep: `url(http…)`,
+      `@import`, font CDNs in CSS; optional link-rot probe. (Cheap shell; a
+      strong pull-forward candidate.)
+- [ ] `references/failure-mechanics.md` — the spec-trap family: auto minimums
+      (ELP_033), flex-column `min-height: auto`, `overflow-wrap` for
+      unbreakable tokens, `contain-intrinsic-size`.
+- [ ] Field-report pipeline — convention for `layout-edits.md`-style incident
+      reports feeding fixtures/principles (this plan's Phase 5 is the model).
+- [ ] Anchor-positioning recipes (escape-gated until Baseline per registry);
+      scroll-driven animation + `interpolate-size` motion-allowlist
+      extensions; `@page` margin boxes in print-rules; optional HTML validity
+      gate (vnu) as a non-core CI extra.
+- [ ] Ship-conventions-as-skill — plugin-root CLAUDE.md is not loaded for
+      consumers (validator warning); decide which conventions belong in a
+      skill so installed users receive them.
+
+---
+
+## Release map
+
+| Release | Phases | Nature |
+|---|---|---|
+| 4.5.1 | 1 | PATCH — doc/config truth fixes, agent `tools:` rename, ci.sh |
+| 4.6.0 | 2–5 | MINOR — gate hardening, self-compliance, value sweep, **ELP_033** |
+| 4.7.0 | 6 | MINOR — native-interaction catalog, baseline registry, dvh, scaffolder, ids.json |
+| — | 7 | backlog |

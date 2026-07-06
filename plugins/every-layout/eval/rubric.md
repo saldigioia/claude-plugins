@@ -20,6 +20,7 @@ This rubric provides structured criteria for evaluating CSS layouts against Ever
 - [ ] Uses `min-width` appropriately
 - [ ] Avoids fixed heights on content
 - [ ] Uses `ch` for measure constraints
+- [ ] Fraction tracks carry a definite minimum or 0 (`minmax(0, 1fr)`, never bare `1fr`); shrinkable flex/grid children have `min-inline-size: 0` (ELP_033)
 
 ### 2. Responsive Without Breakpoints (0-3 points)
 

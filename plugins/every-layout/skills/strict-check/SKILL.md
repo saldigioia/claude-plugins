@@ -64,8 +64,9 @@ Canonical source: skills/css-layout-engine/references/axioms.md
 | ELA_002 Designing Without Seeing | N | file:line |
 | ELA_003 Exception-Based Styling | N | file:line |
 | ELA_004 Axiomatic Values | N | file:line |
+| ELA_006 Archival Durability | N (reported with `--archival`) | file:line |
 
-### JavaScript budget gate: [PASS | FAIL | SKIPPED]
+### JavaScript budget gate — ELA_005 CSS-Dominant Composition: [PASS | FAIL | SKIPPED]
 Canonical source: skills/css-design-system/references/performance-rules.md
 
 | Route | Gzipped | Budget | Status |

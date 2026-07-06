@@ -96,7 +96,16 @@ escapes_load() {
       gsub(/^[ \t]+/, "", expires); gsub(/[ \t]+$/, "", expires)
       gsub(/`/, "", target)
       if (axiom !~ /^ELA_[0-9][0-9][0-9]$/) next
-      if (expires !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) next
+      if (expires !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) {
+        printf "escapes.sh: WARNING — escape row (%s, %s) has malformed Expires \"%s\" (need YYYY-MM-DD); row IGNORED, its violations will fail\n", target, axiom, expires > "/dev/stderr"
+        next
+      }
+      mm = substr(expires, 6, 2) + 0
+      dd = substr(expires, 9, 2) + 0
+      if (mm < 1 || mm > 12 || dd < 1 || dd > 31) {
+        printf "escapes.sh: WARNING — escape row (%s, %s) has impossible Expires \"%s\" (month/day out of range); row IGNORED, its violations will fail\n", target, axiom, expires > "/dev/stderr"
+        next
+      }
       printf "%s\t%s\t%s\t%s\t%s\n", target, axiom, lines, expires, esc
     }
   ' "$file")

@@ -7,6 +7,142 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.6.0] - 2026-07-06
+
+### Added — ELP_033 Neutralized Auto-Minimum (from field report `layout-edits.md`)
+
+A real-world "works wide, clips narrow" bug — three `1fr` swatch columns with
+`aspect-ratio` chips clipping at narrow card widths — is now a first-class
+principle, baked through every layer:
+
+- **ELP_033** in `css-layout-engine/references/principles.md`: every fraction
+  track carries a definite minimum or 0 (bare `1fr` ≡ `minmax(auto, 1fr)` is
+  the violation); inline-shrink primitives zero their children's automatic
+  minimum. Exceptions documented: Reel (`flex: 0 0 auto` by design), Sidebar
+  content pane (explicit `--content-min` already replaces `auto`).
+- **Canonical recipes updated** (SKILL.md, primitives.md, vanilla.md,
+  tailwind.md, astro.md, `demos/every-layout.css`,
+  archive-site `primitives.css`): `.grid > *`, `.switcher > *`,
+  `.cluster > *`, and the Sidebar pane gain `min-inline-size: 0`.
+- New cookbook recipe **"Fixed-N Equal Columns (Swatch Grid)"** — the catalog
+  hole that caused the original bug (`repeat(var(--columns), minmax(0, 1fr))`);
+  chooser entry added.
+- New anti-pattern #8 **"Bare Fraction Tracks (The Auto-Minimum Floor)"** +
+  eval fixture `anti-pattern-auto-min.html` distilled from the field report.
+- **css-diagnostician**: new diagnostic pattern "column/child clipped at
+  narrow widths" (the symptom previously had no diagnostic path).
+- Constitution code-review checklist gains the one-line reviewer heuristic;
+  rubric dimension 1 and css-auditor check ELP_033; memory hook added.
+- `css-lint-hook.sh`: warning-tier check for bare `1fr` in `grid-template-*`.
+- **Reel keyboard access** (accessibility tier 1): `tabindex="0"` +
+  `role="region"` + `aria-label` documented in primitives.md and
+  `accessibility.md`.
+
+### Added — gate hardening (Improvement Plan Phase 2)
+
+- **`bin/css-strict.sh`**: multi-line viewport `@media` detection (block-aware
+  scan); 0-2-0 specificity cap actually computed (functional pseudo-class
+  wrappers and their arguments excluded by documented design, so canonical
+  primitives stay legal); `--archival` completed (`@supports not (…)` check
+  added, brace-depth counter fixed); **`.html`/`.astro` scanning** — `<style>`
+  blocks (line numbers preserved) plus inline `style=""` attributes, closing
+  the demo blind spot.
+- **`bin/ports-lint.sh`** (new): CSS-in-JS detector giving ELA_005's "no
+  CSS-in-JS" its first enforcement — styled-components/emotion imports,
+  `css`-template literals, `React.CSSProperties` objects, runtime `<style>`
+  injection, bespoke keys in style objects. Warning-tier via the PostToolUse
+  hook, `--strict` for CI.
+- **`bin/lib/primitive-params.sh`** (new): single source of truth for
+  inline-styleable primitive parameters, shared by the hook, the strict gate,
+  and ports-lint; extended with the documented `--side-width`,
+  `--content-min`, `--justify`, `--align`, `--border-width`, `--n`, `--d`
+  (etc.) parameters.
+- **`bin/test-gates.sh`** (new): 16-assertion acceptance battery with gate
+  fixtures under `eval/fixtures/gates/`; wired into `bin/ci.sh`.
+- `bin/lib/escapes.sh`: malformed/impossible `Expires` dates now warn loudly
+  and never suppress.
+- `axioms.md` enforcement text synced to what the gates actually do (icon
+  `em`/`cap` whitelist, comment stripping, reduced-motion `!important`
+  whitelist, specificity approximation, gzip measurement, ports-lint).
+
+### Changed — self-compliance (the plugin passes its own gates)
+
+- **React/Vue/Svelte reference ports rewritten** to the compliant pattern:
+  class + `--custom-property` parameters only (Svelte uses `style:--x`
+  directives); no declaration objects, no runtime `<style>` injection.
+  Boolean variants map to `data-*` attributes; `splitAfter` replaced by the
+  child-side `data-split-after` marker everywhere.
+- **Port parameter contract reconciled** across all six ports + stylesheets:
+  Box `--border-width` (per-instance) falling back to `--border-thin`
+  (global token); Frame dual API `--ratio` or `--n`/`--d`; Container
+  `--container-name`; Cover `.principal` (canonical) with `[data-centered]`
+  as the port alias; Cluster `--justify`/`--align` now consumed by the CSS.
+- **`demos/every-layout.css`** (new): the canonical single-file vanilla
+  stylesheet; stress tests now link it (the old
+  `../implementations/vanilla/every-layout.css` href pointed at a directory
+  that never existed).
+- **Demo react-ports** rewritten: per-instance unscoped `<style>` injection
+  removed (it duplicated rules per instance and leaked `recursive`/
+  `splitAfter` selectors to every `.stack` on the page).
+- **`demos/gallery.html`, `demos/artsheet.html`, all 13 stress tests** now
+  pass the hardened gate with zero violations (bespoke inline styles moved to
+  classes, physical properties → logical, arbitrary px → rem/tokens, a
+  genuine 0-3-0 selector reduced, one out-of-whitelist `!important` removed).
+- **65ch measure canonicalized** as the fallback default across cookbooks and
+  ports (explicit `--measure` token overrides remain legal and documented).
+- expected-properties.md: Cover marker corrected to `.principal`; ELP_033
+  requirements added; bare-`1fr` forbidden for Grid.
+- escape-hatch byte limits marked advisory (nothing enforced them).
+
+---
+
+## [4.5.1] - 2026-07-06
+
+### Fixed — integration & documentation truth (Improvement Plan Phase 1)
+
+- **Agent frontmatter**: renamed `allowed-tools:` → `tools:` in all three
+  agents (`css-auditor`, `css-diagnostician`, `site-builder`). `allowed-tools`
+  is a *skill* key; an agent using it gets the default (full) toolset, so the
+  auditor/diagnostician "read-only" guarantee was prompt-only. With `tools:`
+  the restriction is configuration-enforced.
+- **css-auditor**: now applies the rubric's cascade rule (Motion Safety or
+  Focus Visibility at 0/3 caps the total at 16/24; both at 0/3 cap at 12/24)
+  and reports `Raw → After cascade` scores, matching `eval/rubric.md`.
+- **site-builder**: new Traceability section — must cite ELC_*/ELP_* IDs in
+  every layout recommendation; CSS/JS budget numbers inlined (34 KB min /
+  8.5 KB gzip CSS; 15 KB route / 30 KB page JS).
+- **strict-check**: report template now covers all six axioms — added the
+  missing `ELA_006` row to the CSS gate table and labeled the JS budget gate
+  as `ELA_005`.
+- **physical-properties.md**: documented the previously implicit accepted
+  exception — CSS `width`/`height` with `em`/`cap` units on inline icons
+  (ELC_ICON, per ELP_024), matching the existing `css-strict.sh` whitelist.
+- **css-layout-engine SKILL.md**: modular-scale range typo in the ELP_005
+  row (`--s-2` → `--s-5`).
+- **CLAUDE.md**: corrected architecture counts (26 layout principles owned by
+  the layout engine, 17 reference files); settings.json note updated
+  (supported keys are `agent` and `subagentStatusLine`).
+- **README**: `paths:` frontmatter described accurately as an
+  availability-scoping mechanism, not an on-edit auto-trigger.
+
+### Removed
+
+- Empty `settings.json` (was `{}`; set no supported keys).
+- Inert `paths:` frontmatter from the user-invoked `refactor-to-primitives`
+  and `plan-migration` skills (`disable-model-invocation: true` makes path
+  scoping meaningless).
+
+### Added
+
+- **`bin/ci.sh`** — single CI entry point for this repo: syntax-checks every
+  script in `bin/`, runs the escape acceptance tests, the eval structural
+  validation, and the CSS strict gate against the demo site.
+- **`IMPROVEMENT-PLAN.md`** — phased work plan (4.5.1 → 4.7.0) from the
+  2026-07-06 full review + the `layout-edits.md` field report (auto-minimum
+  clipping → ELP_033, scheduled for 4.6.0).
+
+---
+
 ## [4.5.0] - 2026-06-04
 
 ### Reconciliation — merge of the two divergent lineages

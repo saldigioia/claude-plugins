@@ -4,13 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Box Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
     .pass { color: green; }
     .fail { color: red; }
+    .min-height-demo { min-block-size: 3.125rem; }
+    .box-thick-border { --border-width: 4px; }
   </style>
 </head>
 <body>
@@ -19,7 +21,7 @@
   <section class="test-section">
     <h2>Test 1: Empty Box</h2>
     <p>Box with no children should render padding and border.</p>
-    <div class="box" style="min-height: 50px">
+    <div class="box min-height-demo">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if empty box renders with padding and border</p>
@@ -59,7 +61,7 @@
   <section class="test-section">
     <h2>Test 5: Custom Border Width</h2>
     <p>Box with thick border.</p>
-    <div class="box" style="--border-width: 4px">
+    <div class="box box-thick-border">
       <p>Thick border Box</p>
     </div>
     <p class="pass">✓ Pass if border is visibly thicker than default</p>

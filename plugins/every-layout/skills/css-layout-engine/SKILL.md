@@ -52,7 +52,7 @@ The Every Layout system provides 13 composable CSS layout primitives that replac
 | ELP_002 | Intrinsic Sizing — let content determine size, avoid fixed dimensions |
 | ELP_003 | Universal Border-Box — always use `box-sizing: border-box` |
 | ELP_004 | Logical Properties — use `inline-*`/`block-*`, not `left`/`right` |
-| ELP_005 | Modular Scale — all spacing from scale (ratio 1.5): `--s-2` to `--s5` |
+| ELP_005 | Modular Scale — all spacing from scale (ratio 1.5): `--s-5` to `--s5` |
 | ELP_006 | Measure Constraint — limit line length to `65ch` for readability |
 | ELP_007 | Global Element Styles — style elements first, add classes only when needed |
 | ELP_008 | Child-Only Layout Effects — parent controls layout of direct children only |
@@ -73,8 +73,9 @@ The Every Layout system provides 13 composable CSS layout primitives that replac
 | ELP_030 | Text Wrap Balance — `text-wrap: balance` on headings |
 | ELP_031 | Scroll Snap Enhancement — progressive, not mandatory |
 | ELP_032 | Font-Display Contract — `font-display: optional` for `ch`-unit CLS prevention |
+| ELP_033 | Neutralized Auto-Minimum — `minmax(0|definite, 1fr)` tracks; `min-inline-size: 0` children |
 
-> Full specs for all 32 principles: `references/principles.md`
+> Full specs for all 33 principles: `references/principles.md`
 
 ---
 
@@ -106,13 +107,16 @@ Each `calc()` chain must start from `--ratio` and `--s0` — never hardcode deri
 ```css
 .box {
   padding: var(--padding, var(--s1));
-  border: var(--border-thin, 1px) solid;
+  border-width: var(--border-width, var(--border-thin, 1px));
+  border-style: solid;
   outline: var(--border-thin, 1px) transparent;
   outline-offset: calc(var(--border-thin, 1px) * -1);
 }
 .box * { color: inherit; }
 .box[data-invert] { color: var(--color-light); background-color: var(--color-dark); }
 ```
+
+`--border-width` is the per-instance parameter; `--border-thin` is the global token it falls back to.
 
 ### Center (ELC_CENTER)
 ```css
@@ -130,32 +134,38 @@ Each `calc()` chain must start from `--ratio` and `--s0` — never hardcode deri
   display: flex;
   flex-wrap: wrap;
   gap: var(--space, 1rem);
-  justify-content: flex-start;
-  align-items: center;
+  justify-content: var(--justify, flex-start);
+  align-items: var(--align, center);
 }
+.cluster > * { min-inline-size: 0; }
 ```
 
 ### Sidebar (ELC_SIDEBAR)
 ```css
 .with-sidebar { display: flex; flex-wrap: wrap; gap: var(--space, 1rem); }
-.with-sidebar > :first-child { flex-basis: var(--side-width, 20rem); flex-grow: 1; }
+.with-sidebar > :first-child { flex-basis: var(--side-width, 20rem); flex-grow: 1; min-inline-size: 0; }
 .with-sidebar > :last-child { flex-basis: 0; flex-grow: 999; min-inline-size: var(--content-min, 50%); }
 ```
+
+The pane's `min-inline-size: 0` neutralizes the `auto` floor (ELP_033); the content pane's explicit `--content-min` floor is the switching mechanism and already replaces `auto`.
 
 ### Switcher (ELC_SWITCHER)
 ```css
 .switcher { display: flex; flex-wrap: wrap; gap: var(--space, 1rem); }
-.switcher > * { flex-grow: 1; flex-basis: calc((var(--threshold, 30rem) - 100%) * 999); }
+.switcher > * { flex-grow: 1; flex-basis: calc((var(--threshold, 30rem) - 100%) * 999); min-inline-size: 0; }
 ```
 
 ### Cover (ELC_COVER)
 ```css
 .cover { display: flex; flex-direction: column; min-block-size: var(--min-height, 100vh); padding: var(--padding, var(--s1)); }
 .cover > * { margin-block: var(--space, var(--s1)); }
-.cover > :first-child:not(.principal) { margin-block-start: 0; }
-.cover > :last-child:not(.principal) { margin-block-end: 0; }
-.cover > .principal { margin-block: auto; }
+.cover > :first-child:not(.principal):not([data-centered]) { margin-block-start: 0; }
+.cover > :last-child:not(.principal):not([data-centered]) { margin-block-end: 0; }
+.cover > .principal,
+.cover > [data-centered] { margin-block: auto; }
 ```
+
+`.principal` is the canonical marker; `data-centered` is the equivalent framework-port alias.
 
 ### Grid (ELC_GRID)
 ```css
@@ -164,14 +174,19 @@ Each `calc()` chain must start from `--ratio` and `--s0` — never hardcode deri
   gap: var(--space, 1rem);
   grid-template-columns: repeat(auto-fit, minmax(min(var(--min, 15rem), 100%), 1fr));
 }
+.grid > * { min-inline-size: 0; }
 .grid[data-ragged] { align-items: start; }
 ```
 
+The track's `min(var(--min), 100%)` is a definite floor — it satisfies ELP_033 by construction. Never write bare `1fr` tracks (`repeat(3, 1fr)`): bare `1fr` is `minmax(auto, 1fr)`, and the hidden `auto` floor lets a child (especially one with `aspect-ratio` or an unbreakable string) veto shrinking and clip at narrow widths. Fixed-N columns are `repeat(N, minmax(0, 1fr))`.
+
 ### Frame (ELC_FRAME)
 ```css
-.frame { aspect-ratio: var(--ratio, 16/9); overflow: hidden; display: flex; justify-content: center; align-items: center; }
+.frame { aspect-ratio: var(--ratio, calc(var(--n, 16) / var(--d, 9))); overflow: hidden; display: flex; justify-content: center; align-items: center; }
 .frame > img, .frame > video { inline-size: 100%; block-size: 100%; object-fit: cover; }
 ```
+
+Two equivalent parameter APIs: numeric `--n`/`--d` (preferred; used by the ports) or a single `--ratio`.
 
 ### Reel (ELC_REEL)
 ```css
@@ -320,6 +335,7 @@ Visual-coherence principles (ELP_016–018 theme-aware color; ELP_022–023 shad
 | `width: 300px` | Breaks responsiveness (ELP_002) | Use `min-inline-size` or `max-inline-size` |
 | `@media` for columns | Couples to viewport (ELP_009) | Use Grid/Switcher/Sidebar |
 | `gap: 17px` | Arbitrary value (ELP_005) | Use `var(--s1)` from scale |
+| `repeat(3, 1fr)` | Bare `1fr` = `minmax(auto, 1fr)`; auto floor clips at narrow widths (ELP_033) | `repeat(3, minmax(0, 1fr))` |
 | `margin-left` | Physical property (ELP_004) | Use `margin-inline-start` |
 | Scroll jacking | Breaks browser delegation (ELP_010) | Native scroll + optional snap |
 | Icon-only buttons | Missing accessible name (ELP_015) | Visible text + `aria-hidden` icon |
@@ -359,7 +375,7 @@ Read these when you need deeper detail beyond the quick-reference above:
 
 - `references/primitives.md` — Full specs for all 13 primitives (props, CSS, variants, edge cases)
 - `references/principles.md` — Full specs for all layout principles with rationale and examples
-- `references/hooks.md` — 75 memory hooks for quick recall
+- `references/hooks.md` — one-line memory hooks for every principle and primitive
 - `references/chooser.md` — Full 225-line decision tree with editorial recipe extensions
 - `references/constitution.md` — Full priority hierarchy, all conflict resolutions, decision trees, code review checklist
 - `references/cookbook-primitives.md` — Per-primitive deep-dive guides (13 entries)

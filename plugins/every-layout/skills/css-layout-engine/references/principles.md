@@ -557,3 +557,27 @@ Moved to the `css-design-system` skill. See `css-design-system/references/princi
 **Tags:** performance, layout-stability
 
 > Load a page using Center with --measure: 65ch while throttling network to Slow 3G. With font-display: optional, the layout must not shift when the web font loads (CLS = 0 for the Center element)
+
+---
+
+## Neutralized Auto-Minimum (ELP_033)
+
+**Every fraction track carries a definite minimum or 0 — never the implicit `auto` floor — and inline-shrink primitives zero their children's automatic minimum size so content wraps instead of overflowing**
+
+A grid/flex child's automatic minimum size is `auto`, not `0`: by spec it will not shrink below its own min-content size. Bare `1fr` means `minmax(auto, 1fr)`, so that hidden floor lets a single child veto shrinking and overflow the container. `aspect-ratio` makes it worse: when a label wraps, the extra height transfers back into a *larger* minimum width. The result is the "works wide, clips narrow" bug class — invisible until a container gets small.
+
+**Applies when:** Writing fraction tracks (`1fr`) in any grid, or composing Grid (ELC_GRID), Switcher (ELC_SWITCHER), Cluster (ELC_CLUSTER), or Sidebar (ELC_SIDEBAR) children that can contain media, `aspect-ratio` elements, or long unbreakable strings
+
+**Fails when:** Shrinking is intentionally forbidden — Reel (ELC_REEL) children use `flex: 0 0 auto` because scrolling is the overflow strategy, and Sidebar's content pane keeps its explicit `min-inline-size: var(--content-min)` floor (an explicit minimum already replaces `auto`)
+
+**Tradeoffs:** Content may wrap tighter than its min-content size; unbreakable tokens then need `overflow-wrap: break-word` rather than being allowed to stretch the track
+
+**Sources:**
+
+1. CSS Working Group, "[CSS Grid Layout — Automatic Minimum Size of Grid Items](https://drafts.csswg.org/css-grid/#min-size-auto)" (accessed 2026-07-06) — "the automatic minimum size … is the content-based minimum size"
+2. Field report `layout-edits.md` (2026-07-06): swatch-grid third-column clipping — `repeat(3, 1fr)` tracks with `aspect-ratio: 2/1` label chips; fixed by `repeat(3, minmax(0, 1fr))`
+3. *Every Layout*, Grid (the canonical `minmax(min(var(--min), 100%), 1fr)` guard — a definite floor that satisfies this principle by construction)
+
+**Tags:** intrinsic-sizing, containment
+
+> An `aspect-ratio: 2/1` child with a wrapping text label inside `repeat(3, minmax(0, 1fr))` tracks must never be clipped at any container width; with bare `repeat(3, 1fr)` the same markup clips at narrow widths — that difference is this principle

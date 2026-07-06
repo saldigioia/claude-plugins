@@ -6,7 +6,10 @@ description: >
   when a primitive misbehaves (e.g., Sidebar always stacking, Switcher not
   flipping, Grid collapsing to one column) — read-only analysis only.
 model: haiku
-allowed-tools: Read Glob Grep
+tools:
+  - Read
+  - Glob
+  - Grep
 skills:
   - css-layout-engine
   - css-design-system
@@ -40,6 +43,11 @@ an Every Layout primitive, you explain *why* it's happening by tracing the algor
 **Cause:** Container narrower than `--min`.
 **Trace:** `minmax(min(var(--min), 100%), 1fr)` — when container < `--min`, the `min()` resolves to `100%`, producing a single column.
 **Fix:** Reduce `--min` or widen the container.
+
+### Column or Child Clipped at Narrow Widths
+**Cause:** The `min-width: auto` floor — a grid/flex child refuses to shrink below its min-content size, the tracks' combined demand exceeds the container, and an ancestor's `overflow: hidden` clips the overflow (ELP_033).
+**Trace:** Check the track definition first: bare `1fr` means `minmax(auto, 1fr)` — the hidden `auto` floor is the culprit, not the `1fr` ceiling. Then check the child: `aspect-ratio` feeds wrapped-label height back into a larger minimum width; long unbreakable strings raise min-content directly. Reproduce by narrowing the container until combined minimums exceed it.
+**Fix:** `minmax(0, 1fr)` on the tracks (or a definite minimum like the canonical Grid's `min(var(--min), 100%)`), or `min-inline-size: 0` on the child. Never fix with a media query. Exception: Reel children (`flex: 0 0 auto`) are correct-by-design — scrolling is their overflow strategy.
 
 ### Cover Content Not Centering
 **Cause:** Missing `.principal` class on the centered element.

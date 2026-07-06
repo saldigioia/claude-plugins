@@ -2,7 +2,7 @@
 
 Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 6 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
 
-**Version:** 4.5.0 | **Author:** Rare Data Club
+**Version:** 4.6.0 | **Author:** Rare Data Club
 
 ## The commitment
 
@@ -14,7 +14,7 @@ This plugin treats **simple, durable, CSS-dominant web design as a requirement, 
 skills/                  13 skills (knowledge base + task workflows)
 
   Knowledge skills (auto-invokable)
-    css-layout-engine/       13 primitives, 29 layout principles, 16 reference files
+    css-layout-engine/       13 primitives, 27 layout principles, 17 reference files
     css-design-system/       Tokens, theming, fluid type, 6 design-system principles, 18 reference files
     framework-implementations/ Ports for Astro, React, Vue, Svelte, Tailwind, Vanilla
     astro-site-architect/    Astro 6 project structure, content layer, routing, performance
@@ -39,10 +39,14 @@ hooks/                   PostToolUse CSS linting
   hooks.json               Routes Write/Edit/MultiEdit to bin/css-lint-hook.sh for .css files
 
 bin/                     Shell utilities
-  css-strict.sh            AXIOM GATE — exits non-zero on any ELA_001–006 violation (escape-aware)
+  css-strict.sh            AXIOM GATE — exits non-zero on any ELA_001–006 violation (escape-aware; scans .css plus .html/.astro style blocks and inline attributes)
   js-budget.sh             AXIOM GATE — enforces ELA_005 JS budget (15 KB route / 30 KB page) (escape-aware)
+  ports-lint.sh            CSS-in-JS detector (ELA_005) — warning via hook, --strict for CI
+  ci.sh                    Single CI entry point — syntax checks, acceptance batteries, evals, corpus scans
   lib/escapes.sh           Shared escapes.md parser — sourced by both gates
+  lib/primitive-params.sh  Single source of truth for inline-styleable primitive parameters
   test-escapes.sh          Acceptance test for escape suppression (suppressed/expired/unregistered)
+  test-gates.sh            Acceptance test for the hardened gate checks (16 assertions)
   install-git-hooks.sh     Installs a pre-commit hook that runs both gates on every commit
   css-lint-hook.sh         PostToolUse warning hook (.css + inline-style scan for .astro/.tsx/.jsx/.vue/.svelte)
   css-audit.sh             Directory-wide CSS lint with colored output
@@ -62,13 +66,13 @@ demos/                   Reference implementations
   artsheet.html            Single-page vanilla demo — modular scale + core primitives
   gallery.html             Single-page vanilla demo — all primitives rendered inline
 
-stress-tests/            Edge-case tests (1 per primitive, 8 tests each)
+stress-tests/            Edge-case tests (1 per primitive, 8–9 tests each)
 ```
 
 ## Skill Dependency Graph
 
 ```
-css-layout-engine          (foundation — no dependencies; owns ELP_001–015, 019–021, 025–032)
+css-layout-engine          (foundation — no dependencies; owns ELP_001–015, 019–021, 025–033)
   └─ css-design-system     (builds on layout primitives; owns ELP_016–018, 022–024)
   └─ framework-implementations (ports layout primitives into framework components)
 astro-site-architect       (depends on both CSS skills)
@@ -90,7 +94,7 @@ The site-builder agent wires all 5 knowledge skills. The css-auditor and css-dia
 
 ### IDs Are Canonical
 - Primitives: `ELC_STACK`, `ELC_BOX`, `ELC_CENTER`, etc. (13 total)
-- Principles: `ELP_001` through `ELP_032`
+- Principles: `ELP_001` through `ELP_033`
 - Every recommendation must cite IDs. Never invent new ones.
 
 ### CSS Rules
@@ -110,11 +114,11 @@ The site-builder agent wires all 5 knowledge skills. The css-auditor and css-dia
 ### Plugin File Conventions
 - Skills: `skills/<name>/SKILL.md` + optional `references/` directory
 - Workflow skills (user-invoked) set `disable-model-invocation: true`; knowledge skills do not
-- Agents: `agents/<name>.md` with model, allowed-tools (YAML list), and skills preload
+- Agents: `agents/<name>.md` with model, tools (YAML list — the agent key is `tools`, not `allowed-tools`), and skills preload
 - Hooks: `hooks/hooks.json` — PostToolUse matchers that route to `bin/` scripts via stdin (jq for `tool_input.file_path`)
 - Eval: `eval/prompts/<name>.md` + `eval/fixtures/<name>.html|.astro`
 - Manifest: `.claude-plugin/plugin.json` (name, version, description, author, homepage, repository, license, keywords)
-- Settings: `settings.json` — only `agent` key is supported by Claude Code
+- Settings: `settings.json` (optional) — Claude Code supports only the `agent` and `subagentStatusLine` keys; this plugin sets neither, so the file is omitted
 - Escape hatches: `escapes.md` in project root — registered intentional deviations, parsed directly by both axiom gates. Canonical format is the **Active escapes** table keyed on `(Target glob, ELA_### axiom, Lines)` + inclusive ISO `Expires`; `Lines` is `-` (whole file) or `9`/`9,10`/`9-11` (line-scoped). An unexpired match is suppressed, an expired or unregistered one fails. No permanent escapes — use a far-future date. Parser: `bin/lib/escapes.sh`; format: `escapes.md.template` and `css-design-system/references/escape-hatch-registry.md`. `ESCAPES_TODAY=YYYY-MM-DD` pins "today" for reproducible CI; `ESCAPES_FILE` overrides the path.
 - The `commands/` directory is unused — all former commands live as skills in `skills/<name>/SKILL.md` per `skills.md:14-17`
 

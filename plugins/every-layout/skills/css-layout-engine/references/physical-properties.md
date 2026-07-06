@@ -24,3 +24,4 @@ Source: `decisions.md` §13
 | `translateX(-50%)` | Centering (toast, Imposter) | No logical equivalent. Used only in conjunction with `inset-inline-start: 50%`. |
 | SVG `width`/`height` attributes | Inline SVG in HTML | SVG attributes, not CSS properties. `inline-size`/`block-size` do not apply to SVG presentation attributes. |
 | `<img width="" height="">` | HTML attributes for CLS prevention | These are HTML attributes, not CSS. They set intrinsic aspect ratio. |
+| CSS `width`/`height` with `em`/`cap` units | Inline icons (ELC_ICON, per ELP_024) | Typographic units are algorithmic (font-derived), and a square icon must track the cap height on both axes regardless of writing mode. `bin/css-strict.sh` whitelists exactly this pattern. |

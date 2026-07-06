@@ -17,7 +17,7 @@ Create an article layout where:
 
 ```css
 .article-grid {
-  --content: min(var(--measure, 60ch), 100% - var(--gutter, var(--s1)) * 2);
+  --content: min(var(--measure, 65ch), 100% - var(--gutter, var(--s1)) * 2);
   --breakout: minmax(0, calc((var(--breakout-max, 85ch) - var(--content)) / 2));
   --full: minmax(var(--gutter, var(--s1)), 1fr);
 
@@ -103,7 +103,7 @@ Add a fourth zone for subtle breakout:
 
 ```css
 .article-grid {
-  --content: min(var(--measure, 60ch), 100% - var(--gutter, var(--s1)) * 2);
+  --content: min(var(--measure, 65ch), 100% - var(--gutter, var(--s1)) * 2);
   --popout: minmax(0, 2rem);
   --breakout: minmax(0, calc((var(--breakout-max, 85ch) - var(--content)) / 2 - 2rem));
   --full: minmax(var(--gutter, var(--s1)), 1fr);
@@ -130,7 +130,7 @@ Use asymmetric named lines for a margin note gutter:
 
 ```css
 .article-grid--annotated {
-  --content: min(var(--measure, 60ch), 100%);
+  --content: min(var(--measure, 65ch), 100%);
   --note: minmax(0, 20ch);
   --full: minmax(var(--gutter, var(--s1)), 1fr);
 
@@ -153,7 +153,7 @@ Use asymmetric named lines for a margin note gutter:
 
 | Property | Default | Effect |
 |----------|---------|--------|
-| `--measure` | `60ch` | Content column max width |
+| `--measure` | `65ch` | Content column max width |
 | `--breakout-max` | `85ch` | Breakout column max width |
 | `--gutter` | `var(--s1)` | Minimum side padding |
 
@@ -1010,3 +1010,60 @@ Combine with Sidebar for a main+sidebar page that also has sidenotes:
 | Stack | Vertical spacing within article content |
 | Center | Can wrap `.has-sidenotes` for page centering |
 | Sidebar | Page-level layout (optional, see variation) |
+
+---
+
+# Recipe: Fixed-N Equal Columns (Swatch Grid)
+
+## Problem
+
+Exactly N columns are *semantic* — color triplets (INK / PAPER / ACCENT), before/during/after, weekday headers. Grid (ELC_GRID) is wrong because `auto-fit` changes the column count as the container narrows; Switcher (ELC_SWITCHER) is wrong because it stacks below the threshold. The count must never change — the cells must just get narrower.
+
+## Solution
+
+```css
+.columns {
+  display: grid;
+  grid-template-columns: repeat(var(--columns, 3), minmax(0, 1fr));
+  gap: var(--space, var(--s0));
+}
+
+.columns > * {
+  min-inline-size: 0;           /* ELP_033 — wrap, don't clip */
+  overflow-wrap: break-word;    /* unbreakable tokens wrap too */
+}
+```
+
+```html
+<div class="columns" style="--columns: 3; --space: var(--s-2)">
+  <div class="swatch">INK</div>
+  <div class="swatch">PAPER</div>
+  <div class="swatch">ACCENT</div>
+</div>
+```
+
+## Why This Works
+
+1. **`minmax(0, 1fr)`, never bare `1fr`** — bare `1fr` is `minmax(auto, 1fr)`, whose hidden `auto` floor lets a child (an `aspect-ratio` swatch, a long value string) veto shrinking and clip the last column at narrow widths (ELP_033)
+2. **`min-inline-size: 0` on children** — content wraps to more lines instead of pushing the track wider
+3. **The count is a parameter** — `--columns` is instance API (ELP_011); no breakpoint ever changes it (ELP_009)
+4. **Truly intrinsic** — the composition works at any container width with zero media queries (ELA_001)
+
+## When NOT to Use This
+
+If the column count is *presentational* (cards, tiles, galleries), use Grid (ELC_GRID) — dropping columns on narrow screens is the correct behavior there. This recipe is only for counts with meaning.
+
+## Principles Applied
+
+- ELP_033 — Neutralized Auto-Minimum (the reason this recipe exists)
+- ELP_011 — Custom Properties for Configuration
+- ELP_009 — Algorithmic Self-Governing Layout
+- ELP_005 — Modular Scale Spacing
+
+## Primitives Used
+
+| Primitive | Role |
+|-----------|------|
+| (composition) | Fixed-N tracks are a documented composition, not a 14th primitive |
+| Box (ELC_BOX) | Optional cell padding |
+| Stack (ELC_STACK) | Optional vertical rhythm inside cells |

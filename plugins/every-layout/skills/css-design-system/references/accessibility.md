@@ -52,3 +52,18 @@ Hash-linked content (e.g., `#photo-123`) should receive a visible highlight when
 ```
 
 This is an accessibility AND UX pattern -- it tells the user what they just linked to.
+
+## Scrollable Regions (Reel)
+
+A horizontal scroll container (ELC_REEL) whose overflow hides content must be operable by keyboard:
+
+```html
+<div class="reel" tabindex="0" role="region" aria-label="Album covers">
+  …
+</div>
+```
+
+- `tabindex="0"` — makes the scroll container focusable so arrow keys scroll it (do not rely on browser-specific auto-focusable scrollers)
+- `role="region"` + `aria-label` — a focusable element needs a name; `region` surfaces it as a landmark to screen readers
+- The scrollbar stays visible unless an equivalent affordance exists (never hide the only overflow cue)
+- Snap behavior remains a progressive enhancement (ELP_031) and any scroll animation respects reduced motion (ELP_028)

@@ -6,11 +6,6 @@ description: >
   locality, and recommends a migration sequence by impact.
 disable-model-invocation: true
 allowed-tools: Read Grep Glob
-paths:
-  - "**/*.css"
-  - "**/*.scss"
-  - "**/*.astro"
-  - "**/*.html"
 argument-hint: "<directory or file path to scan>"
 ---
 

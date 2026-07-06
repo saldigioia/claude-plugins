@@ -4,14 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Center Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
     .demo-box { background: #e0e0e0; padding: 1rem; }
     .pass { color: green; }
     .fail { color: red; }
+    .measure-narrow-demo { max-inline-size: 12.5rem; }
+    .measure-wide-demo { max-inline-size: 18.75rem; }
+    .center-shaded-1 { background: #f0f0f0; }
+    .center-shaded-2 { background: #f0f0f0; padding-block: 1rem; }
+    .center-shaded-3 { background: #e0e0e0; padding-block: 1rem; }
+    .center-shaded-4 { background: #d0d0d0; padding-block: 1rem; }
+    .center-empty-demo { border: 1px dashed #ccc; min-block-size: 3.125rem; }
   </style>
 </head>
 <body>
@@ -48,8 +55,8 @@
     <h2>Test 4: Intrinsic Centering</h2>
     <p>data-intrinsic should center children by their content width.</p>
     <div class="center" data-intrinsic>
-      <div class="demo-box" style="max-inline-size: 200px">Narrow box</div>
-      <div class="demo-box" style="max-inline-size: 300px">Wider box</div>
+      <div class="demo-box measure-narrow-demo">Narrow box</div>
+      <div class="demo-box measure-wide-demo">Wider box</div>
     </div>
     <p class="pass">✓ Pass if both boxes are horizontally centered at their own widths</p>
   </section>
@@ -69,7 +76,7 @@
   <section class="test-section">
     <h2>Test 6: Content-Box Sizing</h2>
     <p>Gutters should not reduce the content area below --measure.</p>
-    <div class="center" style="--measure: 40ch; --gutter: var(--s3); background: #f0f0f0">
+    <div class="center center-shaded-1" style="--measure: 40ch; --gutter: var(--s3)">
       <div class="demo-box">Content area should be exactly 40ch wide. Large gutters add space outside.</div>
     </div>
     <p class="pass">✓ Pass if content area is 40ch AND gutters are visible outside it</p>
@@ -78,9 +85,9 @@
   <section class="test-section">
     <h2>Test 7: Nested Centers</h2>
     <p>Nested Centers with different measures.</p>
-    <div class="center" style="--measure: 70ch; background: #f0f0f0; padding-block: 1rem">
-      <div class="center" style="--measure: 40ch; background: #e0e0e0; padding-block: 1rem">
-        <div class="center" style="--measure: 20ch; background: #d0d0d0; padding-block: 1rem">
+    <div class="center center-shaded-2" style="--measure: 70ch">
+      <div class="center center-shaded-3" style="--measure: 40ch">
+        <div class="center center-shaded-4" style="--measure: 20ch">
           <p>Innermost (20ch)</p>
         </div>
       </div>
@@ -91,7 +98,7 @@
   <section class="test-section">
     <h2>Test 8: Empty Center</h2>
     <p>Center with no children should not cause errors.</p>
-    <div class="center" style="border: 1px dashed #ccc; min-height: 50px">
+    <div class="center center-empty-demo">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if empty Center renders without errors</p>

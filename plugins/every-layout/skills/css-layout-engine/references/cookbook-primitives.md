@@ -128,7 +128,7 @@ The Center constrains content width and centers it horizontally with gutters.
 
 ```html
 <div class="center">
-  <p>This content is centered with a max-width of 60ch.</p>
+  <p>This content is centered with a 65ch measure.</p>
 </div>
 ```
 

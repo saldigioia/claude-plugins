@@ -4,14 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Stack Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
     .demo-box { background: #e0e0e0; padding: 1rem; }
     .pass { color: green; }
     .fail { color: red; }
+    .stack-empty-demo { border: 1px dashed #ccc; min-block-size: 3.125rem; }
+    .stack-scroll-demo { max-block-size: 18.75rem; overflow: auto; }
+    .stack-outer-demo { border: 2px solid blue; padding: 1rem; }
+    .stack-inner-demo { border: 2px solid red; padding: 1rem; }
+    .stack-contents-demo { display: contents; }
   </style>
 </head>
 <body>
@@ -20,7 +25,7 @@
   <section class="test-section">
     <h2>Test 1: Empty Stack</h2>
     <p>Stack with no children should render with no errors.</p>
-    <div class="stack" style="border: 1px dashed #ccc; min-height: 50px">
+    <div class="stack stack-empty-demo">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if no errors, empty box renders</p>
@@ -38,7 +43,7 @@
   <section class="test-section">
     <h2>Test 3: Many Children (50+)</h2>
     <p>Stack should handle many children without performance issues.</p>
-    <div class="stack" style="max-height: 300px; overflow: auto">
+    <div class="stack stack-scroll-demo">
       <!-- Generated 50 items -->
       <div class="demo-box">Item 1</div><div class="demo-box">Item 2</div>
       <div class="demo-box">Item 3</div><div class="demo-box">Item 4</div>
@@ -69,9 +74,9 @@
   <section class="test-section">
     <h2>Test 5: Nested Stacks</h2>
     <p>Inner Stack should have independent spacing from outer.</p>
-    <div class="stack" style="--space: 2rem; border: 2px solid blue; padding: 1rem">
+    <div class="stack stack-outer-demo" style="--space: 2rem">
       <div class="demo-box">Outer item 1</div>
-      <div class="stack" style="--space: 0.5rem; border: 2px solid red; padding: 1rem">
+      <div class="stack stack-inner-demo" style="--space: 0.5rem">
         <div class="demo-box">Inner item 1</div>
         <div class="demo-box">Inner item 2</div>
         <div class="demo-box">Inner item 3</div>
@@ -107,7 +112,7 @@
     <p>Child with display: contents should be handled.</p>
     <div class="stack">
       <div class="demo-box">Normal item</div>
-      <div style="display: contents">
+      <div class="stack-contents-demo">
         <div class="demo-box">Contents child 1</div>
         <div class="demo-box">Contents child 2</div>
       </div>

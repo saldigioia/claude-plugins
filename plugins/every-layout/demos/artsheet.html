@@ -24,6 +24,7 @@
       --s3: calc(var(--s2) * var(--ratio));
       --s4: calc(var(--s3) * var(--ratio));
       --s5: calc(var(--s4) * var(--ratio));
+      /* explicit override of the 65ch default measure — legal token setting per ELP_006 */
       --measure: 60ch;
       --color-dark: #000;
       --color-light: #fff;
@@ -131,8 +132,8 @@
     }
 
     /* Section headers */
-    .section-header {
-      background-color: var(--color-header) !important;
+    .box.section-header {
+      background-color: var(--color-header);
       --padding: var(--s-1) var(--s1);
       --border-width: 0;
     }
@@ -245,7 +246,7 @@
       z-index: 10;
       min-inline-size: 12rem;
     }
-    .size-range-wrapper[data-open] .imposter {
+    [data-open] .imposter {
       display: block;
     }
     .multiselect-panel {
@@ -319,9 +320,42 @@
       max-inline-size: 5rem;
     }
 
+    /* Style number input */
+    .style-number-input {
+      max-inline-size: 10rem;
+    }
+
+    /* Color value input */
+    .color-value-input {
+      max-inline-size: 8rem;
+    }
+
     /* No-gap stack helper for binding header to body */
     .stack-flush > * + * {
       margin-block-start: 0;
+    }
+
+    /* Sidebar-reversed helper: main content is first-child, sidebar is
+       last-child — mirrors .with-sidebar's flex roles in reverse order */
+    .sidebar-reversed-main {
+      flex-basis: 0;
+      flex-grow: 999;
+      min-inline-size: 60%;
+    }
+    .sidebar-reversed-side {
+      flex-basis: 12rem;
+      flex-grow: 1;
+    }
+
+    /* Dimension panel sub-heading */
+    .dim-panel-heading {
+      font-size: var(--s0);
+      text-transform: uppercase;
+    }
+
+    /* Cluster end-justification helper */
+    .cluster-end {
+      justify-content: flex-end;
     }
   </style>
 </head>
@@ -347,7 +381,7 @@
           <div class="stack" style="--space: var(--s1)">
 
             <!-- CLUSTER (ELC_CLUSTER): horizontal controls row -->
-            <div class="cluster" style="--space: var(--s-1); --align: flex-end">
+            <div class="cluster" style="--space: var(--s-1)">
               <select class="season-select" aria-label="Season">
                 <option>Season</option>
                 <option>Spring</option>
@@ -390,7 +424,7 @@
             <!-- CLUSTER (ELC_CLUSTER): STYLE NUMBER -->
             <div class="cluster" style="--space: var(--s-1)">
               <span class="form-label">Style Number:</span>
-              <input type="text" aria-label="Style number" style="max-inline-size: 10rem">
+              <input type="text" aria-label="Style number" class="style-number-input">
             </div>
 
             <!-- STACK (ELC_STACK): ART DESCRIPTION -->
@@ -426,7 +460,7 @@
                 <div class="cluster" style="--space: var(--s-1)">
                   <input type="checkbox" class="color-checkbox" id="color1-check" checked aria-label="Enable color 1">
                   <label class="form-label" for="color1">Color 1:</label>
-                  <input type="text" id="color1" aria-label="Color 1 value" style="max-inline-size: 8rem">
+                  <input type="text" id="color1" aria-label="Color 1 value" class="color-value-input">
                 </div>
               </div>
             </div>
@@ -437,7 +471,7 @@
               <div class="with-sidebar" data-no-stretch style="--side-width: 12rem; --content-min: 0; --space: var(--s1)">
 
                 <!-- Drop zone (first-child = main content via inline overrides) -->
-                <div style="flex-basis: 0; flex-grow: 999; min-inline-size: 60%">
+                <div class="sidebar-reversed-main">
                   <div class="dropzone" role="region" aria-label="File upload area">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M12 16V4m0 0L8 8m4-4l4 4" stroke-linecap="round" stroke-linejoin="round"/>
@@ -448,9 +482,9 @@
                 </div>
 
                 <!-- Dimension panel (last-child = sidebar on right) -->
-                <div style="flex-basis: 12rem; flex-grow: 1">
+                <div class="sidebar-reversed-side">
                   <div class="stack" style="--space: var(--s-1)">
-                    <strong style="font-size: var(--s0); text-transform: uppercase">Size Range: 0M-24M</strong>
+                    <strong class="dim-panel-heading">Size Range: 0M-24M</strong>
                     <div class="cluster" style="--space: var(--s-1)">
                       <span class="form-label">Height:</span>
                       <input type="text" class="dim-input" aria-label="Height">
@@ -481,7 +515,7 @@
         <!-- BOX (ELC_BOX): white content area -->
         <div class="box section-body">
           <!-- CLUSTER (ELC_CLUSTER): right-aligned button -->
-          <div class="cluster" style="--justify: flex-end">
+          <div class="cluster cluster-end">
             <button type="button" class="btn-generate">Generate Artsheet</button>
           </div>
         </div>

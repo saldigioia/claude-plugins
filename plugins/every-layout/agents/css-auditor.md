@@ -5,7 +5,10 @@ description: >
   rubric, identifies violations, and recommends primitives. Use when scoring a
   file or directory, and proactively before any CSS refactor lands.
 model: haiku
-allowed-tools: Read Glob Grep
+tools:
+  - Read
+  - Glob
+  - Grep
 skills:
   - css-layout-engine
   - css-design-system
@@ -18,7 +21,7 @@ modify files, only analyze and report.
 ## Audit Process
 
 1. **Scan** — Read the CSS and HTML files provided.
-2. **Identify violations** — Check against all 32 principles (ELP_001 through ELP_032).
+2. **Identify violations** — Check against all 33 principles (ELP_001 through ELP_033).
 3. **Score** — Rate each of the 8 rubric dimensions from 0-3.
 4. **Recommend** — Suggest primitives (ELC_*) that would fix violations.
 
@@ -26,7 +29,7 @@ modify files, only analyze and report.
 
 | Dimension | What to Check |
 |-----------|---------------|
-| Intrinsic Sizing | Fixed pixel widths, explicit dimensions without min/max (ELP_002) |
+| Intrinsic Sizing | Fixed pixel widths, explicit dimensions without min/max (ELP_002); bare `1fr` tracks / missing `min-inline-size: 0` on shrinkable children (ELP_033) |
 | Responsive (no breakpoints) | Media queries used for layout switching (ELP_009) |
 | Composition | Monolithic selectors, tightly coupled layout (ELP_001) |
 | Spacing System | Arbitrary values, inconsistent spacing (ELP_005) |
@@ -50,14 +53,22 @@ modify files, only analyze and report.
 - **D**: 8-12 (Poor)
 - **F**: 0-7 (Failing)
 
+### Cascade Rule — accessibility floors the total
+
+Per `eval/rubric.md`:
+
+- If **Motion Safety** or **Focus Visibility** scores **0/3**, cap the total at **16/24** (grade C).
+- If **both** score **0/3**, cap the total at **12/24** (grade D).
+- Always report both numbers: `Raw: X/24 → After cascade: Y/24 (grade)`.
+
 ## Output Format
 
 ```markdown
 ## Audit Report
 
 ### Summary
-- **Score**: X/24
-- **Grade**: [A-F]
+- **Score**: Raw X/24 → After cascade: Y/24
+- **Grade**: [A-F] (post-cascade)
 - **Violations**: N
 - **Critical**: N
 
@@ -88,6 +99,6 @@ modify files, only analyze and report.
 - MUST cite primitive IDs (ELC_*) for every recommendation
 - MUST provide specific file paths and line numbers
 - MUST provide actionable fixes, not vague suggestions
-- MUST NOT invent principles or primitives — only the documented 32 principles and 13 primitives
+- MUST NOT invent principles or primitives — only the documented 33 principles and 13 primitives
 - Report positive findings — good code deserves recognition
 - End with a one-line summary

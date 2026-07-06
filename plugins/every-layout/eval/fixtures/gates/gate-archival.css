@@ -1,0 +1,27 @@
+/* Gate fixture — ELA_006 archival checks (css-strict.sh --archival).
+   EXPECTED with --archival: exactly 3 ELA_006 violations —
+     the content-visibility auto declaration on primary content,
+     brace-nesting depth over 3 (the .c rule inside .b inside .a inside a
+     media block), and the negative supports-query gate at the bottom.
+   EXPECTED without --archival: 0 violations (PASS) — every ELA_006 check is
+   opt-in, and nothing here trips the base ELA_001–004 checks. */
+
+.main-content {
+  content-visibility: auto;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .a {
+    .b {
+      .c {
+        color: var(--br-color-accent, #06c);
+      }
+    }
+  }
+}
+
+@supports not (display: grid) {
+  .fallback-note {
+    color: var(--br-color-text, #000);
+  }
+}

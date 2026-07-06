@@ -813,3 +813,61 @@ The fluid type scale (`implementations/vanilla/fluid-type.css`) uses `clamp()` w
 3. Pinch-zoom on mobile — zoom works?
 4. Check viewport meta — no `maximum-scale` or `user-scalable`?
 5. Search CSS for `px` font sizes — should find none (except borders and shadows)
+
+---
+
+# Anti-Pattern: Bare Fraction Tracks (The Auto-Minimum Floor)
+
+## The Problem
+
+`1fr` reads as "share the space equally" but actually means `minmax(auto, 1fr)`. The hidden `auto` **floor** — not the `1fr` ceiling — lets any child refuse to shrink below its min-content size. When the children carry `aspect-ratio` or long unbreakable strings, their combined minimums can exceed the container: the grid overflows, and an ancestor's `overflow: hidden` clips the last column. The signature is **"works wide, clips narrow"** — invisible at desktop widths, broken the moment a card or viewport gets small.
+
+`aspect-ratio` makes it worse: when a label wraps to two lines the item grows taller, and the ratio transfers that extra height back into a *larger minimum width*.
+
+## Bad Example
+
+```css
+/* DON'T DO THIS — three equal columns that clip at narrow widths */
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);   /* == minmax(auto, 1fr) */
+}
+.swatch {
+  aspect-ratio: 2 / 1;                     /* feeds height back into min width */
+}
+```
+
+## Why It's Bad
+
+1. **Hidden behavior**: nothing in `1fr` says "auto floor" — the bug is invisible in the code
+2. **Width-dependent**: surfaces only at certain container widths, so it escapes review
+3. **Compounds with aspect-ratio**: wrapped labels inflate the minimum via the ratio
+4. **Invites the wrong fix**: the tempting patch is a media query (ELP_009 violation)
+
+## The Fix
+
+Give every fraction track an explicit floor, and let children shrink:
+
+```css
+.swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));  /* explicit zero floor */
+}
+.swatch-grid > * {
+  min-inline-size: 0;   /* children wrap instead of vetoing shrink */
+}
+```
+
+Labels now wrap to two lines when space is tight instead of forcing an overflow. Add `overflow-wrap: break-word` if content can contain unbreakable tokens.
+
+## Legitimate Uses
+
+The `auto` floor (or an explicit floor) is *correct* when not shrinking is the point:
+
+- **Reel (ELC_REEL)** children use `flex: 0 0 auto` — scrolling is the overflow strategy
+- **Sidebar (ELC_SIDEBAR)** content pane keeps `min-inline-size: var(--content-min)` — that explicit floor *is* the switching mechanism (and an explicit minimum already replaces `auto`)
+- **Grid (ELC_GRID)** canonical tracks use `minmax(min(var(--min), 100%), 1fr)` — a definite floor that satisfies ELP_033 by construction
+
+## Reviewer Heuristic
+
+> If a rule lays out children with `1fr` tracks **or** flex, and a child can contain an image, an `aspect-ratio`, or a long unbreakable string: confirm the track is `minmax(0|definite, …)` **or** the child has `min-inline-size: 0`. If neither is present, it will clip at some width. (ELP_033)

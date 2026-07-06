@@ -2,6 +2,8 @@
 
 All 13 Every Layout primitives as Vue 3 components with Composition API, plus shared types and barrel export.
 
+**The stylesheet is loaded once per app** (see `references/vanilla.md`; `demos/every-layout.css` is its built artifact). These ports do not carry CSS — they render a primitive's class name and bind only the `--custom-property` parameters that class reads. Boolean variants become `data-*` attributes the stylesheet already selects on. See "Why no style objects" below.
+
 ## Shared Types (types.ts)
 
 ```typescript
@@ -23,7 +25,6 @@ export interface BaseLayoutProps {
 export interface StackProps extends BaseLayoutProps {
   space?: string;
   recursive?: boolean;
-  splitAfter?: number;
 }
 
 // Box
@@ -76,6 +77,7 @@ export interface CoverProps extends BaseLayoutProps {
 export interface GridProps extends BaseLayoutProps {
   min?: string;
   space?: string;
+  ragged?: boolean;
 }
 
 // Frame
@@ -106,9 +108,50 @@ export interface IconProps extends BaseLayoutProps {
 
 // Container
 export interface ContainerProps extends BaseLayoutProps {
-  name?: string;
+  containerName?: string;
 }
 ```
+
+## Stack.vue
+
+```vue
+<!--
+  Stack Component
+  Vertical spacing between sibling elements
+-->
+<script setup lang="ts">
+import type { StackProps } from './types';
+
+const props = withDefaults(defineProps<StackProps>(), {
+  as: 'div',
+  space: 'var(--s1)',
+  recursive: false,
+});
+</script>
+
+<template>
+  <component
+    :is="as"
+    :class="['stack', $attrs.class]"
+    :data-recursive="recursive || undefined"
+    :style="{ '--space': space }"
+  >
+    <slot />
+  </component>
+</template>
+```
+
+A child that should absorb remaining space (the old `splitAfter` prop) carries the marker attribute directly — no numeric index prop, no runtime CSS:
+
+```vue
+<Stack>
+  <p>First</p>
+  <p data-split-after>Pushes the rest down</p>
+  <p>Last</p>
+</Stack>
+```
+
+`.stack > [data-split-after] { margin-block-end: auto }` lives in the stylesheet (`vanilla.md`).
 
 ## Box.vue
 
@@ -118,7 +161,6 @@ export interface ContainerProps extends BaseLayoutProps {
   Padded container with optional border
 -->
 <script setup lang="ts">
-import { computed } from 'vue';
 import type { BoxProps } from './types';
 
 const props = withDefaults(defineProps<BoxProps>(), {
@@ -127,21 +169,14 @@ const props = withDefaults(defineProps<BoxProps>(), {
   borderWidth: 'var(--border-thin)',
   invert: false,
 });
-
-const styles = computed(() => ({
-  padding: props.padding,
-  borderWidth: props.borderWidth,
-  borderStyle: 'solid',
-  color: props.invert ? 'var(--color-light)' : 'var(--color-dark)',
-  backgroundColor: props.invert ? 'var(--color-dark)' : 'var(--color-light)',
-}));
 </script>
 
 <template>
   <component
     :is="as"
-    :class="['box', { 'box--invert': invert }, $attrs.class]"
-    :style="styles"
+    :class="['box', $attrs.class]"
+    :data-invert="invert || undefined"
+    :style="{ '--padding': padding, '--border-width': borderWidth }"
   >
     <slot />
   </component>
@@ -156,7 +191,6 @@ const styles = computed(() => ({
   Horizontal centering with max-width constraint
 -->
 <script setup lang="ts">
-import { computed } from 'vue';
 import type { CenterProps } from './types';
 
 const props = withDefaults(defineProps<CenterProps>(), {
@@ -166,23 +200,16 @@ const props = withDefaults(defineProps<CenterProps>(), {
   intrinsic: false,
   andText: false,
 });
-
-const styles = computed(() => ({
-  boxSizing: 'content-box',
-  maxInlineSize: props.max,
-  marginInline: 'auto',
-  paddingInline: props.gutters,
-  ...(props.intrinsic && {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-  }),
-  ...(props.andText && { textAlign: 'center' }),
-}));
 </script>
 
 <template>
-  <component :is="as" :class="['center', $attrs.class]" :style="styles">
+  <component
+    :is="as"
+    :class="['center', $attrs.class]"
+    :data-intrinsic="intrinsic || undefined"
+    :data-text="andText || undefined"
+    :style="{ '--measure': max, '--gutter': gutters }"
+  >
     <slot />
   </component>
 </template>
@@ -196,7 +223,6 @@ const styles = computed(() => ({
   Flexible wrapping horizontal layout
 -->
 <script setup lang="ts">
-import { computed } from 'vue';
 import type { ClusterProps } from './types';
 
 const props = withDefaults(defineProps<ClusterProps>(), {
@@ -205,50 +231,84 @@ const props = withDefaults(defineProps<ClusterProps>(), {
   justify: 'flex-start',
   align: 'center',
 });
-
-const styles = computed(() => ({
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: props.space,
-  justifyContent: props.justify,
-  alignItems: props.align,
-}));
 </script>
 
 <template>
-  <component :is="as" :class="['cluster', $attrs.class]" :style="styles">
+  <component
+    :is="as"
+    :class="['cluster', $attrs.class]"
+    :style="{ '--space': space, '--justify': justify, '--align': align }"
+  >
     <slot />
   </component>
 </template>
 ```
 
-## Container.vue
+## Sidebar.vue
 
 ```vue
 <!--
-  Container Component
-  Container query context wrapper
+  Sidebar Component
+  Two-element layout with intrinsic switching
 -->
 <script setup lang="ts">
-import { computed } from 'vue';
-import type { ContainerProps } from './types';
+import type { SidebarProps } from './types';
 
-const props = withDefaults(defineProps<ContainerProps>(), {
+const props = withDefaults(defineProps<SidebarProps>(), {
   as: 'div',
+  side: 'left',
+  sideWidth: '20rem',
+  contentMin: '50%',
+  space: 'var(--s1)',
+  noStretch: false,
 });
-
-const styles = computed(() => ({
-  containerType: 'inline-size',
-  ...(props.name && { containerName: props.name }),
-}));
 </script>
 
 <template>
-  <component :is="as" :class="['container', $attrs.class]" :style="styles">
+  <component
+    :is="as"
+    :class="['with-sidebar', $attrs.class]"
+    :data-side="side === 'right' ? 'right' : undefined"
+    :data-no-stretch="noStretch || undefined"
+    :style="{ '--side-width': sideWidth, '--content-min': contentMin, '--space': space }"
+  >
     <slot />
   </component>
 </template>
 ```
+
+The stylesheet's `[data-side="right"]` variant swaps which child (first vs. last) receives `--side-width`; see `vanilla.md` for the selector pair.
+
+## Switcher.vue
+
+```vue
+<!--
+  Switcher Component
+  Equal columns that switch to stack below threshold
+-->
+<script setup lang="ts">
+import type { SwitcherProps } from './types';
+
+const props = withDefaults(defineProps<SwitcherProps>(), {
+  as: 'div',
+  threshold: '30rem',
+  space: 'var(--s1)',
+});
+</script>
+
+<template>
+  <component
+    :is="as"
+    :class="['switcher', $attrs.class]"
+    :data-limit="limit"
+    :style="{ '--threshold': threshold, '--space': space }"
+  >
+    <slot />
+  </component>
+</template>
+```
+
+`data-limit` takes the integer value directly (`data-limit="2"`) — the stylesheet ships `[data-limit="2"]`, `[data-limit="3"]`, and `[data-limit="4"]` selectors (`vanilla.md`). Values outside that range fall back to the unlimited default; add a new selector to the stylesheet (not to this component) to support another limit.
 
 ## Cover.vue
 
@@ -258,41 +318,65 @@ const styles = computed(() => ({
   Vertical centering with optional header/footer
 -->
 <script setup lang="ts">
-import { computed, useId } from 'vue';
 import type { CoverProps } from './types';
 
 const props = withDefaults(defineProps<CoverProps>(), {
   as: 'div',
-  centered: '[data-centered]',
   space: 'var(--s1)',
   minHeight: '100vh',
   noPad: false,
 });
-
-const id = useId();
-
-const styles = computed(() => ({
-  '--min-height': props.minHeight,
-  '--space': props.space,
-  display: 'flex',
-  flexDirection: 'column',
-  minBlockSize: props.minHeight,
-  ...(!props.noPad && { padding: props.space }),
-}));
-
-const childCss = computed(() => `
-  #${id} > * { margin-block: var(--space, var(--s1)); }
-  #${id} > :first-child:not(${props.centered}) { margin-block-start: 0; }
-  #${id} > :last-child:not(${props.centered}) { margin-block-end: 0; }
-  #${id} > ${props.centered} { margin-block: auto; }
-`);
 </script>
 
 <template>
-  <component :is="as" :id="id" :class="['cover', $attrs.class]" :style="styles">
+  <component
+    :is="as"
+    :class="['cover', $attrs.class]"
+    :data-no-pad="noPad || undefined"
+    :style="{ '--space': space, '--min-height': minHeight }"
+  >
     <slot />
   </component>
-  <component :is="'style'">{{ childCss }}</component>
+</template>
+```
+
+The element that should be pinned to the vertical center (the old `centered` prop, a selector string) is now a marker on the child itself, matching the stylesheet's default `[data-centered]` selector:
+
+```vue
+<Cover>
+  <header>Header</header>
+  <h1 data-centered>Centered Title</h1>
+  <footer>Footer</footer>
+</Cover>
+```
+
+## Grid.vue
+
+```vue
+<!--
+  Grid Component
+  Responsive grid with intrinsic sizing
+-->
+<script setup lang="ts">
+import type { GridProps } from './types';
+
+const props = withDefaults(defineProps<GridProps>(), {
+  as: 'div',
+  min: '15rem',
+  space: 'var(--s1)',
+  ragged: false,
+});
+</script>
+
+<template>
+  <component
+    :is="as"
+    :class="['grid', $attrs.class]"
+    :data-ragged="ragged || undefined"
+    :style="{ '--min': min, '--space': space }"
+  >
+    <slot />
+  </component>
 </template>
 ```
 
@@ -304,7 +388,7 @@ const childCss = computed(() => `
   Aspect ratio container for media
 -->
 <script setup lang="ts">
-import { computed, useId } from 'vue';
+import { computed } from 'vue';
 import type { FrameProps } from './types';
 
 const props = withDefaults(defineProps<FrameProps>(), {
@@ -312,150 +396,17 @@ const props = withDefaults(defineProps<FrameProps>(), {
   ratio: '16/9',
 });
 
-const id = useId();
-
-const styles = computed(() => ({
-  aspectRatio: props.ratio,
-  overflow: 'hidden',
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-}));
-
-const childCss = `
-  #${id} > img,
-  #${id} > video {
-    inline-size: 100%;
-    block-size: 100%;
-    object-fit: cover;
-  }
-`;
-</script>
-
-<template>
-  <component :is="as" :id="id" :class="['frame', $attrs.class]" :style="styles">
-    <slot />
-  </component>
-  <component :is="'style'">{{ childCss }}</component>
-</template>
-```
-
-## Grid.vue
-
-```vue
-<!--
-  Grid Component
-  Responsive grid with intrinsic sizing
--->
-<script setup lang="ts">
-import { computed } from 'vue';
-import type { GridProps } from './types';
-
-const props = withDefaults(defineProps<GridProps>(), {
-  as: 'div',
-  min: '15rem',
-  space: 'var(--s1)',
+// The stylesheet's .frame reads --n and --d (aspect-ratio: var(--n, 16) / var(--d, 9)),
+// not a single --ratio custom property, so the "16/9"-style prop is split here.
+// This computed returns only --n/--d — no other keys.
+const params = computed(() => {
+  const [n, d] = props.ratio.split('/').map((part) => part.trim());
+  return { '--n': n, '--d': d };
 });
-
-const styles = computed(() => ({
-  display: 'grid',
-  gap: props.space,
-  gridTemplateColumns: `repeat(auto-fit, minmax(min(${props.min}, 100%), 1fr))`,
-}));
 </script>
 
 <template>
-  <component :is="as" :class="['grid', $attrs.class]" :style="styles">
-    <slot />
-  </component>
-</template>
-```
-
-## Icon.vue
-
-```vue
-<!--
-  Icon Component
-  Inline SVG icon sizing and alignment
--->
-<script setup lang="ts">
-import { computed, useId } from 'vue';
-import type { IconProps } from './types';
-
-const props = withDefaults(defineProps<IconProps>(), {
-  as: 'span',
-  space: '0.5em',
-});
-
-const id = useId();
-
-const styles = computed(() => ({
-  '--space': props.space,
-  display: 'inline-flex',
-  alignItems: 'baseline',
-}));
-
-const childCss = `
-  #${id} .icon {
-    height: 0.75em;
-    height: 1cap;
-    width: 0.75em;
-    width: 1cap;
-  }
-  #${id} .icon {
-    margin-inline-end: var(--space, 0.5em);
-  }
-`;
-</script>
-
-<template>
-  <component
-    :is="as"
-    :id="id"
-    :class="['with-icon', $attrs.class]"
-    :style="styles"
-    :role="label ? 'img' : undefined"
-    :aria-label="label"
-  >
-    <slot />
-  </component>
-  <component :is="'style'">{{ childCss }}</component>
-</template>
-```
-
-## Imposter.vue
-
-```vue
-<!--
-  Imposter Component
-  Superimposed/overlay positioning
--->
-<script setup lang="ts">
-import { computed } from 'vue';
-import type { ImposterProps } from './types';
-
-const props = withDefaults(defineProps<ImposterProps>(), {
-  as: 'div',
-  breakout: false,
-  margin: '0px',
-  fixed: false,
-});
-
-const styles = computed(() => ({
-  position: props.fixed ? 'fixed' : 'absolute',
-  insetBlockStart: '50%',
-  insetInlineStart: '50%',
-  transform: 'translate(-50%, -50%)',
-  ...(!props.breakout && {
-    overflow: 'auto',
-    maxInlineSize: `calc(100% - (${props.margin} * 2))`,
-    maxBlockSize: `calc(100% - (${props.margin} * 2))`,
-  }),
-}));
-</script>
-
-<template>
-  <component :is="as" :class="['imposter', $attrs.class]" :style="styles">
+  <component :is="as" :class="['frame', $attrs.class]" :style="params">
     <slot />
   </component>
 </template>
@@ -469,7 +420,6 @@ const styles = computed(() => ({
   Horizontal scrolling container
 -->
 <script setup lang="ts">
-import { computed, useId } from 'vue';
 import type { ReelProps } from './types';
 
 const props = withDefaults(defineProps<ReelProps>(), {
@@ -479,205 +429,104 @@ const props = withDefaults(defineProps<ReelProps>(), {
   height: 'auto',
   noBar: false,
 });
+</script>
 
-const id = useId();
+<template>
+  <component
+    :is="as"
+    :class="['reel', $attrs.class]"
+    :data-no-bar="noBar || undefined"
+    :style="{ '--item-width': itemWidth, '--space': space, '--height': height }"
+  >
+    <slot />
+  </component>
+</template>
+```
 
-const styles = computed(() => ({
-  '--item-width': props.itemWidth,
-  '--space': props.space,
-  '--height': props.height,
-  display: 'flex',
-  blockSize: props.height,
-  overflowX: 'auto',
-  overflowY: 'hidden',
-  ...(props.noBar && { scrollbarWidth: 'none' }),
-}));
+## Imposter.vue
 
-const childCss = computed(() => {
-  let css = `
-    #${id} > * { flex: 0 0 var(--item-width, auto); }
-    #${id} > img { block-size: 100%; flex-basis: auto; width: auto; }
-    #${id} > * + * { margin-inline-start: var(--space, var(--s1)); }
-  `;
-  if (props.noBar) {
-    css += `#${id}::-webkit-scrollbar { display: none; }`;
-  }
-  return css;
+```vue
+<!--
+  Imposter Component
+  Superimposed/overlay positioning
+-->
+<script setup lang="ts">
+import type { ImposterProps } from './types';
+
+const props = withDefaults(defineProps<ImposterProps>(), {
+  as: 'div',
+  breakout: false,
+  margin: '0px',
+  fixed: false,
 });
 </script>
 
 <template>
   <component
     :is="as"
-    :id="id"
-    :class="['reel', { 'reel--no-bar': noBar }, $attrs.class]"
-    :style="styles"
+    :class="['imposter', $attrs.class]"
+    :data-contain="!breakout || undefined"
+    :data-fixed="fixed || undefined"
+    :style="{ '--margin': margin }"
   >
     <slot />
   </component>
-  <component :is="'style'">{{ childCss }}</component>
 </template>
 ```
 
-## Sidebar.vue
+## Icon.vue
 
 ```vue
 <!--
-  Sidebar Component
-  Two-element layout with intrinsic switching
+  Icon Component
+  Inline SVG icon sizing and alignment
 -->
 <script setup lang="ts">
-import { computed, useId } from 'vue';
-import type { SidebarProps } from './types';
+import type { IconProps } from './types';
 
-const props = withDefaults(defineProps<SidebarProps>(), {
-  as: 'div',
-  side: 'left',
-  sideWidth: '20rem',
-  contentMin: '50%',
-  space: 'var(--s1)',
-  noStretch: false,
-});
-
-const id = useId();
-
-const styles = computed(() => ({
-  '--side-width': props.sideWidth,
-  '--content-min': props.contentMin,
-  '--space': props.space,
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: props.space,
-  ...(props.noStretch && { alignItems: 'flex-start' }),
-}));
-
-const childCss = computed(() => {
-  const sideChild = props.side === 'left' ? 'first' : 'last';
-  const contentChild = props.side === 'left' ? 'last' : 'first';
-  return `
-    #${id} > * { flex-grow: 1; }
-    #${id} > :${sideChild}-child { flex-basis: var(--side-width); }
-    #${id} > :${contentChild}-child {
-      flex-basis: 0;
-      flex-grow: 999;
-      min-inline-size: var(--content-min);
-    }
-  `;
+const props = withDefaults(defineProps<IconProps>(), {
+  as: 'span',
+  space: '0.5em',
 });
 </script>
 
 <template>
   <component
     :is="as"
-    :id="id"
-    :class="['with-sidebar', { 'with-sidebar--no-stretch': noStretch }, $attrs.class]"
-    :style="styles"
+    :class="['with-icon', $attrs.class]"
+    :role="label ? 'img' : undefined"
+    :aria-label="label"
+    :style="{ '--space': space }"
   >
     <slot />
   </component>
-  <component :is="'style'">{{ childCss }}</component>
 </template>
 ```
 
-## Stack.vue
+## Container.vue
 
 ```vue
 <!--
-  Stack Component
-  Vertical spacing between sibling elements
+  Container Component
+  Container query context wrapper
 -->
 <script setup lang="ts">
-import { computed, useId } from 'vue';
-import type { StackProps } from './types';
+import type { ContainerProps } from './types';
 
-const props = withDefaults(defineProps<StackProps>(), {
+const props = withDefaults(defineProps<ContainerProps>(), {
   as: 'div',
-  space: 'var(--s1)',
-  recursive: false,
-});
-
-const id = useId();
-
-const styles = computed(() => ({
-  '--space': props.space,
-  display: 'flex',
-  flexDirection: 'column',
-  justifyContent: 'flex-start',
-}));
-
-const childCss = computed(() => {
-  let css = `
-    #${id} > * { margin-block: 0; }
-    #${id} > * + * { margin-block-start: var(--space, 1.5rem); }
-  `;
-  if (props.recursive) {
-    css += `#${id} * + * { margin-block-start: var(--space, 1.5rem); }`;
-  }
-  if (props.splitAfter) {
-    css += `#${id} > :nth-child(${props.splitAfter}) { margin-block-end: auto; }`;
-  }
-  return css;
 });
 </script>
 
 <template>
-  <component :is="as" :id="id" :class="['stack', $attrs.class]" :style="styles">
+  <component
+    :is="as"
+    :class="['container', $attrs.class]"
+    :data-name="containerName || undefined"
+    :style="containerName ? { '--container-name': containerName } : undefined"
+  >
     <slot />
   </component>
-  <component :is="'style'">{{ childCss }}</component>
-</template>
-```
-
-## Switcher.vue
-
-```vue
-<!--
-  Switcher Component
-  Equal columns that switch to stack below threshold
--->
-<script setup lang="ts">
-import { computed, useId } from 'vue';
-import type { SwitcherProps } from './types';
-
-const props = withDefaults(defineProps<SwitcherProps>(), {
-  as: 'div',
-  threshold: '30rem',
-  space: 'var(--s1)',
-});
-
-const id = useId();
-
-const styles = computed(() => ({
-  '--threshold': props.threshold,
-  '--space': props.space,
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: props.space,
-}));
-
-const childCss = computed(() => {
-  let css = `
-    #${id} > * {
-      flex-grow: 1;
-      flex-basis: calc((var(--threshold, 30rem) - 100%) * 999);
-    }
-  `;
-  if (props.limit) {
-    css += `
-    #${id} > :nth-last-child(n+${props.limit + 1}),
-    #${id} > :nth-last-child(n+${props.limit + 1}) ~ * {
-      flex-basis: 100%;
-    }`;
-  }
-  return css;
-});
-</script>
-
-<template>
-  <component :is="as" :id="id" :class="['switcher', $attrs.class]" :style="styles">
-    <slot />
-  </component>
-  <component :is="'style'">{{ childCss }}</component>
 </template>
 ```
 
@@ -724,20 +573,24 @@ export type {
 
 ## Prop/Slot API Summary
 
-All Vue components use `<script setup>` with `withDefaults(defineProps<T>())`, accept an `as` prop for polymorphic rendering, and provide a default `<slot />` for children.
+All Vue components use `<script setup>` with `withDefaults(defineProps<T>())`, accept an `as` prop for polymorphic rendering, and provide a default `<slot />` for children. Every prop maps to either a `--custom-property` bound via `:style` or a `data-*` attribute the stylesheet already selects on — no component owns a declaration object.
 
-| Component | Props | Defaults |
-|-----------|-------|----------|
-| Box | `padding`, `borderWidth`, `invert` | `var(--s1)`, `var(--border-thin)`, `false` |
-| Center | `max`, `gutters`, `intrinsic`, `andText` | `var(--measure)`, `var(--s1)`, `false`, `false` |
-| Cluster | `space`, `justify`, `align` | `var(--s1)`, `flex-start`, `center` |
-| Container | `name` | `undefined` |
-| Cover | `centered`, `space`, `minHeight`, `noPad` | `[data-centered]`, `var(--s1)`, `100vh`, `false` |
-| Frame | `ratio` | `16/9` |
-| Grid | `min`, `space` | `15rem`, `var(--s1)` |
-| Icon | `space`, `label` | `0.5em`, `undefined` |
-| Imposter | `breakout`, `margin`, `fixed` | `false`, `0px`, `false` |
-| Reel | `itemWidth`, `space`, `height`, `noBar` | `auto`, `var(--s1)`, `auto`, `false` |
-| Sidebar | `side`, `sideWidth`, `contentMin`, `space`, `noStretch` | `left`, `20rem`, `50%`, `var(--s1)`, `false` |
-| Stack | `space`, `recursive`, `splitAfter` | `var(--s1)`, `false`, `undefined` |
-| Switcher | `threshold`, `space`, `limit` | `30rem`, `var(--s1)`, `undefined` |
+| Component | Props | Defaults | `--param` / `data-*` |
+|-----------|-------|----------|-----------------------|
+| Box | `padding`, `borderWidth`, `invert` | `var(--s1)`, `var(--border-thin)`, `false` | `--padding`, `--border-width` / `data-invert` |
+| Center | `max`, `gutters`, `intrinsic`, `andText` | `var(--measure)`, `var(--s1)`, `false`, `false` | `--measure`, `--gutter` / `data-intrinsic`, `data-text` |
+| Cluster | `space`, `justify`, `align` | `var(--s1)`, `flex-start`, `center` | `--space`, `--justify`, `--align` |
+| Container | `containerName` | `undefined` | `--name` / `data-name` |
+| Cover | `space`, `minHeight`, `noPad` | `var(--s1)`, `100vh`, `false` | `--space`, `--min-height` / `data-no-pad` (mark the centered child with `data-centered`) |
+| Frame | `ratio` | `16/9` | `--n`, `--d` (parsed from `ratio`) |
+| Grid | `min`, `space`, `ragged` | `15rem`, `var(--s1)`, `false` | `--min`, `--space` / `data-ragged` |
+| Icon | `space`, `label` | `0.5em`, `undefined` | `--space` |
+| Imposter | `breakout`, `margin`, `fixed` | `false`, `0px`, `false` | `--margin` / `data-contain`, `data-fixed` |
+| Reel | `itemWidth`, `space`, `height`, `noBar` | `auto`, `var(--s1)`, `auto`, `false` | `--item-width`, `--space`, `--height` / `data-no-bar` |
+| Sidebar | `side`, `sideWidth`, `contentMin`, `space`, `noStretch` | `left`, `20rem`, `50%`, `var(--s1)`, `false` | `--side-width`, `--content-min`, `--space` / `data-side`, `data-no-stretch` |
+| Stack | `space`, `recursive` | `var(--s1)`, `false` | `--space` / `data-recursive` (mark a child `data-split-after` to absorb trailing space) |
+| Switcher | `threshold`, `space`, `limit` | `30rem`, `var(--s1)`, `undefined` | `--threshold`, `--space` / `data-limit` |
+
+## Why no style objects
+
+Axiom `ELA_005` (CSS-Dominant Composition) reserves styling for CSS: a framework runtime emits classes and parameters, never declarations. A Vue `computed(() => ({ padding, borderWidth, color, ... }))` object bound via `:style` is CSS-in-JS by another name — it just moved the declaration from a stylesheet into a script block, and it duplicates rules the shared stylesheet already owns. Every component above binds only `--custom-property` keys, so `:style="{...}"` never carries a bespoke declaration. `bin/ports-lint.sh` enforces this mechanically: it parses every `:style="{...}"` binding in `.vue` source and fails on any key that doesn't start with `--`.

@@ -1,6 +1,6 @@
 # CSS Design System Principles
 
-> Design-system principles that were previously numbered within the layout-engine catalog but belong semantically to theming, tokens, shadows, and icon sizing. IDs are preserved to keep existing cross-references valid. The `css-layout-engine/references/principles.md` file retains pointer stubs at each relocated slot.
+> Design-system principles that were previously numbered within the layout-engine catalog but belong semantically to theming, tokens, shadows, and icon sizing. IDs are preserved to keep existing cross-references valid. The `css-layout-engine/references/principles.md` file retains pointer stubs at each relocated slot. This file defines ELP_016–018 and ELP_022–024 only; the complete ELP_001–033 catalog spans both files.
 
 ---
 

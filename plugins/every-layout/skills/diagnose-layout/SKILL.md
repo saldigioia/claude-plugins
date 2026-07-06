@@ -20,6 +20,7 @@ Canonical inputs before diagnosing:
 
 - Primitive definition: `skills/css-layout-engine/references/primitives.md` — the `applies_when`, `fails_when`, and custom-property defaults for the primitive in question.
 - Hooks: `skills/css-layout-engine/references/hooks.md` — how each primitive responds to its custom properties.
+- For clipping/overflow-at-narrow-widths symptoms: ELP_033 (Neutralized Auto-Minimum) in `references/principles.md` — check bare `1fr` tracks and the `min-width: auto` floor before anything else.
 
 ## Report shape
 

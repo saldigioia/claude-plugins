@@ -142,7 +142,7 @@ Related principles: `ELP_006`
 ### CSS Recipe
 
 ```css
-.center { box-sizing: content-box; max-inline-size: var(--measure); margin-inline: auto; padding-inline: var(--s1) }
+.center { box-sizing: content-box; max-inline-size: var(--measure, 65ch); margin-inline: auto; padding-inline: var(--s1) }
 ```
 
 ### Custom Properties
@@ -201,7 +201,8 @@ Related principles: `ELP_012`
 ### CSS Recipe
 
 ```css
-.cluster { display: flex; flex-wrap: wrap; gap: var(--space, 1rem); justify-content: flex-start; align-items: center }
+.cluster { display: flex; flex-wrap: wrap; gap: var(--space, 1rem); justify-content: var(--justify, flex-start); align-items: var(--align, center) }
+.cluster > * { min-inline-size: 0 } /* ELP_033 — children wrap instead of overflowing */
 ```
 
 ### Custom Properties
@@ -259,9 +260,9 @@ Related principles: `ELP_009`, `ELP_002`
 ### CSS Recipe
 
 ```css
-.with-sidebar { display: flex; flex-wrap: wrap; gap: var(--s1) }
-.with-sidebar > :first-child { flex-basis: 20rem; flex-grow: 1 }
-.with-sidebar > :last-child { flex-basis: 0; flex-grow: 999; min-inline-size: 50% }
+.with-sidebar { display: flex; flex-wrap: wrap; gap: var(--space, var(--s1)) }
+.with-sidebar > :first-child { flex-basis: var(--side-width, 20rem); flex-grow: 1; min-inline-size: 0 /* ELP_033 */ }
+.with-sidebar > :last-child { flex-basis: 0; flex-grow: 999; min-inline-size: var(--content-min, 50%) }
 ```
 
 ### Custom Properties
@@ -321,8 +322,8 @@ Related principles: `ELP_009`, `ELP_002`
 ### CSS Recipe
 
 ```css
-.switcher { display: flex; flex-wrap: wrap; gap: var(--s1) }
-.switcher > * { flex-grow: 1; flex-basis: calc((var(--threshold, 30rem) - 100%) * 999) }
+.switcher { display: flex; flex-wrap: wrap; gap: var(--space, var(--s1)) }
+.switcher > * { flex-grow: 1; flex-basis: calc((var(--threshold, 30rem) - 100%) * 999); min-inline-size: 0 /* ELP_033 */ }
 ```
 
 ### Custom Properties
@@ -443,7 +444,8 @@ Related principles: `ELP_009`, `ELP_012`, `ELP_021`
 ### CSS Recipe
 
 ```css
-.grid { display: grid; gap: var(--s1); grid-template-columns: repeat(auto-fit, minmax(min(var(--min, 15rem), 100%), 1fr)) }
+.grid { display: grid; gap: var(--space, var(--s1)); grid-template-columns: repeat(auto-fit, minmax(min(var(--min, 15rem), 100%), 1fr)) }
+.grid > * { min-inline-size: 0 } /* ELP_033 — the track's min() floor is definite, but children still need shrink permission */
 ```
 
 ### Custom Properties
@@ -554,9 +556,9 @@ Tags: `flow`, `containment`
 
 Sources: Chapter `ch_19`, Window `w01`
 
-HTML expectations: Container with multiple items (cards, images, links)
+HTML expectations: Container with multiple items (cards, images, links). The scroll container itself carries `tabindex="0"`, `role="region"`, and an accessible name (`aria-label`) so keyboard users can reach and scroll the overflow.
 
-Related principles: `ELP_015`
+Related principles: `ELP_015`, `ELP_027`
 
 ### CSS Recipe
 
@@ -587,6 +589,7 @@ Related principles: `ELP_015`
 
 - **Items shrink** -- No overflow. Fix: Add `flex-shrink: 0`.
 - **Page scrolls** -- Bad UX. Fix: Contain overflow on Reel.
+- **Keyboard users cannot scroll** -- Overflowed items are unreachable without a pointer. Fix: `tabindex="0"` + `role="region"` + `aria-label` on the reel element (accessibility is tier 1 in the constitution).
 
 ### Best For
 

@@ -4,14 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Switcher Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
     .demo-box { background: #e0e0e0; padding: 1rem; }
     .pass { color: green; }
     .fail { color: red; }
+    .switcher-empty-demo { border: 1px dashed #ccc; min-block-size: 3.125rem; }
+    .switcher-narrow-demo { max-inline-size: 15.625rem; border: 1px dashed #ccc; padding: var(--s-2); }
+    .break-safe { overflow-wrap: break-word; }
   </style>
 </head>
 <body>
@@ -20,7 +23,7 @@
   <section class="test-section">
     <h2>Test 1: Empty Switcher</h2>
     <p>Switcher with no children should render without errors.</p>
-    <div class="switcher" style="border: 1px dashed #ccc; min-height: 50px">
+    <div class="switcher switcher-empty-demo">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if empty Switcher renders</p>
@@ -50,7 +53,7 @@
   <section class="test-section">
     <h2>Test 4: Narrow Container (Stacked)</h2>
     <p>Columns should stack when container is below threshold.</p>
-    <div style="max-inline-size: 250px; border: 1px dashed #ccc; padding: 0.5rem">
+    <div class="switcher-narrow-demo">
       <div class="switcher" style="--threshold: 30rem">
         <div class="demo-box">Column 1</div>
         <div class="demo-box">Column 2</div>
@@ -110,5 +113,17 @@
     <p class="pass">✓ Pass if all 6 items display in equal columns (or stack if narrow)</p>
   </section>
 
+
+  <section class="test-section">
+    <h2>Test 9: Auto-Minimum Neutralized (ELP_033)</h2>
+    <p>A long unbreakable token must not force horizontal overflow — <code>.switcher > *</code> carries <code>min-inline-size: 0</code>.</p>
+    <div class="switcher-narrow-demo">
+      <div class="switcher" style="--threshold: 10rem">
+        <div class="demo-box">Short</div>
+        <div class="demo-box break-safe">AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA</div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if the token wraps within its column instead of overflowing the container</p>
+  </section>
 </body>
 </html>

@@ -31,7 +31,7 @@ Production-ready CSS classes implementing all 13 Every Layout primitives, plus p
   --s5: calc(var(--s4) * var(--ratio));
 
   /* Measure (line length) */
-  --measure: 60ch;
+  --measure: 65ch;
 
   /* Colors */
   --color-dark: #000;
@@ -123,20 +123,13 @@ img {
   margin-block-start: var(--space, var(--s1));
 }
 
-/* Split after variant - pushes items after nth child to bottom */
+/* Split variant — the CHILD carries the marker (mark the element after
+   which the split happens); no counting, works for any position */
 .stack:only-child {
   block-size: 100%;
 }
 
-.stack[data-split-after="1"] > :nth-child(1) {
-  margin-block-end: auto;
-}
-
-.stack[data-split-after="2"] > :nth-child(2) {
-  margin-block-end: auto;
-}
-
-.stack[data-split-after="3"] > :nth-child(3) {
+.stack > [data-split-after] {
   margin-block-end: auto;
 }
 
@@ -198,6 +191,10 @@ img {
   align-items: var(--align, center);
 }
 
+.cluster > * {
+  min-inline-size: 0; /* ELP_033 — wrap instead of overflowing the container */
+}
+
 /* ========================================
    THE SIDEBAR
    Two-element layout with intrinsic switching
@@ -215,6 +212,7 @@ img {
 
 .with-sidebar > :first-child {
   flex-basis: var(--side-width, 20rem);
+  min-inline-size: 0; /* ELP_033 — the content pane's --content-min already replaces auto */
 }
 
 .with-sidebar > :last-child {
@@ -242,21 +240,23 @@ img {
 .switcher > * {
   flex-grow: 1;
   flex-basis: calc((var(--threshold, 30rem) - 100%) * 999);
+  min-inline-size: 0; /* ELP_033 */
 }
 
-/* Limit max items in row */
-.switcher[data-limit="2"] > :nth-last-child(n+3),
-.switcher[data-limit="2"] > :nth-last-child(n+3) ~ * {
+/* Limit max items in row. data-limit is Switcher-only, so the attribute
+   alone keeps each selector at 0-2-0 (ELA_003) */
+[data-limit="2"] > :nth-last-child(n+3),
+[data-limit="2"] > :nth-last-child(n+3) ~ * {
   flex-basis: 100%;
 }
 
-.switcher[data-limit="3"] > :nth-last-child(n+4),
-.switcher[data-limit="3"] > :nth-last-child(n+4) ~ * {
+[data-limit="3"] > :nth-last-child(n+4),
+[data-limit="3"] > :nth-last-child(n+4) ~ * {
   flex-basis: 100%;
 }
 
-.switcher[data-limit="4"] > :nth-last-child(n+5),
-.switcher[data-limit="4"] > :nth-last-child(n+5) ~ * {
+[data-limit="4"] > :nth-last-child(n+5),
+[data-limit="4"] > :nth-last-child(n+5) ~ * {
   flex-basis: 100%;
 }
 
@@ -276,14 +276,17 @@ img {
   margin-block: var(--space, var(--s1));
 }
 
-.cover > :first-child:not([data-centered]) {
+.cover > :first-child:not(.principal):not([data-centered]) {
   margin-block-start: 0;
 }
 
-.cover > :last-child:not([data-centered]) {
+.cover > :last-child:not(.principal):not([data-centered]) {
   margin-block-end: 0;
 }
 
+/* `.principal` is the canonical marker (SKILL.md, primitives.md);
+   `data-centered` is the framework-port alias — both are supported */
+.cover > .principal,
 .cover > [data-centered] {
   margin-block: auto;
 }
@@ -307,6 +310,10 @@ img {
   );
 }
 
+.grid > * {
+  min-inline-size: 0; /* ELP_033 — track floor is definite; children still need shrink permission */
+}
+
 /* Ragged variant — preserves natural item heights (no equal-row forcing) */
 .grid[data-ragged] {
   align-items: start;
@@ -318,7 +325,7 @@ img {
    ======================================== */
 
 .frame {
-  aspect-ratio: var(--n, 16) / var(--d, 9);
+  aspect-ratio: var(--ratio, calc(var(--n, 16) / var(--d, 9)));
   overflow: hidden;
   display: flex;
   justify-content: center;
@@ -461,7 +468,7 @@ img {
 }
 
 .container[data-name] {
-  container-name: var(--name);
+  container-name: var(--container-name, layout);
 }
 ```
 
@@ -812,7 +819,7 @@ Horizontal centering with max-width constraint.
 ```
 
 **Custom Properties:**
-- `--measure` - Maximum content width (default: `60ch`)
+- `--measure` - Maximum content width (default: `65ch`)
 - `--gutter` - Side padding (default: `var(--s1)`)
 
 **Data Attributes:**

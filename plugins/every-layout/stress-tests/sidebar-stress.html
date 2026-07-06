@@ -4,15 +4,20 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Sidebar Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
     .demo-box { background: #e0e0e0; padding: 1rem; }
     .demo-side { background: #c0d8f0; padding: 1rem; }
     .pass { color: green; }
     .fail { color: red; }
+    .sidebar-narrow-demo { max-inline-size: 18.75rem; border: 1px dashed #ccc; padding: var(--s-2); }
+    .sidebar-main-grow { flex-basis: 0; flex-grow: 999; min-inline-size: 50%; }
+    .sidebar-side-fixed { flex-basis: 20rem; flex-grow: 1; }
+    .sidebar-empty-content { min-block-size: 3.125rem; border: 1px dashed #ccc; }
+    .break-safe { overflow-wrap: break-word; }
   </style>
 </head>
 <body>
@@ -31,7 +36,7 @@
   <section class="test-section">
     <h2>Test 2: Narrow Container (Stacking)</h2>
     <p>Sidebar should stack when container is too narrow.</p>
-    <div style="max-inline-size: 300px; border: 1px dashed #ccc; padding: 0.5rem">
+    <div class="sidebar-narrow-demo">
       <div class="with-sidebar" style="--content-min: 60%">
         <div class="demo-side">Sidebar</div>
         <div class="demo-box">Content</div>
@@ -72,8 +77,8 @@
     <h2>Test 5: Sidebar on Right</h2>
     <p>Sidebar element as last-child should appear on the right (when content is first).</p>
     <div class="with-sidebar">
-      <div class="demo-box" style="flex-basis: 0; flex-grow: 999; min-inline-size: 50%">Main content on the left</div>
-      <div class="demo-side" style="flex-basis: 20rem; flex-grow: 1">Sidebar on the right</div>
+      <div class="demo-box sidebar-main-grow">Main content on the left</div>
+      <div class="demo-side sidebar-side-fixed">Sidebar on the right</div>
     </div>
     <p class="pass">✓ Pass if main content is left and sidebar is right</p>
   </section>
@@ -108,12 +113,24 @@
     <p>Empty content area should not cause errors.</p>
     <div class="with-sidebar">
       <div class="demo-side">Sidebar with content</div>
-      <div style="min-height: 50px; border: 1px dashed #ccc">
+      <div class="sidebar-empty-content">
         <!-- Empty content -->
       </div>
     </div>
     <p class="pass">✓ Pass if sidebar displays and empty content area renders</p>
   </section>
 
+
+  <section class="test-section">
+    <h2>Test 9: Auto-Minimum Neutralized (ELP_033)</h2>
+    <p>An unbreakable token in the sidebar pane must not push the layout wider — the pane carries <code>min-inline-size: 0</code> (the content pane's 50% floor is explicit and unaffected).</p>
+    <div class="sidebar-narrow-demo">
+      <div class="with-sidebar">
+        <div class="demo-box break-safe">Wordthatcannotbreakanywhereatallnohow</div>
+        <div class="demo-box">Content pane</div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if the token wraps inside the pane and the dashed container does not scroll horizontally</p>
+  </section>
 </body>
 </html>

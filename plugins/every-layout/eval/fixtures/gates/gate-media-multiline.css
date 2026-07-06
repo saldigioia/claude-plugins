@@ -1,0 +1,31 @@
+/* Gate fixture — ELA_001 multi-line @media detection (css-strict.sh).
+   EXPECTED: exactly 2 ELA_001 violations —
+     the grid-template-columns line and the flex-direction line inside the
+     multi-line viewport @media block. The old single-line regex missed both.
+   The prefers-reduced-motion reset below must NOT be flagged (ELA_001 nor
+   ELA_003): it is not a viewport query, and its two bang-important reset
+   lines are the canonical WCAG whitelist. The 768px inside the media prelude
+   must NOT be flagged as an arbitrary px value — queries are judged by
+   ELA_001, not by the value rules. */
+
+.card-grid {
+  display: grid;
+  gap: var(--s1);
+}
+
+@media (min-width: 768px) {
+  .card-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .site-nav {
+    flex-direction: row;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

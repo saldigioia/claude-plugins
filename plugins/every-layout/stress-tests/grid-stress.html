@@ -4,13 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Grid Stress Test</title>
-  <link rel="stylesheet" href="../implementations/vanilla/every-layout.css">
+  <link rel="stylesheet" href="../demos/every-layout.css">
   <style>
-    body { padding: 2rem; font-family: system-ui; }
-    .test-section { margin-bottom: 3rem; }
-    .test-section h2 { margin-bottom: 1rem; }
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
     .demo-box { background: #e0e0e0; padding: 1rem; }
     .pass { color: green; }
+    .grid-narrow-demo { inline-size: 12.5rem; border: 1px dashed #ccc; }
+    .grid-empty-demo { border: 1px dashed #ccc; min-block-size: 3.125rem; }
+    .grid-scroll-demo { max-block-size: 25rem; overflow: auto; }
+    .ratio-chip { aspect-ratio: 2 / 1; overflow-wrap: break-word; }
   </style>
 </head>
 <body>
@@ -56,7 +60,7 @@
   <section class="test-section">
     <h2>Test 4: Narrow Container</h2>
     <p>Grid in narrow container should stack to single column.</p>
-    <div style="width: 200px; border: 1px dashed #ccc">
+    <div class="grid-narrow-demo">
       <div class="grid" style="--min: 15rem">
         <div class="demo-box">Item 1</div>
         <div class="demo-box">Item 2</div>
@@ -82,7 +86,7 @@
   <section class="test-section">
     <h2>Test 6: Empty Grid</h2>
     <p>Grid with no children should render without errors.</p>
-    <div class="grid" style="--min: 15rem; border: 1px dashed #ccc; min-height: 50px">
+    <div class="grid grid-empty-demo" style="--min: 15rem">
       <!-- Empty -->
     </div>
     <p class="pass">✓ Pass if empty box renders without errors</p>
@@ -91,7 +95,7 @@
   <section class="test-section">
     <h2>Test 7: Many Items (50+)</h2>
     <p>Grid should handle many items without performance issues.</p>
-    <div class="grid" style="--min: 8rem; max-height: 400px; overflow: auto">
+    <div class="grid grid-scroll-demo" style="--min: 8rem">
       <div class="demo-box">1</div><div class="demo-box">2</div>
       <div class="demo-box">3</div><div class="demo-box">4</div>
       <div class="demo-box">5</div><div class="demo-box">6</div>
@@ -120,5 +124,18 @@
     <p class="pass">✓ Pass if items are directly touching</p>
   </section>
 
+
+  <section class="test-section">
+    <h2>Test 9: Auto-Minimum Neutralized (ELP_033)</h2>
+    <p>Aspect-ratio children with wrapping labels must not clip in a narrow grid — <code>.grid > *</code> carries <code>min-inline-size: 0</code>.</p>
+    <div class="grid-narrow-demo">
+      <div class="grid" style="--min: 5rem">
+        <div class="demo-box ratio-chip">oklch(99% 0.005 90)</div>
+        <div class="demo-box ratio-chip">Supercalifragilisticexpialidocious</div>
+        <div class="demo-box ratio-chip">ACCENT</div>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if no chip is clipped at the container edge (labels wrap instead)</p>
+  </section>
 </body>
 </html>
