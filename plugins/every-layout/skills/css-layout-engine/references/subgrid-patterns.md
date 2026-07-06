@@ -95,7 +95,7 @@ A definition-list-style layout where labels and values align in a two-column gri
 ```css
 .data-grid {
   display: grid;
-  grid-template-columns: max-content 1fr;
+  grid-template-columns: max-content minmax(0, 1fr); /* ELP_033 */
   gap: var(--s-1) var(--s1);
 }
 
@@ -138,7 +138,7 @@ Labels and inputs align across rows without fixed widths.
 ```css
 .form-grid {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr); /* ELP_033 */
   gap: var(--s-1) var(--s1);
   align-items: baseline;
 }
@@ -157,7 +157,7 @@ Labels and inputs align across rows without fixed widths.
 ```css
 @container (max-inline-size: 25rem) {
   .form-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .form-grid > div {
     grid-column: span 1;
@@ -189,7 +189,7 @@ When data is relational but not tabular (no column headers, no row operations), 
 ```css
 .pseudo-table {
   display: grid;
-  grid-template-columns: 1fr max-content max-content;
+  grid-template-columns: minmax(0, 1fr) max-content max-content; /* ELP_033 */
   gap: var(--s-2) var(--s1);
 }
 
@@ -227,7 +227,7 @@ A page layout where the content area and sidebar share a grid track system.
 ```css
 .page-grid {
   display: grid;
-  grid-template-columns: 15rem 1fr;
+  grid-template-columns: 15rem minmax(0, 1fr); /* ELP_033 */
   gap: var(--s1);
 }
 

@@ -269,6 +269,7 @@ img {
   display: flex;
   flex-direction: column;
   min-block-size: var(--min-height, 100vh);
+  min-block-size: var(--min-height, 100dvh); /* dvh: stable mobile viewport; vh line above is the fallback */
   padding: var(--padding, var(--s1));
 }
 
@@ -648,7 +649,7 @@ img {
      ======================================== */
 
   .grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   /* ========================================

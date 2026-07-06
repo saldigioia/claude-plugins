@@ -374,7 +374,7 @@ The Container establishes a container query context, allowing children to respon
   }
   @container (min-width: 30rem) {
     .card {
-      grid-template-columns: 1fr 2fr;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); /* ELP_033 */
     }
   }
 </style>

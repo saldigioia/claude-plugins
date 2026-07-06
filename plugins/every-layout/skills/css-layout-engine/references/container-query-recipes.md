@@ -79,7 +79,7 @@ A card component that shows image-left/text-right in wide slots and image-top/te
 /* Wide slot: horizontal */
 @container card-slot (min-inline-size: 30rem) {
   .adaptive-card {
-    grid-template-columns: 1fr 2fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); /* ELP_033 */
   }
 
   .adaptive-card > img {
@@ -225,3 +225,44 @@ Use `@container <name>` in queries, not bare `@container`, to target the intende
 | Unnamed containers with nesting | Ambiguous query resolution | Name every container |
 | Container query replacing Switcher | Switcher is simpler for equal-column stacking | Use Switcher when threshold-based stacking suffices |
 | Deep nesting (3+ container contexts) | Hard to debug, performance implications | Flatten to 2 levels max |
+
+---
+
+## Container-Relative Units (cqi)
+
+Inside an ELC_CONTAINER context, `cqi` (1% of the container's inline size) is
+to the container what `vi`/`vw` is to the viewport — and it composes with the
+same rules:
+
+- **Fluid type scoped to a component** — the ELP_025 clamp pattern with `cqi`
+  in the preferred term, and per ELP_026 always mixed with a `rem` term so
+  browser zoom still scales the text:
+
+```css
+.card h3 {
+  font-size: clamp(var(--step-0, 1rem), 0.75rem + 2cqi, var(--step-2, 1.5rem));
+}
+```
+
+- **Container-fluid spacing** — acceptable only for *bespoke* gaps inside a
+  registered escape context; modular-scale tokens (ELP_005) remain the rule
+  for system spacing. Prefer `gap: var(--s1)` over `gap: 2cqi`.
+- `cqi`/`cqb` are the logical forms — use them, not `cqw`/`cqh`, for the same
+  reason ELP_004 mandates logical properties.
+
+### Performance note — nested containers
+
+Every `container-type: inline-size` creates layout containment: the browser
+sizes the container without consulting its contents, then lays out contents
+in a second pass. Nesting containers multiplies those passes along the
+ancestor chain of every resize. Guidance:
+
+1. Declare containment at **component boundaries** (card, panel), never on
+   deep wrappers "just in case" (ELP_020's inline-size default keeps the
+   block axis cheap — `container-type: size` is almost never justified).
+2. If a layout can be expressed intrinsically (Switcher/Sidebar/Grid math),
+   prefer it over a container query entirely — ELP_014's ordering
+   (intrinsic → container query → media query) is also the performance
+   ordering.
+3. Two levels of nested named containers is the practical ceiling; past
+   that, restructure.

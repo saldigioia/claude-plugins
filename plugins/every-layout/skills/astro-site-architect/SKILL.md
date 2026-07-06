@@ -367,6 +367,8 @@ import { ClientRouter } from 'astro:transitions';
 
 Pair with `transition:name` and `transition:animate` on elements for smooth page transitions. Note: the client router **is not zero-JS** — it ships approximately 3 KB of JavaScript to intercept navigation and orchestrate transitions. Count it toward the page's island JS budget. The underlying CSS-only `view-transition-name` declarations work without the router but only within a single page.
 
+**Prefer the zero-JS alternative first:** plain MPA pages get page transitions with **0 KB of JavaScript** via cross-document view transitions (`@view-transition { navigation: auto; }`) — reach for `<ClientRouter />` only when client state must persist across navigations. Full pattern, decision table, and reduced-motion rules: `references/view-transitions.md`.
+
 > Full config recipes: `references/astro-config-recipes.md`
 
 ---

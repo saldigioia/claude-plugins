@@ -2,7 +2,7 @@
 
 Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 6 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
 
-**Version:** 4.6.0 | **Author:** Rare Data Club
+**Version:** 4.7.0 | **Author:** Rare Data Club
 
 ## The commitment
 
@@ -11,7 +11,7 @@ This plugin treats **simple, durable, CSS-dominant web design as a requirement, 
 ## Architecture
 
 ```
-skills/                  13 skills (knowledge base + task workflows)
+skills/                  14 skills (knowledge base + task workflows)
 
   Knowledge skills (auto-invokable)
     css-layout-engine/       13 primitives, 27 layout principles, 17 reference files
@@ -29,6 +29,7 @@ skills/                  13 skills (knowledge base + task workflows)
     measure-budget/          /measure-budget — runs bin/css-budget.sh via shell injection
     diagnose-layout/         /diagnose-layout — forks to css-diagnostician agent to explain
     strict-check/            /strict-check — axiom gate (exits non-zero); CI-grade enforcement
+    scaffold-system/         /scaffold-system — greenfield scaffolder: tokens, layers, primitives, escapes.md
 
 agents/                  3 agents
   site-builder.md          Sonnet — autonomous Astro site builder, uses all 5 knowledge skills
@@ -56,7 +57,7 @@ bin/                     Shell utilities
   db-schema.sh             SQLite schema dump
 
 eval/                    Evaluation fixtures and prompts
-  prompts/                 7 eval prompts with scoring rubrics
+  prompts/                 10 eval prompts with scoring rubrics
   fixtures/                HTML/Astro fixtures (compliant + non-compliant)
   rubric.md                24-point scoring rubric (8 dimensions x 0-3)
   expected-properties.md   Required/forbidden CSS per primitive
@@ -86,6 +87,7 @@ Workflow skills reference knowledge skills by name (not by dependency):
   plan-migration → css-layout-engine + css-design-system
   generate-port → css-layout-engine + framework-implementations
   measure-budget → css-design-system/references/performance-rules.md via bin/css-budget.sh
+  scaffold-system → css-design-system token/layer contracts + demos/every-layout.css (copied verbatim)
 ```
 
 The site-builder agent wires all 5 knowledge skills. The css-auditor and css-diagnostician use only the two CSS skills.

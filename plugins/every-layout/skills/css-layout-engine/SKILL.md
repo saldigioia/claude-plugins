@@ -157,7 +157,11 @@ The pane's `min-inline-size: 0` neutralizes the `auto` floor (ELP_033); the cont
 
 ### Cover (ELC_COVER)
 ```css
-.cover { display: flex; flex-direction: column; min-block-size: var(--min-height, 100vh); padding: var(--padding, var(--s1)); }
+.cover {
+  display: flex; flex-direction: column; padding: var(--padding, var(--s1));
+  min-block-size: var(--min-height, 100vh);
+  min-block-size: var(--min-height, 100dvh); /* stable mobile viewport; the vh line is the fallback */
+}
 .cover > * { margin-block: var(--space, var(--s1)); }
 .cover > :first-child:not(.principal):not([data-centered]) { margin-block-start: 0; }
 .cover > :last-child:not(.principal):not([data-centered]) { margin-block-end: 0; }
@@ -318,7 +322,7 @@ Visual-coherence principles (ELP_016–018 theme-aware color; ELP_022–023 shad
 | Center | Remove gutters (`padding-inline: 0`). Page margins handle spacing. |
 | Cluster, Sidebar, Switcher | Linearise to single column (`flex-direction: column`) |
 | Cover | Collapse `min-block-size` to `auto` |
-| Grid | Force `grid-template-columns: 1fr` |
+| Grid | Force `grid-template-columns: minmax(0, 1fr)` |
 | Frame | Collapse `aspect-ratio: auto`, `object-fit: contain`, `max-block-size: 15cm` |
 | Reel | Linearise to column, `overflow: visible` |
 | Imposter | Collapse to `position: static` |
@@ -387,5 +391,7 @@ Read these when you need deeper detail beyond the quick-reference above:
 - `references/form-patterns.md` — Canonical primitive compositions for form layouts (7 patterns + decision tree)
 - `references/i18n-layout.md` — Per-primitive RTL and vertical writing mode behavior, edge cases, testing checklist
 - `references/subgrid-patterns.md` — Subgrid composition patterns on top of ELC_GRID (5 patterns, ELP_021)
-- `references/container-query-recipes.md` — When and how to use ELC_CONTAINER for component-level responsive design
+- `references/container-query-recipes.md` — When and how to use ELC_CONTAINER for component-level responsive design, container-relative units (cqi), nesting cost
 - `references/editorial-craft.md` — Dramatic compositions using existing primitives: oversized type, full-bleed, pull quotes, sidenotes, data showcases
+- `references/native-interaction.md` — The zero-JS interactivity catalog: details/summary accordions, dialog, Popover API, :user-valid/:user-invalid, datalist, accent-color — what native HTML/CSS expresses before an island is justified (ELA_005)
+- `references/baseline-registry.md` — The ELA_006 feature policy as a table: Baseline status per feature, allowed/additive/escape-gated obligations

@@ -45,6 +45,23 @@ The data flows one direction: from structured storage through typed loaders into
 - **Astro DB** — You want database tables defined alongside your Astro project with Drizzle ORM integration.
 - **D1** — Deploying to Cloudflare and need edge-accessible structured data.
 
+### Archival durability ranking (ELA_006)
+
+The options are not equal under the five-year test. Ranked by how little must
+keep working for your data to keep working:
+
+| Rank | Option | Five-year risk profile |
+|---|---|---|
+| 1 | **SQLite file + better-sqlite3 at build time** | The `.db` file is the archive — readable by any SQLite tool forever, no service, no framework coupling. The default for archival projects. |
+| 2 | **libSQL, local file only** | Same file format; the client library is the only extra dependency. Remote sync (Turso) adds a *service* dependency — the moment sync is required for builds, you've left rank 2. |
+| 3 | **Astro DB** | Couples the schema and query layer to the Astro major version — an ELA_006 risk this skill's own examples avoid. Fine for sites expected to track Astro upgrades; wrong for set-and-forget archives. |
+| 4 | **D1** | Data lives behind a vendor API. Only for deployments already committed to Cloudflare — and keep an exported `.db` snapshot in the repo as the real archive. |
+
+Whatever the runtime choice, the archival invariant is: **a plain `.db` (or
+`.sql` dump) checked into the repo or object storage, loadable without any
+service or framework.** Build-time loaders read it; nothing at runtime
+depends on it.
+
 ---
 
 ## Astro DB Setup

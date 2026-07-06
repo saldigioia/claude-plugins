@@ -88,7 +88,7 @@ The "no CSS-in-JS" half of this axiom is enforced by `bin/ports-lint.sh`: styled
 
 1. **No breaking dependencies at runtime.** Layout does not depend on a JS framework version. Upgrading React from 18 to 20 must not change the rendered layout.
 2. **Progressive enhancement for every interaction.** Every link, form, and navigation works with JS disabled or failed. `<a href>` before `onClick`; `<form method="post">` before `fetch`.
-3. **CSS features only from stable browser baselines.** `light-dark()`, logical properties, `:focus-visible`, subgrid, container queries are permitted (Baseline 2024+). Proposed / unflag-only features require an escape-hatch entry with expiry.
+3. **CSS features only from stable browser baselines.** `light-dark()`, logical properties, `:focus-visible`, subgrid, container queries are permitted (Baseline 2024+). Proposed / unflag-only features require an escape-hatch entry with expiry. The operational form of this rule — every non-universal feature with its Baseline status and the obligation it carries (allowed / additive / escape-gated) — is the table in `baseline-registry.md`.
 
 **Verification:** `bin/css-strict.sh --archival` additionally flags `content-visibility: auto` on primary content, CSS nesting deeper than 2, and any `@supports (not` wrapper used to gate "must work" features.
 

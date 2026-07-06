@@ -305,6 +305,75 @@ Borders as visual texture, not just containers.
 
 ---
 
+## 8. Shadows in Dark Mode
+
+ELP_022 (Consistent Shadow Light Source) and ELP_023 (Layered Shadow Realism) assume a light surface where transparent-black shadows read as depth. On dark surfaces, transparent black shadows mostly disappear or muddy the surface instead of lifting it — ELP_017 already established that dark mode should signal elevation through **lightness**, not shadow. These three principles are not in conflict; they apply in sequence: use ELP_017's lightness step as the primary elevation signal in dark mode, then layer a much-reduced, hue-matched shadow (ELP_022/ELP_023) on top for edge definition.
+
+### The reconciliation recipe
+
+1. **Lead with lightness, follow with shadow.** In dark mode, the lightness step (`--gl-elevation-step`) does the elevation work ELP_017 requires. Shadow becomes a secondary, subtle cue — reduce alpha and offset/blur distance versus the light-mode values, rather than reusing them at full strength.
+2. **Color-match, don't blacken.** Transparent black (`hsl(0deg 0% 0% / 0.2)`) on a dark surface reads as murk, not depth. Use `color-mix()` to tint the shadow with the surface's own hue instead, keeping ELP_022's single-light-source ratio intact while making the shadow legible against a dark background.
+3. **Keep the layering, shrink the range.** ELP_023's progressive offset/blur/opacity layering still applies — dark-mode shadows should still be built from 2-3 layers, just compressed (smaller max offset, tighter opacity range) so they don't compete with the lightness step.
+
+### Two-Mode Shadow Token Set
+
+Extend the `--elevation-1/2/3` scale from Section 1 with a `light-dark()`-aware variant rather than replacing it. This is additive: light mode keeps the existing layered values unchanged; dark mode substitutes reduced, hue-matched layers.
+
+```css
+:root {
+  /* Existing light-mode shadow color from Section 1 */
+  --shadow-color: 0deg 0% 0%;
+
+  /* Surface hue for dark-mode shadow tinting — match to --gl-color-bg's hue */
+  --shadow-color-dark: 220deg 13% 4%;
+
+  --br-shadow-raised: light-dark(
+    /* light: unchanged from --elevation-1 */
+    0 1px 2px hsl(var(--shadow-color) / 0.04),
+    0 1px 3px hsl(var(--shadow-color) / 0.06),
+    /* dark: reduced offset/blur, hue-matched via color-mix(), lower alpha ceiling */
+    0 1px 2px color-mix(in oklch, hsl(var(--shadow-color-dark)) 40%, transparent),
+    0 1px 2px color-mix(in oklch, hsl(var(--shadow-color-dark)) 30%, transparent)
+  );
+
+  --br-shadow-elevated: light-dark(
+    /* light: unchanged from --elevation-2 */
+    0 1px 2px hsl(var(--shadow-color) / 0.03),
+    0 3px 6px hsl(var(--shadow-color) / 0.05),
+    0 6px 12px hsl(var(--shadow-color) / 0.04),
+    /* dark: compressed range, still layered per ELP_023, still color-matched */
+    0 2px 4px color-mix(in oklch, hsl(var(--shadow-color-dark)) 35%, transparent),
+    0 4px 8px color-mix(in oklch, hsl(var(--shadow-color-dark)) 25%, transparent)
+  );
+}
+```
+
+**Usage:**
+```css
+.box[data-elevated] {
+  background: var(--gl-color-bg); /* carries the ELP_017 lightness step per elevation level */
+  box-shadow: var(--br-shadow-raised);
+}
+```
+
+Each `light-dark()` shadow token still satisfies ELP_022 — the offset-to-blur ratio per layer is unchanged between modes, only magnitude and color shift. The token stays within the Tier 2 (`--br-*`) naming rule (`token-rules.md`) since it is a semantic mapping a brand could override, while `--gl-elevation-step` remains the Tier 1 mathematical constant driving the lightness side of the equation.
+
+### Transitioning between elevation states
+
+If elevation changes on interaction (e.g. `[data-elevated]` toggling on hover/focus), gate the transition per the motion allowlist — `box-shadow` is paint-only and permitted *only* when the spread value doesn't change between states, which holds here since both tokens share the same layer count and spread:
+
+```css
+@media (prefers-reduced-motion: no-preference) {
+  .box {
+    transition: box-shadow 150ms ease-out;
+  }
+}
+```
+
+No `!important`, no selector past 0-2-0 (`.box[data-elevated]` is a single class + one attribute), and the reduced-motion gate means users who opt out see the final elevation state with no transition — consistent with every other pattern in this file.
+
+---
+
 ## Texture Recipes by Posture
 
 | Posture | Shadows | Background | Borders | Type treatment |

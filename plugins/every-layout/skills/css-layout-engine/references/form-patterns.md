@@ -242,3 +242,59 @@ Is each field on its own line?
         │   └─ No → Switcher (Pattern 4)
         └─ No → Stack (default)
 ```
+
+---
+
+## Validation UX (zero-JS baseline)
+
+Pattern 5 (Error Message Positioning) shows *where* an error lives in the Stack rhythm. This pattern covers *when* it should visually announce itself — natively, without a JS `input`/`blur` listener driving a class toggle.
+
+Style on `:user-invalid` / `:user-valid`, not `:valid`/`:invalid`. The plain pair matches the instant a constraint is satisfiable — an empty `required` field is `:invalid` before the user has so much as focused it, so styling on `:invalid` alone paints every empty field red on page load. `:user-invalid`/`:user-valid` only match **after interaction** (a change, or a blur following interaction), which is the same timing rule browsers apply to their own native bubble validation. See `native-interaction.md` §4 for the full catalog entry, including the honest boundary (this gets you correctly-timed styling, not custom error text).
+
+```html
+<div class="stack" style="--space: var(--s-2)">
+  <label for="email">Email</label>
+  <input
+    id="email"
+    type="email"
+    required
+    aria-describedby="email-error"
+  >
+  <p id="email-error" role="alert" class="field-error">Please enter a valid email.</p>
+</div>
+```
+
+```css
+/* Error text only takes visual weight after interaction, not on page load */
+input:user-invalid {
+  outline: 2px solid var(--br-color-error);
+  outline-offset: var(--s-5);
+}
+
+input:user-valid {
+  outline: 2px solid var(--br-color-success, currentColor);
+  outline-offset: var(--s-5);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  input {
+    transition: outline-color 150ms ease-out;
+  }
+}
+
+/* :focus-visible must still win over validity styling while the field is focused (ELP_029) */
+input:focus-visible {
+  outline: 3px solid var(--br-color-focus, currentColor);
+  outline-offset: var(--s-5);
+}
+
+.field-error {
+  color: var(--br-color-error);
+  font-size: var(--s-1);
+}
+```
+
+**Primitives:** Nested ELC_STACK (tight `--space`, as in Pattern 5)
+**Principles:** ELP_029 (focus visibility — the focus ring is not allowed to lose to a validity outline); ELP_028 (motion safety — the `outline-color` transition is gated behind `prefers-reduced-motion: no-preference` and uses only an allowlisted paint-only property)
+**Accessibility:** Same contract as Pattern 5 — `aria-describedby` links the message to its input, `role="alert"` announces it. `required` alone drives `:user-invalid` with zero JS; injecting custom message *text* (rather than styling) still needs a small script reading `validationMessage` into the live region — see the boundary section of `native-interaction.md`.
+**When to use:** Any field with a native constraint (`required`, `pattern`, `minlength`/`maxlength`, `min`/`max`, `type="email"`/`"url"`). Deviate to a JS-driven validation library only when validation logic cannot be expressed as a single native constraint (cross-field rules, async checks) — and register that under `ESC_JS_EXCESS` if it pushes JS over budget.

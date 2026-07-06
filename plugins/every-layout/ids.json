@@ -1,0 +1,28 @@
+{
+  "$comment": "Machine-readable registry of every canonical ID. IDs are immutable (see CLAUDE.md 'ID Immutability'). bin/run-evals.sh cross-checks that every ID cited in skills/, agents/, and eval/ exists here. Deprecations get an entry in 'deprecated' (never removed from their list).",
+  "version": "4.7.0",
+  "axioms": [
+    "ELA_001", "ELA_002", "ELA_003", "ELA_004", "ELA_005", "ELA_006"
+  ],
+  "primitives": [
+    "ELC_STACK", "ELC_BOX", "ELC_CENTER", "ELC_CLUSTER", "ELC_SIDEBAR",
+    "ELC_SWITCHER", "ELC_COVER", "ELC_GRID", "ELC_FRAME", "ELC_REEL",
+    "ELC_IMPOSTER", "ELC_ICON", "ELC_CONTAINER"
+  ],
+  "principles": [
+    "ELP_001", "ELP_002", "ELP_003", "ELP_004", "ELP_005", "ELP_006",
+    "ELP_007", "ELP_008", "ELP_009", "ELP_010", "ELP_011", "ELP_012",
+    "ELP_013", "ELP_014", "ELP_015", "ELP_016", "ELP_017", "ELP_018",
+    "ELP_019", "ELP_020", "ELP_021", "ELP_022", "ELP_023", "ELP_024",
+    "ELP_025", "ELP_026", "ELP_027", "ELP_028", "ELP_029", "ELP_030",
+    "ELP_031", "ELP_032", "ELP_033"
+  ],
+  "editorial": [
+    "EDC_BLOCKQUOTE", "EDC_PULLQUOTE", "EDC_FIGURE", "EDC_DATATABLE"
+  ],
+  "escapes": [
+    "ESC_EDITORIAL", "ESC_EMBED", "ESC_DATAVIZ", "ESC_LEGACY",
+    "ESC_JS_EAGER", "ESC_JS_EXCESS"
+  ],
+  "deprecated": {}
+}

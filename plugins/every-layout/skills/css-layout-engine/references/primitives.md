@@ -381,7 +381,7 @@ Related principles: `ELP_008`
 ### CSS Recipe
 
 ```css
-.cover { display: flex; flex-direction: column; min-block-size: 100vh; padding: var(--s1) }
+.cover { display: flex; flex-direction: column; min-block-size: 100vh; min-block-size: 100dvh; padding: var(--s1) }
 .cover > * { margin-block: var(--s1) }
 .cover > :first-child:not(.principal) { margin-block-start: 0 }
 .cover > :last-child:not(.principal) { margin-block-end: 0 }

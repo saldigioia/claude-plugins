@@ -7,6 +7,58 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.7.0] - 2026-07-06
+
+### Added — the philosophy-forward expansion wave (Improvement Plan Phase 6)
+
+- **`css-layout-engine/references/native-interaction.md`** — the zero-JS
+  interactivity catalog: `<details name>` exclusive accordions, `<dialog>`
+  (with the honest one-line `showModal()` ELA_005 boundary), Popover API,
+  `:user-valid`/`:user-invalid`, `<datalist>`, `accent-color`,
+  watch-tier `field-sizing`/`interpolate-size` — each with markup contract,
+  Baseline status, fallback obligation, and the JS pattern it replaces.
+  Companion "Validation UX (zero-JS baseline)" section in `form-patterns.md`.
+- **`css-layout-engine/references/baseline-registry.md`** — ELA_006's feature
+  policy operationalized as a table (allowed / additive / escape-gated per
+  Baseline status); `axioms.md` now points to it.
+- **`astro-site-architect/references/view-transitions.md`** — cross-document
+  View Transitions (`@view-transition`) as the 0 KB-JS alternative to
+  `<ClientRouter />`'s ~3 KB; decision table, reduced-motion rules, worked
+  archive-site example. SKILL.md now leads with the zero-JS option.
+- **`/scaffold-system`** (14th skill, 9th workflow) — greenfield scaffolder:
+  exact modular-scale tokens + the 9 mandatory `--br-*` brand tokens with
+  `light-dark()`, contractual layer order, primitives copied verbatim from
+  `demos/every-layout.css`, `escapes.md` from the template, optional
+  pre-commit gate install. Never overwrites; brownfield → `/plan-migration`.
+- **`ids.json`** — machine-readable registry of every canonical ID
+  (ELA/ELC/ELP/EDC/ESC); `bin/run-evals.sh` now cross-checks that every ID
+  cited in skills/agents/eval exists in it (all 62 cited IDs verified).
+- **Eval coverage**: new prompts `css_layout_engine.md` (4 scenarios incl. an
+  ELP_033 hard-fail gate) and `diagnose_layout.md`, with the
+  `diagnose-broken-primitives.html` fixture (4 planted, gate-clean
+  misbehaviors). Eval suite: 70 checks green.
+- **Cover `dvh` upgrade** — every shipped Cover recipe now carries the
+  two-declaration chain (`100vh` fallback line, then `100dvh`) for stable
+  mobile viewports; port-default modernization noted in the plan backlog.
+- **Container-relative units** — `cqi` fluid-type recipe (ELP_025/026-composed)
+  and a nested-container performance note in `container-query-recipes.md`.
+- **Archival durability ranking** in `archival-data-engine`: SQLite file >
+  local libSQL > Astro DB > D1, with the plain-`.db`-in-repo invariant named.
+- **Dark-mode shadows** (`css-texture.md`): lead-with-lightness recipe,
+  `color-mix()` surface-hue shadows, `light-dark()` two-mode shadow tokens.
+- **Mixed-direction content** (`i18n-layout.md`): `dir="auto"`, `<bdi>`,
+  `unicode-bidi`, mirrored-punctuation pitfalls, RTL testing checklist items.
+
+### Changed
+
+- Remaining bare-`1fr` tracks in reference recipes converted to
+  `minmax(0, 1fr)` per ELP_033 (subgrid patterns, container-query recipe,
+  sidenotes, print rules).
+- `token-rules.md` clarifies that the frozen bare-name tokens (`--ratio`,
+  `--s*`, `--measure`, `--border-thin`) are never migrated to `--gl-*`.
+
+---
+
 ## [4.6.0] - 2026-07-06
 
 ### Added — ELP_033 Neutralized Auto-Minimum (from field report `layout-edits.md`)

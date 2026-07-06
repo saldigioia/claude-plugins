@@ -185,6 +185,9 @@ Reference guide for validating primitive implementations.
 - `height` (use min-block-size)
 - `justify-content: center` (use margin: auto)
 
+### Notes
+- Shipped recipes use the two-declaration viewport chain: `min-block-size: var(--min-height, 100vh);` then `min-block-size: var(--min-height, 100dvh);` — `dvh` avoids the mobile browser-chrome jump; the `vh` line is the fallback for non-supporting engines.
+
 ### Custom Properties
 - `--min-height`
 - `--space`

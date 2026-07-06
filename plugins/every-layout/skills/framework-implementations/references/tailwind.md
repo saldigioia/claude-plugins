@@ -122,7 +122,7 @@ module.exports = plugin(function({ addComponents, addUtilities, theme }) {
     '.cover': {
       display: 'flex',
       flexDirection: 'column',
-      minBlockSize: 'var(--cover-min-height, 100vh)',
+      minBlockSize: ['var(--cover-min-height, 100vh)', 'var(--cover-min-height, 100dvh)'],
       padding: 'var(--cover-padding, 1rem)',
       '& > *': {
         marginBlock: 'var(--cover-space, 1rem)',

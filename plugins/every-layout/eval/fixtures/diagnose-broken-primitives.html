@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eval Fixture: Four Broken Primitives</title>
+  <!--
+    EXPECTED AUDIT RESULT — four planted misbehaviors, four root causes.
+    None of these are gate violations (bin/css-strict.sh passes clean on this
+    file, symptom (c)'s bare 1fr included — that check is a lint-tier warning,
+    not an axiom gate check). They are diagnostician material: behavior that
+    is *algorithmically correct* but does not match the author's intent.
+
+    SYMPTOM 1 — Sidebar (ELC_SIDEBAR) always stacks, never sits side-by-side.
+      Root cause: --side-width (24rem / 384px) + --content-min (60% of a
+      ~48rem/768px container ≈ 28.8rem/460px) sum to ~844px, which exceeds
+      any container under that width. The layout ISN'T broken — it's
+      correctly wrapping because the two minimums can't coexist.
+      Fix (smallest first): lower --side-width or --content-min (custom
+      property change) > restructure to Switcher if symmetry is actually
+      wanted (structural) > escapes.md entry if the wide threshold is
+      intentional for this one page.
+
+    SYMPTOM 2 — Switcher (ELC_SWITCHER) never stacks, always horizontal.
+      Root cause: --threshold is set to 4rem (64px) — far below any real
+      container width, so calc((4rem - 100%) * 999) is always a large
+      negative flex-basis, which flex-grow: 1 always overrides toward the
+      horizontal layout. The switch condition can never fire.
+      Fix (smallest first): raise --threshold to a value near the width at
+      which stacking should occur, e.g. 30rem (custom property change) >
+      confirm Switcher is even the right primitive for two asymmetric panes
+      (structural — may actually want Sidebar) > escapes.md if a
+      permanently-horizontal two-up is the intended design.
+
+    SYMPTOM 3 — Swatch grid's third column clips at narrow widths (ELP_033).
+      Root cause: .swatch-row uses bare `repeat(3, 1fr)`, which is
+      `minmax(auto, 1fr)` per spec — the hidden auto floor lets each
+      aspect-ratio: 1/1 swatch (whose min-content width grows when its label
+      wraps) veto shrinking below its own content size. When the three
+      combined minimums exceed the row's inline-size, the row overflows and
+      .swatch-card's overflow: hidden slices off the third column. Works
+      wide, clips narrow — never a media-query fix.
+      Fix (smallest first): repeat(3, minmax(0, 1fr)) on the tracks (custom
+      property / value change) and/or min-inline-size: 0 on .swatch-row > *
+      (structural, one extra rule) > escapes.md only if fixed-width swatches
+      are deliberately exempt from shrinking.
+
+    SYMPTOM 4 — Cover's (ELC_COVER) middle element isn't vertically centered.
+      Root cause: .cover > .principal { margin-block: auto } is the only
+      centering rule — it depends entirely on the .principal class being
+      present. <main> here has no .principal class, so it falls through to
+      the default .cover > * { margin-block: var(--s1) } rule and sits
+      wherever normal flow puts it, immediately below the header.
+      Fix (smallest first): add class="principal" to the <main> element
+      (structural, one attribute) — there is no smaller custom-property fix
+      because centering is gated by class presence, not a variable > apply
+      data-centered / adjust the .principal selector if the project prefers
+      a data-attribute marker over a class > escapes.md not applicable here
+      (this is a plain authoring omission, not an intentional deviation).
+
+    A correct diagnosis for each symptom traces the actual algorithm with the
+    actual custom-property values above — not a generic "check your CSS"
+    answer — and never recommends a media query.
+  -->
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    :root {
+      --ratio: 1.5;
+      --s-2: 0.444rem;
+      --s-1: 0.667rem;
+      --s0: 1rem;
+      --s1: 1.5rem;
+      --s2: 2.25rem;
+      --s3: 3.375rem;
+      --measure: 65ch;
+      --color-dark: #1a1a1a;
+      --color-light: #fafafa;
+      --color-accent: #7a2e1f;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      color: var(--color-dark);
+      background-color: var(--color-light);
+    }
+
+    :focus-visible {
+      outline: 3px solid var(--color-accent);
+      outline-offset: 2px;
+    }
+
+    :focus:not(:focus-visible) {
+      outline: none;
+    }
+
+    /* Stack — ELC_STACK, used as the page spine */
+    .stack {
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+    }
+
+    .stack > * {
+      margin-block: 0;
+    }
+
+    .stack > * + * {
+      margin-block-start: var(--s2);
+    }
+
+    /* Center — ELC_CENTER */
+    .center {
+      box-sizing: content-box;
+      max-inline-size: var(--measure);
+      margin-inline: auto;
+      padding-inline: var(--s1);
+    }
+
+    section > h2 {
+      font-size: var(--s2);
+    }
+
+    section > p {
+      max-inline-size: var(--measure);
+    }
+
+    /* --- SYMPTOM 1: Sidebar (ELC_SIDEBAR) that always stacks --- */
+    .with-sidebar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--s1);
+      border: 1px solid;
+      padding: var(--s1);
+    }
+
+    .with-sidebar > .sidebar-nav {
+      flex-basis: var(--side-width, 24rem);
+      flex-grow: 1;
+      min-inline-size: 0;
+    }
+
+    .with-sidebar > .main-content {
+      flex-basis: 0;
+      flex-grow: 999;
+      min-inline-size: var(--content-min, 60%);
+    }
+
+    .sidebar-nav {
+      padding: var(--s1);
+    }
+
+    .sidebar-nav ul {
+      list-style: none;
+      padding-inline-start: 0;
+      margin: 0;
+    }
+
+    .sidebar-nav li + li {
+      margin-block-start: var(--s-1);
+    }
+
+    .main-content {
+      padding: var(--s1);
+    }
+
+    /* --- SYMPTOM 2: Switcher (ELC_SWITCHER) that never switches --- */
+    .switcher {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--s1);
+      border: 1px solid;
+      padding: var(--s1);
+    }
+
+    .switcher > * {
+      flex-grow: 1;
+      flex-basis: calc((var(--threshold, 4rem) - 100%) * 999);
+      min-inline-size: 0;
+    }
+
+    .panel {
+      padding: var(--s1);
+      border: 1px solid;
+    }
+
+    /* --- SYMPTOM 3: swatch row that clips its third column narrow --- */
+    .swatch-card {
+      border: 1px solid;
+      overflow: hidden;
+      padding: var(--s1);
+    }
+
+    .swatch-row {
+      display: grid;
+      /* Bare 1fr == minmax(auto, 1fr); the hidden auto floor combines with
+         each swatch's aspect-ratio-driven min-content width below. */
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--s-1);
+    }
+
+    .swatch {
+      aspect-ratio: 1 / 1;
+      display: flex;
+      align-items: end;
+      padding: var(--s-2);
+      border: 1px solid;
+    }
+
+    /* --- SYMPTOM 4: Cover (ELC_COVER) whose middle element isn't centered --- */
+    .cover {
+      display: flex;
+      flex-direction: column;
+      min-block-size: 100vh;
+      padding: var(--s1);
+      border: 1px solid;
+    }
+
+    .cover > * {
+      margin-block: var(--s1);
+    }
+
+    .cover > :first-child:not(.principal) {
+      margin-block-start: 0;
+    }
+
+    .cover > :last-child:not(.principal) {
+      margin-block-end: 0;
+    }
+
+    .cover > .principal {
+      margin-block: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="stack center">
+
+    <section>
+      <h2>Symptom 1: Sidebar always stacks</h2>
+      <!-- SYMPTOM 1: user reports "the nav sidebar and the article never sit
+           side by side, they always stack, even on my widescreen monitor" -->
+      <div class="with-sidebar">
+        <aside class="sidebar-nav">
+          <ul>
+            <li><a href="/archive">Archive</a></li>
+            <li><a href="/issues">Issues</a></li>
+            <li><a href="/about">About</a></li>
+          </ul>
+        </aside>
+        <main class="main-content">
+          <p>Finding aid content that should sit beside the nav once there is
+             enough room, per the Sidebar algorithm.</p>
+        </main>
+      </div>
+    </section>
+
+    <section>
+      <h2>Symptom 2: Switcher never switches</h2>
+      <!-- SYMPTOM 2: user reports "these two panels never stack on mobile,
+           they just get squeezed into two skinny columns no matter how
+           narrow the viewport gets" -->
+      <div class="switcher">
+        <article class="panel">
+          <h3>Archive Finding Aid</h3>
+          <p>Series I contains correspondence dated 1968 through 1979,
+             arranged chronologically within each folder.</p>
+        </article>
+        <article class="panel">
+          <h3>Digitization Notes</h3>
+          <p>Negatives were scanned at 4000 dpi and captured on a copy stand
+             with a macro lens at f/8.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Symptom 3: Swatch grid clips a column</h2>
+      <!-- SYMPTOM 3: user reports "on my phone the third swatch in each row
+           is sliced in half — it renders fine on desktop" -->
+      <div class="swatch-card">
+        <div class="swatch-row">
+          <div class="swatch">Ink oklch(20% 0.01 90)</div>
+          <div class="swatch">Paper oklch(99% 0.005 90)</div>
+          <div class="swatch">Accent oklch(60% 0.2 30)</div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Symptom 4: Cover content not centered</h2>
+      <!-- SYMPTOM 4: user reports "the hero heading is supposed to be
+           vertically centered in the cover but it just sits up near the
+           header instead" -->
+      <div class="cover">
+        <header>
+          <p><small>Site header</small></p>
+        </header>
+        <main>
+          <h1>Hero Heading</h1>
+        </main>
+        <footer>
+          <p><small>Site footer</small></p>
+        </footer>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

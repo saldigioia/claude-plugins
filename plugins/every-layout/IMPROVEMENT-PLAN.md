@@ -233,44 +233,44 @@ Reel/Frame exempt by design).
 
 ## Phase 6 — Expansion wave — release **4.7.0 (MINOR)**
 
-- [ ] **6.1 `references/native-interaction.md`** (css-layout-engine) — the
+- [x] **6.1 `references/native-interaction.md`** (css-layout-engine) — the
       zero-JS interactivity catalog: `<details name>` exclusive accordions,
       `<dialog>` + `method="dialog"`, Popover API (`popovertarget`,
       light-dismiss), `:user-valid`/`:user-invalid` (+ validation-UX section
       in `form-patterns.md`), `<datalist>`, `accent-color`; markup contracts,
       focus + reduced-motion rules, Baseline date per feature. This is the
       ELA_005 boundary-mover: it shrinks the set of things that "need" JS.
-- [ ] **6.2 `references/baseline-registry.md`** — operationalize ELA_006:
+- [x] **6.2 `references/baseline-registry.md`** — operationalize ELA_006:
       table of feature | Baseline date | fallback obligation | status
       (allowed / escape-gated / watch). Seed: light-dark, logical props,
       :focus-visible, subgrid, container queries, :has, dvh/svh,
       cross-document view transitions, anchor positioning, scroll-driven
       animations, interpolate-size, cqi, text-box-trim, popover, dialog,
       details-name, :user-valid. Point `axioms.md` ELA_006 at it.
-- [ ] **6.3 Cover dvh upgrade** — fallback chain `min-block-size: 100vh;
+- [x] **6.3 Cover dvh upgrade** — fallback chain `min-block-size: 100vh;
       min-block-size: 100dvh;` in SKILL.md, primitives.md, all ports, demos,
       expected-properties, cover-stress.
-- [ ] **6.4 Cross-document View Transitions** — astro-site-architect
+- [x] **6.4 Cross-document View Transitions** — astro-site-architect
       (`performance.md` or new reference): `@view-transition` MPA transitions
       as the zero-JS alternative to ClientRouter's ~3 KB; reduced-motion
       gated; when each is appropriate.
-- [ ] **6.5 Container query units** — `container-query-recipes.md`: `cqi`
+- [x] **6.5 Container query units** — `container-query-recipes.md`: `cqi`
       sizing + fluid type inside ELC_CONTAINER; nested-container layout-cost
       note. Also fix the latent bare-`1fr` tracks the review found in this
       file (line 82) and `subgrid-patterns.md` (98, 141, 192) per ELP_033.
-- [ ] **6.6 Data durability table** — `archival-data-engine/SKILL.md`:
+- [x] **6.6 Data durability table** — `archival-data-engine/SKILL.md`:
       SQLite vs libSQL vs Astro DB trade-offs framed by ELA_006 (framework
       coupling risk named explicitly).
-- [ ] **6.7 Design-system gap fills** — dark-mode shadow adaptation recipe
+- [x] **6.7 Design-system gap fills** — dark-mode shadow adaptation recipe
       (`css-texture.md`); mixed-direction content section (`i18n-layout.md`).
-- [ ] **6.8 Eval coverage** — new prompts: `css_layout_engine.md` (core) and
+- [x] **6.8 Eval coverage** — new prompts: `css_layout_engine.md` (core) and
       `diagnose_layout.md` (fixture: a broken-primitive page with an
       auto-minimum clip among the faults); update run-evals counts.
-- [ ] **6.9 `/scaffold-system` workflow skill** — greenfield entry point:
+- [x] **6.9 `/scaffold-system` workflow skill** — greenfield entry point:
       emits tokens file (9 mandatory `--br-*`), `@layer` declaration,
       primitives.css, `escapes.md` from template, offers pre-commit install.
       `disable-model-invocation: true`. Companion eval prompt.
-- [ ] **6.10 `ids.json` registry** — machine-readable ELC/ELP/ELA/EDC/ESC
+- [x] **6.10 `ids.json` registry** — machine-readable ELC/ELP/ELA/EDC/ESC
       registry (with `deprecated`/`superseded_by`); `run-evals.sh` check that
       every ID cited anywhere exists. Mechanical teeth for the ID-immutability
       policy.
@@ -305,3 +305,16 @@ Reel/Frame exempt by design).
 | 4.6.0 | 2–5 | MINOR — gate hardening, self-compliance, value sweep, **ELP_033** |
 | 4.7.0 | 6 | MINOR — native-interaction catalog, baseline registry, dvh, scaffolder, ids.json |
 | — | 7 | backlog |
+
+---
+
+## Post-4.7.0 backlog additions (discovered during Phase 6)
+
+- [ ] Port Cover defaults still pin `100vh` (react/vue/svelte/astro docs
+      default the `minHeight` prop) — make the prop optional so the
+      stylesheet's `dvh` chain applies when unset.
+- [ ] Reconcile `--br-color-focus` (token table) vs `--color-focus` (used in
+      accessibility.md / SKILL focus-ring recipes) — pre-existing drift
+      flagged while writing native-interaction.md (spawned task chip).
+- [ ] every-layout.css has no @media print section (vanilla.md's print
+      overrides were not carried into the built artifact).

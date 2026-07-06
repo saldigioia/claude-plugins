@@ -223,7 +223,7 @@ Create a grid of cards that:
 1. **Grid** with `--min: 20rem`
    - Creates columns of at least 20rem
    - `auto-fit` creates as many as will fit
-   - `1fr` ensures equal distribution
+   - `minmax(0, 1fr)` ensures equal distribution without the hidden auto floor (ELP_033)
 
 2. **Box** provides consistent card styling
    - Padding creates internal spacing
@@ -875,7 +875,7 @@ Create a sidenote system where:
 @media (min-width: 60rem) {
   .has-sidenotes {
     display: grid;
-    grid-template-columns: [content-start] 1fr [content-end sidenote-start] 18ch [sidenote-end];
+    grid-template-columns: [content-start] minmax(0, 1fr) [content-end sidenote-start] 18ch [sidenote-end];
     gap: var(--s1);
   }
 
@@ -966,7 +966,7 @@ Flip the grid columns:
 ```css
 @media (min-width: 60rem) {
   .has-sidenotes--left {
-    grid-template-columns: [sidenote-start] 18ch [sidenote-end content-start] 1fr [content-end];
+    grid-template-columns: [sidenote-start] 18ch [sidenote-end content-start] minmax(0, 1fr) [content-end];
   }
 }
 ```

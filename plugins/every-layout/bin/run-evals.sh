@@ -158,6 +158,39 @@ fi
 
 echo ""
 
+# --- ID Registry Cross-Reference ---
+printf "${BOLD}ID Registry (ids.json)${NC}\n"
+
+if [ -f "ids.json" ] && command -v jq >/dev/null 2>&1; then
+  KNOWN_IDS=$(jq -r '.axioms[], .primitives[], .principles[], .editorial[], .escapes[]' ids.json 2>/dev/null)
+  # Every canonical ID cited anywhere in skills/agents/eval must exist in the
+  # registry — mechanical protection for the ID-immutability policy.
+  # Placeholder ids (ELC_XXX, ELC_NEW) and bare prefixes from glob-y prose
+  # ("ESC_JS_*") are filtered out.
+  CITED_IDS=$(grep -rohE '(ELA_[0-9][0-9][0-9]|ELP_[0-9][0-9][0-9]|ELC_[A-Z_]+|EDC_[A-Z_]+|ESC_[A-Z_]+)' \
+      skills agents eval/prompts eval/rubric.md eval/expected-properties.md 2>/dev/null \
+    | sed 's/_*$//' \
+    | grep -vE '_(XXX|YYY|NNN|NEW)$' \
+    | grep -vE '^(ELA|ELP|ELC|EDC|ESC|ESC_JS)$' \
+    | sort -u)
+  UNKNOWN=0
+  while IFS= read -r id; do
+    [ -z "$id" ] && continue
+    if ! printf '%s\n' "$KNOWN_IDS" | grep -qx "$id"; then
+      check "fail" "ids.json" "cited ID not in registry: $id"
+      UNKNOWN=$((UNKNOWN + 1))
+    fi
+  done <<< "$CITED_IDS"
+  if [ "$UNKNOWN" -eq 0 ]; then
+    TOTAL_CITED=$(printf '%s\n' "$CITED_IDS" | grep -c .) || TOTAL_CITED=0
+    check "pass" "ids.json" "all $TOTAL_CITED cited IDs exist in the registry"
+  fi
+else
+  check "warn" "ids.json" "registry or jq missing — ID cross-check skipped"
+fi
+
+echo ""
+
 # --- Summary ---
 echo "================================================="
 TOTAL=$((PASS + FAIL + WARN))
