@@ -28,6 +28,11 @@
   /* Border colors */
   --border-default: light-dark(#e0e0e0, #333333);
   --border-strong: light-dark(#cccccc, #444444);
+
+  /* Focus ring (ELP_029) — canonical brand-tier token; see
+     skills/css-design-system/references/token-rules.md and
+     skills/css-design-system/references/accessibility.md */
+  --br-color-focus: light-dark(#1a56db, #6c9ef8);
 }
 
 /* Theme toggle overrides */

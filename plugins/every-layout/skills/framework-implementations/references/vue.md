@@ -315,7 +315,18 @@ const props = withDefaults(defineProps<SwitcherProps>(), {
 ```vue
 <!--
   Cover Component
-  Vertical centering with optional header/footer
+  Vertical centering with optional header/footer.
+
+  `minHeight` has no default (contrast `space`, `noPad`, etc., which do
+  get one from withDefaults). The stylesheet already ships a
+  two-declaration viewport chain — `min-block-size: var(--min-height, 100vh)`
+  then `min-block-size: var(--min-height, 100dvh)` (see references/vanilla.md)
+  — so that supporting browsers land on the stable 100dvh mobile viewport
+  and older engines fall back to 100vh. `--min-height` is only bound (via
+  the same ternary-to-`:style` idiom Container.vue uses for `--container-name`)
+  when the caller actually passes minHeight; passing it overrides the
+  chain with one fixed value, so reach for it only when you mean a fixed
+  viewport unit, not the default responsive behavior.
 -->
 <script setup lang="ts">
 import type { CoverProps } from './types';
@@ -323,7 +334,6 @@ import type { CoverProps } from './types';
 const props = withDefaults(defineProps<CoverProps>(), {
   as: 'div',
   space: 'var(--s1)',
-  minHeight: '100vh',
   noPad: false,
 });
 </script>
@@ -333,7 +343,7 @@ const props = withDefaults(defineProps<CoverProps>(), {
     :is="as"
     :class="['cover', $attrs.class]"
     :data-no-pad="noPad || undefined"
-    :style="{ '--space': space, '--min-height': minHeight }"
+    :style="[{ '--space': space }, minHeight ? { '--min-height': minHeight } : undefined]"
   >
     <slot />
   </component>
@@ -581,7 +591,7 @@ All Vue components use `<script setup>` with `withDefaults(defineProps<T>())`, a
 | Center | `max`, `gutters`, `intrinsic`, `andText` | `var(--measure)`, `var(--s1)`, `false`, `false` | `--measure`, `--gutter` / `data-intrinsic`, `data-text` |
 | Cluster | `space`, `justify`, `align` | `var(--s1)`, `flex-start`, `center` | `--space`, `--justify`, `--align` |
 | Container | `containerName` | `undefined` | `--name` / `data-name` |
-| Cover | `space`, `minHeight`, `noPad` | `var(--s1)`, `100vh`, `false` | `--space`, `--min-height` / `data-no-pad` (mark the centered child with `data-centered`) |
+| Cover | `space`, `minHeight`, `noPad` | `var(--s1)`, `— (stylesheet: 100dvh, 100vh fallback)`, `false` | `--space`, `--min-height` / `data-no-pad` (mark the centered child with `data-centered`) |
 | Frame | `ratio` | `16/9` | `--n`, `--d` (parsed from `ratio`) |
 | Grid | `min`, `space`, `ragged` | `15rem`, `var(--s1)`, `false` | `--min`, `--space` / `data-ragged` |
 | Icon | `space`, `label` | `0.5em`, `undefined` | `--space` |

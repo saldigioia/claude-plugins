@@ -35,6 +35,8 @@ note it in the CHANGELOG — a PATCH).
 | `color-mix()` | widely (2025) | allowed | — |
 | `:user-valid` / `:user-invalid` | widely (2025) | allowed | see `native-interaction.md` |
 | `:has()` | widely (2026) | allowed | content-aware recipes in `cookbook-recipes.md` |
+| `overflow: clip` | widely (2024) | allowed | Clips without creating a scroll container — see `failure-mechanics.md` trap 7 |
+| `overflow-clip-margin` | newly / partial | additive | The inset-focus-ring escape; without it, rings clip — prefer non-inset rings where support matters |
 | `light-dark()` + `color-scheme` | newly (2024) | additive | Falls back per `color-theming.css` `@supports` blocks — keep those |
 | `text-wrap: balance` | newly (2024) | additive | Unbalanced headings are fully functional (ELP_030) |
 | `cap` unit | newly (2024) | additive | Always the two-declaration pair: `em` line first, `cap` line second (the shipped Icon recipe) |

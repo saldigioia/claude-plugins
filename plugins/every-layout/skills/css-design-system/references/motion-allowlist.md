@@ -164,3 +164,21 @@ Gate: ALWAYS @media (prefers-reduced-motion: no-preference)
 Reset: ALWAYS 0.01ms global reset in prefers-reduced-motion: reduce
 Forbidden: transition: all, layout properties, scroll-jacking, parallax, auto-play
 ```
+
+---
+
+## Watch-tier motion features
+
+Two emerging capabilities interact with this allowlist; their adoption status
+lives in `css-layout-engine/references/baseline-registry.md` (both currently
+escape-gated / watch):
+
+- **Scroll-driven animations** (`animation-timeline: scroll()/view()`) — when
+  they reach Baseline they still animate ONLY allowlisted properties
+  (opacity/transform), remain inside `@media (prefers-reduced-motion:
+  no-preference)` (ELP_028), and no layout may depend on them (ELA_001).
+- **`interpolate-size` / `calc-size()`** — makes `block-size: auto` a legal
+  transition endpoint (the details/accordion case in
+  `native-interaction.md`). Note it does NOT make the transition cheap: the
+  layout recalc cost is why block-size stays off the allowlist; any use is a
+  documented exception, `@supports`-gated, reduced-motion-gated.

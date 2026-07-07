@@ -44,7 +44,7 @@ All framework implementations expose the same props (mapped to CSS custom proper
 | `threshold` | `--threshold` | Switcher | `30rem` |
 | `min` | `--min` | Grid | `15rem` |
 | `ratio` | `--ratio` | Frame | `16/9` |
-| `minHeight` | `--min-height` | Cover | `100vh` |
+| `minHeight` | `--min-height` | Cover | unset → stylesheet `100dvh` chain (`100vh` fallback); passing `minHeight` pins a single fixed value |
 | `itemWidth` | `--item-width` | Reel | `auto` |
 
 ## Usage Pattern

@@ -228,7 +228,7 @@ If escape-hatch instances exceed **15%** of component count, trigger governance 
 - Color scheme (`color-scheme: light dark` on `:root`)
 
 ### Interactive Elements
-- Focus ring: `:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }`
+- Focus ring (ELP_029): `:focus-visible { outline: 3px solid var(--br-color-focus, currentColor); outline-offset: 2px; }`
 - Hover reveal: both `:hover` AND `:focus-visible` required
 - Active press: `translate: 0 1px` on `:active`
 - Disabled: `opacity: 0.5; pointer-events: none;` with `aria-disabled="true"`

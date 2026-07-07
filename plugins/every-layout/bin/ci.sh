@@ -52,6 +52,9 @@ step "css-strict.sh — stress tests (HTML-mode)"
 step "ports-lint.sh — demo framework sources"
 ( cd "$ROOT" && bash bin/ports-lint.sh --strict demos/archive-site/src ) || FAIL=1
 
+step "archival-audit.sh — external-dependency sweep"
+( cd "$ROOT" && bash bin/archival-audit.sh --strict demos stress-tests ) || FAIL=1
+
 step "verdict"
 if [ "$FAIL" -eq 0 ]; then
   echo "CI GREEN — all gates passed"

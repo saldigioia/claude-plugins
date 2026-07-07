@@ -215,7 +215,7 @@ touches `style`.
 <script lang="ts">
   export let as: string = 'div';
   export let space: string = 'var(--s1)';
-  export let minHeight: string = '100vh';
+  export let minHeight: string | undefined = undefined;
   export let noPad: boolean = false;
 </script>
 
@@ -231,13 +231,25 @@ touches `style`.
 </svelte:element>
 ```
 
+`minHeight` has no default — same `string | undefined = undefined` idiom as
+`Container.svelte`'s `containerName` and `Switcher.svelte`'s `limit`. Svelte's
+`style:--min-height={minHeight}` directive already omits the declaration
+entirely when `minHeight` is `undefined`, so leaving it unset lets the
+stylesheet's own two-declaration viewport chain apply —
+`min-block-size: var(--min-height, 100vh)` then
+`min-block-size: var(--min-height, 100dvh)` (see references/vanilla.md) —
+giving supporting browsers the stable `100dvh` mobile viewport and older
+engines the `100vh` fallback. Passing `minHeight` overrides that chain with
+a single fixed value via the inline custom property, so only pass it when
+you specifically want a fixed viewport unit.
+
 The principal (vertically centered) child is marked with a plain `class="principal"`
 in the consumer's own markup — the stylesheet's `.cover > .principal` selector
 picks it up directly. There is no `centered` prop; a class the author writes is
 not a runtime style.
 
 ```svelte
-<Cover minHeight="100vh">
+<Cover>
   <header>Site header</header>
   <h1 class="principal">Centered heading</h1>
   <footer>Site footer</footer>
@@ -435,7 +447,7 @@ variants set a `data-*` attribute the stylesheet already selects on.
 | Cluster | `space`, `justify`, `align` | `--space`, `--justify`, `--align` | — |
 | Sidebar | `side`, `sideWidth`, `contentMin`, `space`, `noStretch` | `--side-width`, `--content-min`, `--space` | `data-no-stretch`; `side` picks slot order, not style |
 | Switcher | `threshold`, `space`, `limit` | `--threshold`, `--space` | `data-limit` |
-| Cover | `space`, `minHeight`, `noPad` | `--space`, `--min-height` | `data-no-pad`; principal child uses `class="principal"` |
+| Cover | `space`, `minHeight`, `noPad` | `--space`, `--min-height` (no default; unset → stylesheet `100dvh`/`100vh` chain) | `data-no-pad`; principal child uses `class="principal"` |
 | Grid | `min`, `space`, `ragged` | `--min`, `--space` | `data-ragged` |
 | Frame | `ratio` | `--ratio` | — |
 | Reel | `itemWidth`, `space`, `height`, `noBar` | `--item-width`, `--space`, `--height` | `data-no-bar` |

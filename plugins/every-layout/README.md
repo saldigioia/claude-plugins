@@ -2,7 +2,7 @@
 
 Composable CSS layout primitives, Astro 6 site architecture, archival data engine, and design system tokens for Claude Code. Built on the [Every Layout](https://every-layout.dev) methodology by Andy Bell and Heydon Pickering.
 
-**Version:** 4.7.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
+**Version:** 4.8.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
 
 ## The commitment
 

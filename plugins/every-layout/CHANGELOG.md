@@ -7,6 +7,55 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.8.0] - 2026-07-06
+
+### Added — backlog closed (Improvement Plan Phase 7); the plan is fully executed
+
+- **`bin/archival-audit.sh`** — ELA_006 external-dependency sweep: remote
+  `url()`, remote `@import`, external `<link>`/`<script>` in CSS/HTML/Astro.
+  Flag-only by default, `--strict` for CI; wired into `bin/ci.sh` over demos
+  and stress-tests (verdict on the shipped corpus: SELF-CONTAINED, 26 files,
+  zero external runtime dependencies).
+- **`css-layout-engine/references/failure-mechanics.md`** — the spec-trap
+  family reference seeded by ELP_033: automatic minimum size (+ the
+  flex-column `min-block-size: auto` twin), unbreakable tokens vs
+  min-content, `aspect-ratio` feedback, percentage padding, `auto` margins vs
+  `justify-content` (why Cover centers the way it does), margin-collapse
+  contexts (why the Stack owl is safe), and non-visible `overflow`'s
+  BFC-plus-clipping bundle (sticky breakage, inset focus-ring clipping).
+- **Field-report pipeline** documented in CLAUDE.md → Development Workflow:
+  the incident → fixture → principle/mechanics-entry → recipes → diagnostics
+  → gate template that produced ELP_033; ids.json registration added to the
+  new-primitive checklist.
+- `baseline-registry.md`: rows for `overflow: clip` (allowed) and
+  `overflow-clip-margin` (additive/partial). `motion-allowlist.md`: watch-tier
+  section for scroll-driven animations and `interpolate-size`.
+  `print-rules.md`: `@page` margin-box guidance (physical units are correct
+  on paper; ELP_004 governs screen flow).
+- `demos/every-layout.css`: print overrides section (linearisation was in
+  vanilla.md but missing from the built artifact).
+
+### Fixed
+
+- **Port Cover defaults no longer pin `100vh`** — `minHeight` is now optional
+  with no default in the React/Vue/Svelte/Astro port docs, so the
+  stylesheets' `100dvh` chain applies when unset (Astro's self-contained
+  scoped Cover carries the chain inline). Passing `minHeight` pins a single
+  fixed value, documented as such.
+- **Focus token drift reconciled** — every recipe now uses the canonical
+  `var(--br-color-focus, currentColor)` (the bare `--color-focus` name was
+  never defined by any tier); `color-theming.css` now defines
+  `--br-color-focus` with `light-dark()`.
+
+### Decided
+
+- No vnu/HTML-validity gate (external tooling conflicts with the
+  zero-dependency `bin/` ethos; revisit on demand). No 15th
+  "conventions" skill — everything consumer-facing already ships via skills;
+  CLAUDE.md is deliberately the contributor doc.
+
+---
+
 ## [4.7.0] - 2026-07-06
 
 ### Added — the philosophy-forward expansion wave (Improvement Plan Phase 6)

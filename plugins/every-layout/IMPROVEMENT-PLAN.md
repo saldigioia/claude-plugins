@@ -1,4 +1,4 @@
-# Improvement Plan — 4.5.1 → 4.7.0
+# Improvement Plan — 4.5.1 → 4.8.0 (fully executed 2026-07-06)
 
 Actionable sequence derived from the 2026-07-06 full plugin review plus the
 field report `layout-edits.md` (swatch-grid column-clipping / automatic
@@ -277,23 +277,28 @@ Reel/Frame exempt by design).
 
 ---
 
-## Phase 7 — Backlog (unscheduled; pull forward when cheap)
+## Phase 7 — Backlog → shipped in **4.8.0** except where noted
 
-- [ ] `bin/archival-audit.sh` — ELA_006 external-dependency sweep: `url(http…)`,
-      `@import`, font CDNs in CSS; optional link-rot probe. (Cheap shell; a
-      strong pull-forward candidate.)
-- [ ] `references/failure-mechanics.md` — the spec-trap family: auto minimums
-      (ELP_033), flex-column `min-height: auto`, `overflow-wrap` for
-      unbreakable tokens, `contain-intrinsic-size`.
-- [ ] Field-report pipeline — convention for `layout-edits.md`-style incident
-      reports feeding fixtures/principles (this plan's Phase 5 is the model).
-- [ ] Anchor-positioning recipes (escape-gated until Baseline per registry);
-      scroll-driven animation + `interpolate-size` motion-allowlist
-      extensions; `@page` margin boxes in print-rules; optional HTML validity
-      gate (vnu) as a non-core CI extra.
-- [ ] Ship-conventions-as-skill — plugin-root CLAUDE.md is not loaded for
-      consumers (validator warning); decide which conventions belong in a
-      skill so installed users receive them.
+- [x] `bin/archival-audit.sh` — ELA_006 external-dependency sweep: remote
+      `url()`, `@import`, external `<link>`/`<script>`; `--strict` wired into
+      `bin/ci.sh` over demos + stress-tests (link-rot probing stays future).
+- [x] `references/failure-mechanics.md` — the spec-trap family: auto minimums
+      (ELP_033), flex-column `min-height: auto`, unbreakable tokens,
+      aspect-ratio feedback, percentage-padding, auto margins vs
+      justify-content, margin-collapse contexts, overflow BFC/clipping.
+- [x] Field-report pipeline — documented in CLAUDE.md → Development Workflow
+      ("Field reports → principles"), with ids.json registration added to the
+      new-primitive checklist.
+- [x] Motion-allowlist watch-tier section (scroll-driven, interpolate-size)
+      cross-referencing baseline-registry; `@page` margin boxes appended to
+      print-rules.md. Anchor-positioning recipes stay WATCH (registry row
+      exists; recipes when Baseline). HTML validity gate (vnu) deliberately
+      NOT added — external tooling conflicts with the zero-dependency bin/
+      ethos; revisit only on demand.
+- [x] Ship-conventions-as-skill — RESOLVED as a decision, not a new skill:
+      everything consumer-facing already ships via skills (axioms, budgets,
+      token/layer contracts, ID rules). CLAUDE.md is deliberately the
+      contributor doc; the validator warning is accepted.
 
 ---
 
@@ -310,11 +315,11 @@ Reel/Frame exempt by design).
 
 ## Post-4.7.0 backlog additions (discovered during Phase 6)
 
-- [ ] Port Cover defaults still pin `100vh` (react/vue/svelte/astro docs
+- [x] Port Cover defaults still pin `100vh` (react/vue/svelte/astro docs
       default the `minHeight` prop) — make the prop optional so the
       stylesheet's `dvh` chain applies when unset.
-- [ ] Reconcile `--br-color-focus` (token table) vs `--color-focus` (used in
+- [x] Reconcile `--br-color-focus` (token table) vs `--color-focus` (used in
       accessibility.md / SKILL focus-ring recipes) — pre-existing drift
       flagged while writing native-interaction.md (spawned task chip).
-- [ ] every-layout.css has no @media print section (vanilla.md's print
+- [x] every-layout.css has no @media print section (vanilla.md's print
       overrides were not carried into the built artifact).

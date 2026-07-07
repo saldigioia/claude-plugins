@@ -29,3 +29,28 @@ Source: `decisions.md` §7
 | Rule | Detail |
 |------|--------|
 | All links | Show URL after text: `a[href^="http"]::after { content: " (" attr(href) ")"; }` |
+
+---
+
+## Page Margin Boxes (@page)
+
+Paged media gets running headers/footers from CSS alone — no print-specific
+markup:
+
+```css
+@page {
+  margin: 2cm;
+}
+
+@page :first {
+  margin-block-start: 3cm;
+}
+```
+
+Browser support for the full margin-box syntax (`@page { @top-center { … } }`)
+remains partial — check `baseline-registry.md` before relying on it; plain
+`@page` margins and `:first`/`:left`/`:right` selectors are safe. Physical
+units (`cm`, `mm`) are correct here: paper is a physical medium, and the
+logical-property mandate (ELP_004) governs screen flow, not page sheets.
+Combine with the per-primitive linearisation table above and
+`break-inside: avoid` on Box (ELC_BOX) groupings.

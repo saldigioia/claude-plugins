@@ -76,7 +76,7 @@ button:focus { outline: none; }
 ```css
 /* After */
 button:focus-visible {
-  outline: 3px solid var(--color-focus);
+  outline: 3px solid var(--br-color-focus, currentColor);
   outline-offset: 2px;
 }
 button:focus:not(:focus-visible) { outline: none; }

@@ -420,3 +420,49 @@
 :focus:not(:focus-visible) {
   outline: none;
 }
+
+/* ========================================
+   PRINT OVERRIDES
+   Linearise interactive layouts on paper
+   (see css-layout-engine/references/print-rules.md)
+   ======================================== */
+
+@media print {
+  .cover {
+    min-block-size: auto;
+  }
+
+  .with-sidebar,
+  .switcher,
+  .cluster {
+    flex-direction: column;
+  }
+
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .reel {
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .frame {
+    aspect-ratio: auto;
+  }
+
+  .frame > img,
+  .frame > video {
+    object-fit: contain;
+    max-block-size: 15cm;
+  }
+
+  .imposter {
+    position: static;
+    transform: none;
+  }
+
+  .center {
+    padding-inline: 0;
+  }
+}

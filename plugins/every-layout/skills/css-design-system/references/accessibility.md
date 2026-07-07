@@ -15,7 +15,7 @@ Source: `decisions.md` §11
 
 | Pattern | Rule |
 |---------|------|
-| Focus ring | `:focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }` on all interactive elements. Never `outline: none` without a replacement. |
+| Focus ring (ELP_029) | `:focus-visible { outline: 3px solid var(--br-color-focus, currentColor); outline-offset: 2px; }` on all interactive elements. Never `outline: none` without a replacement. |
 | Hover reveal | Secondary actions (share buttons, etc.) start at `opacity: 0` and reveal on parent `:hover` AND own `:focus-visible`. Both are required -- hover alone fails keyboard users. |
 | Active press | `translate: 0 1px` on `:active` (see transitions.md). |
 | Disabled state | `opacity: 0.5; pointer-events: none; cursor: not-allowed;` with `aria-disabled="true"` (not `disabled` attribute on non-form elements). |
@@ -40,13 +40,13 @@ Source: `decisions.md` §11
 
 When applying `list-style: none` to `<ul>` or `<ol>`, Safari VoiceOver stops announcing it as a list. Fix: add `role="list"` explicitly to the element. Apply globally in the reset stylesheet.
 
-## `:target` Deep-Link Highlighting
+## `:target` Deep-Link Highlighting (ELP_029)
 
 Hash-linked content (e.g., `#photo-123`) should receive a visible highlight when navigated to:
 
 ```css
 .item:target {
-  outline: var(--border-thick) solid var(--color-focus);
+  outline: var(--border-thick) solid var(--br-color-focus, currentColor);
   outline-offset: var(--s-2);
 }
 ```

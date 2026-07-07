@@ -395,3 +395,4 @@ Read these when you need deeper detail beyond the quick-reference above:
 - `references/editorial-craft.md` — Dramatic compositions using existing primitives: oversized type, full-bleed, pull quotes, sidenotes, data showcases
 - `references/native-interaction.md` — The zero-JS interactivity catalog: details/summary accordions, dialog, Popover API, :user-valid/:user-invalid, datalist, accent-color — what native HTML/CSS expresses before an island is justified (ELA_005)
 - `references/baseline-registry.md` — The ELA_006 feature policy as a table: Baseline status per feature, allowed/additive/escape-gated obligations
+- `references/failure-mechanics.md` — The spec-trap family: auto minimums (ELP_033), flex-column min-height, unbreakable tokens, aspect-ratio feedback, percentage padding, auto margins vs justify-content, margin-collapse contexts, overflow BFC/clipping

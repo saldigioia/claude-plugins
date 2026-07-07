@@ -182,6 +182,20 @@ const {
 /**
  * Cover Component
  * Vertical centering with optional header/footer
+ *
+ * `minHeight` has no default — same conditional-vars idiom as Container.astro's
+ * `name`. Unlike the React/Vue/Svelte ports, this component's `.cover` rule is
+ * its own self-contained scoped style (Astro components don't share the
+ * external canonical stylesheet), so the two-declaration viewport chain lives
+ * right here: `min-block-size: var(--minHeight, 100vh)` then
+ * `min-block-size: var(--minHeight, 100dvh)` gives supporting browsers the
+ * stable 100dvh mobile viewport while older engines fall back to 100vh
+ * (mirrors references/vanilla.md's chain). `--minHeight` is only added to
+ * `define:vars` when the caller actually passes minHeight, exactly like
+ * Container.astro only adds `--name` when `name` is passed — never emit the
+ * custom property with an undefined value. Passing minHeight overrides the
+ * chain with a single fixed value, so only pass it when you mean a fixed
+ * viewport unit.
  */
 
 interface Props {
@@ -195,7 +209,7 @@ interface Props {
 const {
   centered = '[data-centered]',
   space = 'var(--s1, 1rem)',
-  minHeight = '100vh',
+  minHeight,
   noPad = false,
   class: className = ''
 } = Astro.props;
@@ -207,11 +221,12 @@ const id = `cover-${Math.random().toString(36).slice(2, 9)}`;
   <slot />
 </div>
 
-<style define:vars={{ space, minHeight }}>
+<style define:vars={minHeight ? { space, minHeight } : { space }}>
   .cover {
     display: flex;
     flex-direction: column;
-    min-block-size: var(--minHeight);
+    min-block-size: var(--minHeight, 100vh);
+    min-block-size: var(--minHeight, 100dvh);
     padding: var(--space);
   }
   .cover--no-pad {
@@ -690,7 +705,7 @@ All Astro components accept a `class` prop and render a `<slot />` for children.
 | Center | `max`, `gutters`, `intrinsic`, `andText` | `var(--measure, 65ch)`, `var(--s1, 1rem)`, `false`, `false` |
 | Cluster | `space`, `justify`, `align` | `var(--s1, 1rem)`, `flex-start`, `center` |
 | Container | `name` | `undefined` |
-| Cover | `centered`, `space`, `minHeight`, `noPad` | `[data-centered]`, `var(--s1, 1rem)`, `100vh`, `false` |
+| Cover | `centered`, `space`, `minHeight`, `noPad` | `[data-centered]`, `var(--s1, 1rem)`, `— (stylesheet: 100dvh, 100vh fallback)`, `false` |
 | Frame | `ratio` | `16 / 9` |
 | Grid | `min`, `space` | `15rem`, `var(--s1, 1rem)` |
 | Icon | `space`, `label` | `0.5em`, `undefined` |

@@ -2,7 +2,7 @@
 
 Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 6 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
 
-**Version:** 4.7.0 | **Author:** Rare Data Club
+**Version:** 4.8.0 | **Author:** Rare Data Club
 
 ## The commitment
 
@@ -132,6 +132,21 @@ The site-builder agent wires all 5 knowledge skills. The css-auditor and css-dia
 3. Update `eval/expected-properties.md`
 4. Add stress test in `stress-tests/`
 5. Update framework references in `skills/framework-implementations/references/`
+6. Register the new ID in `ids.json` (run-evals cross-checks every citation)
+
+### Field reports → principles (the incident pipeline)
+A real-world layout bug is the best possible input to this plugin. The
+pipeline that produced ELP_033 (a swatch-grid clipping report became a
+principle, recipes, an anti-pattern, a diagnostic pattern, stress tests, and
+a lint check) is the template:
+1. Capture the report as a markdown post-mortem: symptom, root cause
+   (spec-level mechanism, not just the fix), resolution, proposed general rule.
+2. Distill the case into an `eval/fixtures/anti-pattern-*.html` fixture.
+3. Decide the layer: new ELP principle (MINOR bump) vs. an entry in
+   `references/failure-mechanics.md` / `cookbook-antipatterns.md` (PATCH).
+4. Bake through the "Adding a New Primitive or Principle" checklist above,
+   plus: a css-diagnostician pattern for the symptom, and a gate or
+   lint-hook check when the trap is mechanically detectable.
 
 ### Running Evals
 - Structural validation: `bin/run-evals.sh` — checks fixture well-formedness and cross-references

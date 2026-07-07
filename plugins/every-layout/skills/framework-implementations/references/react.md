@@ -299,6 +299,15 @@ export default Container;
  * Mark the child that should absorb the remaining space with
  * `data-centered` — the stylesheet's `.cover > [data-centered]` rule
  * (see references/vanilla.md) handles the `margin-block: auto`.
+ *
+ * `minHeight` has no default here. The stylesheet already carries a
+ * two-declaration viewport chain (`min-block-size: var(--min-height, 100vh)`
+ * then `min-block-size: var(--min-height, 100dvh)` — see references/vanilla.md)
+ * so that supporting browsers get the stable `100dvh` mobile viewport and
+ * older engines fall back to `100vh`. Passing `minHeight` overrides that
+ * chain with a single fixed value via the inline custom property — only do
+ * that when you specifically want a fixed viewport unit, not the default
+ * responsive behavior.
  */
 
 import React, { forwardRef } from 'react';
@@ -743,7 +752,7 @@ import { Cover, Center, Stack, Box } from './components';
 
 function Page() {
   return (
-    <Cover style={{ '--min-height': '100vh' }}>
+    <Cover>
       <Box as="header" style={{ '--padding': 'var(--s0)' }}>Header</Box>
       <Center data-centered="" style={{ '--measure': '40ch' }}>
         <Stack style={{ '--space': 'var(--s2)' }}>
