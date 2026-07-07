@@ -29,10 +29,12 @@
 set -uo pipefail
 
 STRICT=0
+DOCS=0
 TARGETS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --strict) STRICT=1; shift ;;
+    --docs) DOCS=1; shift ;;
     --help|-h) grep -E '^# ' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) TARGETS="$TARGETS
 $1"; shift ;;
@@ -75,6 +77,7 @@ scan_file() {
     /from ["'\''](styled-components|@emotion|@stitches|goober|@linaria)/ { print NR "\tCSS-in-JS library import — forbidden (ELA_005)" }
     /<style[^>]*>[[:space:]]*\{/ { print NR "\truntime <style> injection from a component — ship primitive CSS once as a stylesheet (ELA_005)" }
     /<style jsx/           { print NR "\tstyled-jsx block — CSS-in-JS is forbidden (ELA_005)" }
+    /(class|className)[^=]*=[^>]*-\[[^\]]+\]/ { print NR "\tTailwind arbitrary-value utility in a class attribute — values come from the scale/tokens, not bracket literals (ELA_004)" }
     {
       line = $0
       while (match(line, /style=\{\{[^}]*\}\}/)) {
@@ -107,14 +110,38 @@ EOF
 printf "${BOLD}ports-lint.sh — CSS-in-JS detector (ELA_005)${NC}\n"
 echo "---"
 
+# --docs mode: extract fenced code blocks from a Markdown file into a temp
+# dir (with real extensions) and scan those — standing regression protection
+# for the reference-port docs instead of one-time manual verification.
+scan_md_docs() {
+  local md="$1" tmp
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/ports-docs.XXXXXX")"
+  awk -v out="$tmp" '
+    /^```(tsx|jsx|vue|svelte|js|mjs|astro|html)[[:space:]]*$/ {
+      ext = substr($0, 4); gsub(/[[:space:]]/, "", ext)
+      n++; f = sprintf("%s/block%03d.%s", out, n, ext); inb = 1; next
+    }
+    /^```[[:space:]]*$/ { if (inb) { inb = 0; close(f) }; next }
+    inb { print > f }
+  ' "$md"
+  local f
+  for f in "$tmp"/block*; do
+    [ -f "$f" ] && scan_file "$f"
+  done
+  rm -rf "$tmp"
+}
+
 while IFS= read -r target; do
   [ -z "$target" ] && continue
   if [ -f "$target" ]; then
-    scan_file "$target"
+    case "$target" in
+      *.md) [ "$DOCS" -eq 1 ] && scan_md_docs "$target" || echo "warning: $target is Markdown — pass --docs to scan its fenced code blocks" >&2 ;;
+      *) scan_file "$target" ;;
+    esac
   elif [ -d "$target" ]; then
     while IFS= read -r f; do
       [ -n "$f" ] && scan_file "$f"
-    done < <(find "$target" -type f \( -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" -o -name "*.svelte" -o -name "*.js" -o -name "*.mjs" \) \
+    done < <(find "$target" -type f \( -name "*.tsx" -o -name "*.jsx" -o -name "*.vue" -o -name "*.svelte" -o -name "*.js" -o -name "*.mjs" -o -name "*.astro" -o -name "*.html" \) \
       -not -path "*/node_modules/*" -not -path "*/dist/*" -not -path "*/.astro/*" -not -path "*/.git/*" 2>/dev/null)
   else
     echo "warning: $target not found, skipped" >&2

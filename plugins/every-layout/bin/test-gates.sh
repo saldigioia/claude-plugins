@@ -100,6 +100,50 @@ out=$(ESCAPES_FILE="$TMP/escapes.bad.md" bash "$SCRIPT_DIR/css-strict.sh" "$ROOT
 assert "impossible expiry warns and does not suppress" 1 "WARNING" "suppressed by" "$ec" "$out"
 rm -rf "$TMP"
 
+echo "css-strict.sh — H2.1 true counts past the display cap"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$GATES/gate-many.css" 2>&1); ec=$?
+assert "all 8 findings counted, not just the 5 shown" 1 "8 violation(s)" "-" "$ec" "$out"
+assert "remainder line announces the truncation" 1 "and 3 more [ELA_003]" "-" "$ec" "$out"
+
+echo "css-strict.sh — H2.3 per-file suppression advisory"
+AD="$(mktemp -d)"
+cat > "$AD/many.css" <<'CSS'
+.a1 { color: red !important; }
+.a2 { color: red !important; }
+.a3 { color: red !important; }
+.a4 { color: red !important; }
+CSS
+cat > "$AD/escapes.adv.md" <<'MD'
+| ESC ID | Target (glob) | Axiom | Lines | Expires | Owner | Justification |
+|--------|---------------|-------|-------|---------|-------|---------------|
+| ESC_LEGACY | `*many.css` | ELA_003 | - | 2099-12-31 | @test | File-level waiver to exercise the per-file advisory. |
+MD
+out=$(ESCAPES_FILE="$AD/escapes.adv.md" bash "$SCRIPT_DIR/css-strict.sh" "$AD/many.css" 2>&1); ec=$?
+assert "4 suppressions in one file trip the advisory" 0 "advisory: 4 suppressions" "-" "$ec" "$out"
+
+echo "escapes.sh — H2.3 per-project registry-size advisory"
+REG="$(mktemp -d)"
+{
+  echo '| ESC ID | Target (glob) | Axiom | Lines | Expires | Owner | Justification |'
+  echo '|--------|---------------|-------|-------|---------|-------|---------------|'
+  for i in 1 2 3 4 5 6 7 8 9 10 11; do
+    echo "| ESC_LEGACY | \`f$i.css\` | ELA_003 | - | 2099-12-31 | @test | row $i |"
+  done
+} > "$REG/escapes.md"
+out=$(ESCAPES_FILE="$REG/escapes.md" bash "$SCRIPT_DIR/css-strict.sh" "$ROOT/eval/fixtures/escapes/violation.css" 2>&1); ec=$?
+assert "11 registry rows trip the per-project advisory" 1 "per-project cap (10)" "-" "$ec" "$out"
+rm -rf "$AD" "$REG"
+
+echo "ports-lint.sh — Tailwind arbitrary-value tripwire (ELA_004)"
+out=$(bash "$SCRIPT_DIR/ports-lint.sh" --strict "$GATES/ports/tailwind-arbitrary.html" 2>&1); ec=$?
+assert "bracket-literal utilities fail strict" 1 "arbitrary-value" "-" "$ec" "$out"
+out=$(bash "$SCRIPT_DIR/ports-lint.sh" --strict "$GATES/ports/tailwind-clean.html" 2>&1); ec=$?
+assert "named utilities + primitive params stay CLEAN" 0 "CLEAN" "-" "$ec" "$out"
+
+echo "ports-lint.sh — --docs mode on a reference port"
+out=$(bash "$SCRIPT_DIR/ports-lint.sh" --strict --docs "$ROOT/skills/framework-implementations/references/react.md" 2>&1); ec=$?
+assert "react.md fenced blocks scan CLEAN via --docs" 0 "CLEAN" "-" "$ec" "$out"
+
 echo "---"
 printf 'gate hardening tests: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

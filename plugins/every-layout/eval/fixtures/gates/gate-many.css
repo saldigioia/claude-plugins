@@ -1,0 +1,14 @@
+/* Gate fixture — H2.1 true counts (css-strict.sh).
+   EXPECTED: exactly 8 ELA_003 violations — all eight bang-important lines
+   below are counted even though only the first 5 are printed; the report
+   must include an "… and 3 more" remainder line and the summary must say
+   "8 violation(s)", not 5. */
+
+.m1 { color: var(--br-color-text, #000) !important; }
+.m2 { color: var(--br-color-text, #000) !important; }
+.m3 { color: var(--br-color-text, #000) !important; }
+.m4 { color: var(--br-color-text, #000) !important; }
+.m5 { color: var(--br-color-text, #000) !important; }
+.m6 { color: var(--br-color-text, #000) !important; }
+.m7 { color: var(--br-color-text, #000) !important; }
+.m8 { color: var(--br-color-text, #000) !important; }

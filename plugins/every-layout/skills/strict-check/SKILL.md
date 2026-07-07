@@ -10,6 +10,12 @@ argument-hint: "<css-dir> [dist-dir]    — e.g., 'src/styles dist' or '.' for c
 
 Run the plugin's strict-mode validators against a project and report pass/fail. This is not a scorer — it's a contract-enforcement gate suitable for pre-commit or CI. The exit codes matter: non-zero means axioms violated.
 
+<!-- INVARIANT: the dynamic blocks below interpolate user-typed arguments
+     ($1/$2) into read-only gate invocations. They must only ever call the
+     two allow-listed bin/ gates with path arguments — never widen this into
+     general shell. One of the plugin's only two skill-load shell surfaces
+     (the other: css-design-system's token discovery block). -->
+
 $ARGUMENTS
 
 ## Inputs

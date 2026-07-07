@@ -132,42 +132,40 @@ unload/reload, and only then accept the ~3 KB.
 
 ## 3. Baseline Honesty (ELA_006)
 
-Cross-document view transitions are **newly available**, not yet inside this
-plugin's "several years of unmaintained-widely-available" comfort zone:
-Chrome/Edge 126 (2024), Safari 18.2 (2024), Firefox recent-stable. That is
-squarely a Baseline-2024-or-later feature, one generation younger than the
-`light-dark()` / logical-properties / `:focus-visible` set ELA_006 already
-accepts as stable.
+Cross-document view transitions are **not Baseline** as of 2026-07: Chromium
+(126+, 2024) and Safari (18.2, 2024) animate them, but **Firefox still ships
+the `@view-transition` at-rule behind a flag** and ignores it by default.
+Verified 2026-07-07 — see the feature's row in
+`css-layout-engine/references/baseline-registry.md`, which is the canonical
+status.
 
-**And yet it needs no `escapes.md` entry.** Spell out why, because the
-reasoning is the rule, not just this feature's exemption from it:
+**Therefore this feature is escape-gated: using it in production requires an
+`escapes.md` row.** The registry's rule is deliberate and sharp: the tier
+measures *engine interop* (ELA_006's concern); a perfect fallback does not
+waive registration — it only makes the escape trivially justifiable. This
+one costs a single line and carries zero risk:
 
-> An escape-hatch registration exists to make a **violation** visible,
-> justified, and bounded. Cross-document view transitions are not a
-> violation of anything — the declaration is additive. A browser that
-> doesn't recognize `@view-transition` simply ignores it and performs the
-> navigation it was always going to perform: a normal, instant page load.
-> There is no degraded state to disclose, because the fallback **is** the
-> baseline experience the site already had. This is exactly **ELP_027**
-> (Progressive Enhancement) working as designed: the enhancement layer is
-> allowed to be younger than the foundation it sits on top of, precisely
-> because removing it changes nothing about whether the site works.
+```markdown
+| ESC ID | Target (glob) | Axiom | Lines | Expires | Owner | Justification |
+|--------|---------------|-------|-------|---------|-------|---------------|
+| ESC_EDITORIAL | `src/styles/global.css` | ELA_006 | - | 2027-07-01 | @you | @view-transition: additive MPA transitions; non-supporting engines (Firefox, flagged) perform a normal instant navigation — the fallback IS the baseline experience (ELP_027). Review when Firefox ships unflagged; the registry row then moves to additive and this escape retires. |
+```
 
-Contrast this with the pattern ELA_006's archival gate explicitly forbids:
+Why the escape is *safe* (this reasoning is what you paste into the
+Justification column, not a reason to skip the row): a browser that doesn't
+recognize `@view-transition` simply ignores it and performs the navigation
+it was always going to perform — a normal, instant page load. There is no
+degraded state, because the fallback **is** the baseline experience the site
+already had (ELP_027 working as designed).
+
+Contrast with the pattern ELA_006's archival gate explicitly forbids:
 wrapping a **must-work** feature in `@supports not (...)` to paper over a
-gap. That pattern is a violation because the "must work" feature is load
-bearing and the fallback is a compromise. `@view-transition` needs no
-`@supports` guard at all — there is nothing to detect, because there is no
-un-enhanced state that is worse than not having the rule.
-
-**The rule, generalized:** a newly available CSS feature is an additive
-enhancement — and therefore exempt from escape-hatch registration — exactly
-when (a) the absence of browser support is silently ignored rather than
-producing an error or broken layout, and (b) the resulting fallback is full,
-unqualified functionality rather than a degraded stand-in. `@view-transition`
-qualifies on both counts. A feature that changes layout-critical behavior, or
-whose fallback is visibly worse (e.g. broken instead of merely un-animated),
-does not qualify and needs the usual registered escape with an expiry.
+gap. `@view-transition` needs no `@supports` guard at all — there is nothing
+to detect, because there is no un-enhanced state worse than not having the
+rule. When Firefox ships unflagged and the registry row moves to
+**additive**, the escape row above retires and no registration is needed —
+that promotion path, not a fallback-quality exemption, is how this feature
+graduates.
 
 ---
 

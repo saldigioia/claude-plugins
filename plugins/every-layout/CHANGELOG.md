@@ -7,6 +7,53 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.9.0] - 2026-07-07
+
+### Added — gate truthfulness & new tripwires (Campaign 2 Phase H2)
+
+- **True violation counts** — `css-strict.sh` now counts every finding while
+  display-capping at 5 per (axiom, file), with an "… and N more" remainder
+  line: "N violation(s)" is the real N, never a display artifact.
+- **Escape-limit advisories** (warn-tier; the limits stay advisory but silent
+  drift ends): `escapes.sh` warns when the registry exceeds the 10-row
+  per-project cap; `css-strict.sh` warns when one file's suppressions exceed
+  the per-file cap of 3.
+- **Tailwind arbitrary-value tripwire (ELA_004)** — `ports-lint.sh` flags
+  bracket-literal utilities (`p-[17px]`) in class attributes across
+  .html/.astro/.tsx/.jsx/.vue/.svelte; the axiomatic-values regime no longer
+  stops at CSS files.
+- **`ports-lint.sh --docs`** — extracts fenced code blocks from Markdown and
+  scans them, giving the reference-port docs standing regression protection;
+  wired into `ci.sh` over react/vue/svelte/astro.md (58 blocks CLEAN).
+- **`ci.sh --with-build` (opt-in)** — builds the archive-site demo and runs
+  the real `js-budget.sh` against its `dist/` (expects the 4.8.1 escapes);
+  default CI stays offline and dependency-free.
+- **Baseline registry verified against live sources** (MDN, web.dev Baseline
+  digests, web-features tracker; every row now carries `Last verified:
+  2026-07-07`). Nine corrections, three consequential: `accent-color` is NOT
+  Baseline (Safari control-mark contrast bug) → escape-gated;
+  **cross-document View Transitions are NOT Baseline** (Firefox still flags
+  the at-rule) → escape-gated, and `view-transitions.md` §3 rewritten
+  accordingly; `overflow-clip-margin` → escape-gated (Safari never shipped
+  it). Promotions: CSS anchor positioning reached newly-available (Jan
+  2026, Firefox 147), `lh` reached widely. Date fixes: Popover's real
+  Baseline is Jan 2025 (2024 announcement retracted); `<details name>` is
+  Sept 2025; subgrid/`:user-valid` crossed to widely in 2026.
+- **Policy sharpened in the registry**: a complete no-support fallback does
+  NOT waive escape registration for a non-Baseline feature — it only makes
+  the escape trivially justifiable. The tier measures engine interop
+  (ELA_006); degradation quality is a separate virtue. (This supersedes the
+  broader exemption rule 4.7.0's view-transitions doc had generalized.)
+- **Enforcement-tiers honesty table** (README + CLAUDE.md): advice → hook
+  warnings → pre-commit/CI teeth; "adoption = contract" is realized only at
+  tier 3. **Release checklist** added to CLAUDE.md. Invariant comments on
+  the plugin's only two skill-load shell surfaces. `js-budget.sh` labels
+  renamed to what is measured (per-file route proxy / dist-total page
+  proxy) with the heuristic documented in `performance-rules.md`.
+- `test-gates.sh` grows to 24 assertions; eval suite to 72 checks.
+
+---
+
 ## [4.8.1] - 2026-07-07
 
 ### Fixed — Campaign 2 Phase H1 (from the ambiguities & vulnerabilities review)

@@ -48,7 +48,7 @@ details > :not(summary) {
 
 Selector depth stays at 0-1-0 throughout (ELA_003).
 
-**Baseline:** 2024 (`name` attribute on `<details>`), widely available as of 2026.
+**Baseline:** newly available 2025 (`name` on `<details>` reached cross-engine support September 2025; an earlier 2024 date was optimistic) — additive tier per `baseline-registry.md`. Verified 2026-07-07.
 
 **Fallback obligation:** None needed — `<details>` without `name` support (there isn't one; browsers without `<details>` itself are pre-Baseline) still discloses individually. Non-CSS browsers get an unstyled but fully functional expand/collapse. Nothing degrades below "reads and opens."
 
@@ -192,7 +192,7 @@ This animates the fade/slide only — `display`/`overlay` are outside the motion
 
 Position the popover today with the **Imposter** pattern (ELC_IMPOSTER) — absolute positioning relative to a `position: relative` ancestor, as shown above. `:popover-open` is a pseudo-class and does not add to the specificity cap beyond its one count.
 
-**Baseline:** 2024, widely available as of 2026.
+**Baseline:** newly available January 2025 (the April 2024 Baseline announcement was formally retracted over a Safari/iOS light-dismiss bug) — additive tier per `baseline-registry.md`. Verified 2026-07-07.
 
 **Fallback obligation:** A browser without Popover API support does not recognize the `popover` attribute; the element renders in normal flow (not hidden, not floating) and the `popovertarget` button becomes an inert attribute with no default behavior. That means content must make sense un-popped — do not put content-only-reachable-via-popover behind this without a fallback discoverability path (a real link, a details/summary, or a query param), per ELP_027.
 
@@ -309,7 +309,7 @@ This is not a limitation to work around — the whole point is the browser draws
 
 One declaration, inherited, themes every checkbox, radio button, range slider, and progress bar on the page to match the brand accent — while leaving the control's native hit-target size, keyboard behavior, and OS-consistent chrome (light/dark mode, high-contrast mode, forced-colors mode) completely intact. Setting it on `:root` keeps specificity at 0-0-0 and lets any subtree override by re-declaring the same property closer in (ELP_011).
 
-**Baseline:** 2022, widely available as of 2026.
+**Baseline:** NOT Baseline as of 2026-07 (verified 2026-07-07) — despite shipping everywhere in 2021–22, a Safari contrast-adjustment bug on control marks has blocked the Baseline determination since 2022. **Escape-gated per `baseline-registry.md`:** the no-support/buggy-support fallback is the browser's default control colors (fully functional), so the `escapes.md` row is one line — but it is required until the registry promotes the row.
 
 **Fallback obligation:** A non-supporting browser renders the OS-default control color instead of the brand color. This is a pure aesthetic degrade — no functionality is lost, so no fallback code path is needed at all.
 

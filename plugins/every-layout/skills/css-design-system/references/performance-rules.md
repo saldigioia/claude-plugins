@@ -62,3 +62,18 @@ Review owner: @team-lead
 ```
 
 Without an entry, `bin/js-budget.sh` fails CI and the build does not ship.
+
+## How `bin/js-budget.sh` measures (proxy semantics)
+
+The gate measures gzip bytes of built output with two proxies, named honestly:
+
+- **Per-file (route proxy)** — each `.js` file in `dist/` is held to the
+  15 KB per-route budget. Too *lenient* when one route loads several chunks
+  (shared chunks are counted once, not per consuming route).
+- **Dist total (page proxy)** — the whole directory is held to the 30 KB
+  page budget. Too *strict* for multi-page sites where no single page loads
+  every chunk.
+
+These bracket the truth from both sides; real per-page telemetry is out of
+scope for a dependency-free shell gate. The escape target for a dist-total
+overage remains the reserved key `page-total`.

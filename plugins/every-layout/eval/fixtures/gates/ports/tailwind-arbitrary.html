@@ -1,0 +1,6 @@
+<!-- Gate fixture — ports-lint.sh Tailwind arbitrary-value tripwire (ELA_004).
+     EXPECTED AUDIT RESULT (--strict): exit 1 — bracket-literal utility values move
+     arbitrary numbers into markup where the CSS gates cannot see them. -->
+<div class="stack p-[17px] gap-[1.3rem]">
+  <span class="m-[3vh]">arbitrary values hiding in class attributes</span>
+</div>

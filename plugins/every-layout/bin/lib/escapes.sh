@@ -109,6 +109,14 @@ escapes_load() {
       printf "%s\t%s\t%s\t%s\t%s\n", target, axiom, lines, expires, esc
     }
   ' "$file")
+
+  # Advisory (never fatal): escape-hatch-registry.md caps a project at 10
+  # active escapes. Exceeding it is a governance smell that must be visible.
+  local rows
+  rows=$(printf '%s\n' "$ESCAPES_RECORDS" | grep -c .) || rows=0
+  if [ "$rows" -gt 10 ]; then
+    printf 'escapes.sh: advisory — %s registered escape rows exceed the per-project cap (10); see escape-hatch-registry.md limits\n' "$rows" >&2
+  fi
   return 0
 }
 

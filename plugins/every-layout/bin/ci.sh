@@ -13,6 +13,10 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FAIL=0
+WITH_BUILD=0
+for arg in "$@"; do
+  [ "$arg" = "--with-build" ] && WITH_BUILD=1
+done
 
 step() { printf '\n== %s ==\n' "$1"; }
 
@@ -49,11 +53,29 @@ step "css-strict.sh — demos (HTML-mode)"
 step "css-strict.sh — stress tests (HTML-mode)"
 ( cd "$ROOT" && bash bin/css-strict.sh stress-tests ) || FAIL=1
 
-step "ports-lint.sh — demo framework sources"
-( cd "$ROOT" && bash bin/ports-lint.sh --strict demos/archive-site/src ) || FAIL=1
+step "ports-lint.sh — demo + stress corpus (CSS-in-JS + Tailwind brackets)"
+( cd "$ROOT" && bash bin/ports-lint.sh --strict demos stress-tests ) || FAIL=1
+
+step "ports-lint.sh — reference-port docs (--docs regression)"
+( cd "$ROOT" && bash bin/ports-lint.sh --strict --docs \
+    skills/framework-implementations/references/react.md \
+    skills/framework-implementations/references/vue.md \
+    skills/framework-implementations/references/svelte.md \
+    skills/framework-implementations/references/astro.md ) || FAIL=1
 
 step "archival-audit.sh — external-dependency sweep"
 ( cd "$ROOT" && bash bin/archival-audit.sh --strict demos stress-tests ) || FAIL=1
+
+if [ "$WITH_BUILD" -eq 1 ]; then
+  step "archive-site build + js-budget (opt-in --with-build)"
+  if command -v npm >/dev/null 2>&1; then
+    ( cd "$ROOT/demos/archive-site" && npm ci --no-audit --no-fund && npm run build \
+        && bash "$ROOT/bin/js-budget.sh" dist ) || FAIL=1
+  else
+    echo "npm not found — --with-build requested but unavailable"
+    FAIL=1
+  fi
+fi
 
 step "verdict"
 if [ "$FAIL" -eq 0 ]; then

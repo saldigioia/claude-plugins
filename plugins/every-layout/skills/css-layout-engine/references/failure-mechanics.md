@@ -156,7 +156,7 @@ The rule cuts both ways: it's why Cover works, and why adding a `justify-content
 }
 ```
 
-For the focus-ring case specifically, `overflow: clip` plus `overflow-clip-margin` is the modern, purpose-built escape — it clips only past an authored margin instead of flush at the border edge, so an inset ring stays visible while rounded corners still crop the image. Per `baseline-registry.md`, `overflow-clip-margin` is not yet in the registry — verify current Baseline status against MDN/webstatus.dev before shipping it as a bare dependency, and register it under `escapes.md` if it lands short of **allowed**.
+For the focus-ring case specifically, `overflow: clip` plus `overflow-clip-margin` is the modern, purpose-built escape — it clips only past an authored margin instead of flush at the border edge, so an inset ring stays visible while rounded corners still crop the image. Per `baseline-registry.md`, `overflow-clip-margin` is **escape-gated** (Safari has never shipped it) — prefer non-inset rings where support matters, and any reliance on this property needs an `escapes.md` row until the registry promotes it.
 
 ```css
 .frame[data-focusable] {

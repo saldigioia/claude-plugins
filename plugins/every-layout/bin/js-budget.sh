@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # js-budget.sh — enforce the ELA_005 JavaScript budget.
 #
-# Measures compressed (gzip) size of every .js file in a build output directory
-# and fails when any route, or the page total, exceeds the budget in
+# Measures compressed (gzip) size of every .js file in a build output directory.
+# HONEST SEMANTICS — these are proxies, not page telemetry:
+#   per-FILE check  ~ "per-route" budget (too lenient when one route loads
+#                     several chunks; shared chunks are counted once)
+#   dist-TOTAL check ~ "page total" budget (too strict for multi-page sites,
+#                     where no single page loads every chunk)
+# The escape target for a dist-total overage remains the reserved key
+# `page-total`. Budgets come from
 # skills/css-design-system/references/performance-rules.md.
 #
 # Usage:
@@ -44,9 +50,9 @@ NC='\033[0m'
 
 printf "${BOLD}js-budget.sh — ELA_005 JavaScript budget gate${NC}\n"
 printf "Directory:     %s\n" "$DIR"
-printf "Per-route:     %d bytes (~%s)\n" "$PER_ROUTE_LIMIT" \
+printf "Per-file (route proxy):  %d bytes (~%s)\n" "$PER_ROUTE_LIMIT" \
   "$(awk -v n="$PER_ROUTE_LIMIT" 'BEGIN{printf "%g KB", n/1024}')"
-printf "Page total:    %d bytes (~%s)\n" "$PAGE_TOTAL_LIMIT" \
+printf "Dist total (page proxy): %d bytes (~%s)\n" "$PAGE_TOTAL_LIMIT" \
   "$(awk -v n="$PAGE_TOTAL_LIMIT" 'BEGIN{printf "%g KB", n/1024}')"
 echo "---"
 
@@ -103,21 +109,21 @@ PAGE_LIMIT_KB=$(awk -v n="$PAGE_TOTAL_LIMIT" 'BEGIN{printf "%g", n/1024}')
 if [ "$TOTAL" -gt "$PAGE_TOTAL_LIMIT" ]; then
   case "$(escapes_lookup "page-total" ELA_005)" in
     "suppressed "*)
-      printf "Page total:    %s KB gzipped  ${YELLOW}OVER %s KB (suppressed by %s)${NC}\n" \
+      printf "Dist total:    %s KB gzipped  ${YELLOW}OVER %s KB (suppressed by %s)${NC}\n" \
         "$TOTAL_KB" "$PAGE_LIMIT_KB" "$(escapes_lookup "page-total" ELA_005 | sed 's/^suppressed //')"
       SUPPRESSED=$((SUPPRESSED + 1))
       ;;
     "expired "*)
-      printf "Page total:    %s KB gzipped  ${RED}OVER %s KB page budget (escape expired)${NC}\n" "$TOTAL_KB" "$PAGE_LIMIT_KB"
+      printf "Dist total:    %s KB gzipped  ${RED}OVER %s KB page budget (escape expired)${NC}\n" "$TOTAL_KB" "$PAGE_LIMIT_KB"
       FAILURES=$((FAILURES + 1))
       ;;
     *)
-      printf "Page total:    %s KB gzipped  ${RED}OVER %s KB page budget${NC}\n" "$TOTAL_KB" "$PAGE_LIMIT_KB"
+      printf "Dist total:    %s KB gzipped  ${RED}OVER %s KB page budget${NC}\n" "$TOTAL_KB" "$PAGE_LIMIT_KB"
       FAILURES=$((FAILURES + 1))
       ;;
   esac
 else
-  printf "Page total:    %s KB gzipped  ${GREEN}OK${NC}\n" "$TOTAL_KB"
+  printf "Dist total:    %s KB gzipped  ${GREEN}OK${NC}\n" "$TOTAL_KB"
 fi
 
 echo ""

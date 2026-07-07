@@ -81,6 +81,28 @@ VIOLATIONS=0
 SUPPRESSED=0
 FILES_CHECKED=0
 
+# H2.1 — true counts: every finding is COUNTED (and escape-checked); only the
+# first $DISPLAY_CAP per (axiom, file) group are PRINTED. fail() tracks the
+# group itself and flush_more announces any truncated remainder, so the
+# summary's "N violation(s)" is the real N, never a display artifact.
+DISPLAY_CAP=5
+VERBOSE=1
+LAST_KEY=""
+LAST_AXIOM=""
+LAST_FILE=""
+KEY_N=0
+FILE_SUPPRESSED=0
+flush_more() {
+  if [ -n "$LAST_KEY" ] && [ "$KEY_N" -gt "$DISPLAY_CAP" ]; then
+    printf "    ${YELLOW}… and %d more [%s] finding(s) in %s (display capped; all counted)${NC}\n" \
+      "$((KEY_N - DISPLAY_CAP))" "$LAST_AXIOM" "$LAST_FILE"
+  fi
+  LAST_KEY=""
+  KEY_N=0
+  VERBOSE=1
+  return 0
+}
+
 STYLE_TMP="$(mktemp "${TMPDIR:-/tmp}/css-strict.XXXXXX")"
 trap 'rm -f "$STYLE_TMP"' EXIT
 
@@ -93,25 +115,40 @@ trap 'rm -f "$STYLE_TMP"' EXIT
 #   - an unregistered violation counts as normal.
 fail() {
   local axiom="$1" file="$2" line="$3" snippet="$4" reason="$5"
-  local status esc rest
+  local status esc rest key
+  key="$axiom|$file"
+  if [ "$key" = "$LAST_KEY" ]; then
+    KEY_N=$((KEY_N + 1))
+  else
+    flush_more
+    LAST_KEY="$key"; LAST_AXIOM="$axiom"; LAST_FILE="$file"; KEY_N=1
+  fi
+  if [ "$KEY_N" -le "$DISPLAY_CAP" ]; then VERBOSE=1; else VERBOSE=0; fi
   status="$(escapes_lookup "$file" "$axiom" "$line")"
   case "$status" in
     "suppressed "*)
       esc="${status#suppressed }"
       SUPPRESSED=$((SUPPRESSED + 1))
-      printf "${YELLOW}[%s]${NC} %s:%s — suppressed by %s\n" \
-        "$axiom" "$file" "$line" "$esc"
+      FILE_SUPPRESSED=$((FILE_SUPPRESSED + 1))
+      if [ "$VERBOSE" -eq 1 ]; then
+        printf "${YELLOW}[%s]${NC} %s:%s — suppressed by %s\n" \
+          "$axiom" "$file" "$line" "$esc"
+      fi
       ;;
     "expired "*)
       rest="${status#expired }"
       VIOLATIONS=$((VIOLATIONS + 1))
-      printf "${RED}[%s]${NC} %s:%s\n    %s\n    escape expired (%s) — renew the escapes.md entry or fix the violation\n" \
-        "$axiom" "$file" "$line" "$snippet" "$rest"
+      if [ "$VERBOSE" -eq 1 ]; then
+        printf "${RED}[%s]${NC} %s:%s\n    %s\n    escape expired (%s) — renew the escapes.md entry or fix the violation\n" \
+          "$axiom" "$file" "$line" "$snippet" "$rest"
+      fi
       ;;
     *)
       VIOLATIONS=$((VIOLATIONS + 1))
-      printf "${RED}[%s]${NC} %s:%s\n    %s\n    %s\n" \
-        "$axiom" "$file" "$line" "$snippet" "$reason"
+      if [ "$VERBOSE" -eq 1 ]; then
+        printf "${RED}[%s]${NC} %s:%s\n    %s\n    %s\n" \
+          "$axiom" "$file" "$line" "$snippet" "$reason"
+      fi
       ;;
   esac
 }
@@ -163,7 +200,7 @@ check_css_content() {
       depth += o - c
       if (opened == 1 && depth <= 0) { in_mq = 0 }
     }
-  ' "$file" 2>/dev/null | head -5)
+  ' "$file" 2>/dev/null)
 
   # ELA_002 — physical properties (excluding icon-style cap/em on width/height)
   while IFS=: read -r lineno rest; do
@@ -175,7 +212,7 @@ check_css_content() {
     fail "ELA_002" "$rname" "$lineno" "$(printf '%s' "$rest" | head -c 80)" "Physical property — use logical equivalent"
   done < <(grep -nE '(^|[{;[:space:]])(width|height|min-width|max-width|min-height|max-height|margin-left|margin-right|margin-top|margin-bottom|padding-left|padding-right|padding-top|padding-bottom|left|right|top|bottom)\s*:' "$file" 2>/dev/null \
     | grep -vE '(translate|transform|inset-|max-inline-size|max-block-size|min-inline-size|min-block-size|block-size|inline-size|[Ss][Vv][Gg]|img\[|video\[)' \
-    | head -5)
+   )
 
   # ELA_002 — arbitrary pixel values (10+ px, outside accepted contexts).
   # Strip C-style comments first so px values inside /* ... */ don't false-positive.
@@ -215,20 +252,20 @@ check_css_content() {
     ' "$file" 2>/dev/null \
     | grep -E '[0-9]{2,}px' \
     | grep -vE '(var\(--|^\s*//|border-radius:|content:|box-shadow|text-shadow|outline:|filter:|@media)' \
-    | head -5)
+   )
 
   # ELA_003 — !important (excluding canonical prefers-reduced-motion: reduce resets)
   while IFS=: read -r lineno rest; do
     [ -z "$lineno" ] && continue
     if is_whitelisted_line "$lineno"; then continue; fi
     fail "ELA_003" "$rname" "$lineno" "$(printf '%s' "$rest" | head -c 80)" "!important — use layer order for overrides, not specificity escalation"
-  done < <(grep -nE '!important' "$file" 2>/dev/null | head -5)
+  done < <(grep -nE '!important' "$file" 2>/dev/null)
 
   # ELA_003 — ID selectors
   while IFS=: read -r lineno rest; do
     [ -z "$lineno" ] && continue
     fail "ELA_003" "$rname" "$lineno" "$(printf '%s' "$rest" | head -c 80)" "ID selector — 0-2-0 specificity cap. Use class or attribute."
-  done < <(grep -nE '^\s*#[a-zA-Z][a-zA-Z0-9_-]*\s*[{,]' "$file" 2>/dev/null | head -5)
+  done < <(grep -nE '^\s*#[a-zA-Z][a-zA-Z0-9_-]*\s*[{,]' "$file" 2>/dev/null)
 
   # ELA_003 — 0-2-0 specificity cap. Counts classes + attributes +
   # pseudo-classes per complex selector (selector lists split on commas).
@@ -272,7 +309,7 @@ check_css_content() {
         }
       }
     }
-  ' "$file" 2>/dev/null | head -5)
+  ' "$file" 2>/dev/null)
 
   # ELA_004 — arbitrary numeric spacing (rem/em outside scale)
   while IFS=: read -r lineno rest; do
@@ -280,14 +317,14 @@ check_css_content() {
     fail "ELA_004" "$rname" "$lineno" "$(printf '%s' "$rest" | head -c 80)" "Non-scale rem/em value — use --s-5..--s5 tokens"
   done < <(grep -nE '(margin|padding|gap)(-[a-z]+)?\s*:\s*[0-9]+\.?[0-9]*(rem|em)' "$file" 2>/dev/null \
     | grep -vE '(var\(--|/\*|0\.132rem|0\.198rem|0\.296rem|0\.444rem|0\.667rem|1rem|1\.5rem|2\.25rem|3\.375rem|5\.063rem|7\.594rem|0\.5em|1em|1\.5em|0\.25em)' \
-    | head -5)
+   )
 
   # ELA_006 — archival durability (opt-in)
   if [ "$ARCHIVAL" -eq 1 ]; then
     while IFS=: read -r lineno rest; do
       [ -z "$lineno" ] && continue
       fail "ELA_006" "$rname" "$lineno" "$rest" "content-visibility: auto can hide primary content if script fails"
-    done < <(grep -nE '^\s*content-visibility\s*:\s*auto' "$file" 2>/dev/null | head -3)
+    done < <(grep -nE '^\s*content-visibility\s*:\s*auto' "$file" 2>/dev/null)
 
     # Brace-nesting depth: flag any line whose opening brace(s) push depth
     # past 3 (rule inside @media inside @layer is depth 3; deeper than that
@@ -306,14 +343,14 @@ check_css_content() {
         d -= c
         if (d < 0) d = 0
       }
-    ' "$file" 2>/dev/null | head -3)
+    ' "$file" 2>/dev/null)
 
     # @supports not (...) — gating a "must work" feature behind a negative
     # support query means the base experience differs by browser era.
     while IFS=: read -r lineno rest; do
       [ -z "$lineno" ] && continue
       fail "ELA_006" "$rname" "$lineno" "$(printf '%s' "$rest" | head -c 80)" "@supports not (...) — provide the base experience unconditionally; enhance additively"
-    done < <(grep -nE '@supports[^{]*\bnot[[:space:]]*\(' "$file" 2>/dev/null | head -3)
+    done < <(grep -nE '@supports[^{]*\bnot[[:space:]]*\(' "$file" 2>/dev/null)
   fi
 }
 
@@ -352,7 +389,7 @@ check_inline_attrs() {
         line = substr(line, RSTART + RLENGTH)
       }
     }
-  ' "$file" 2>/dev/null | head -10)
+  ' "$file" 2>/dev/null)
 }
 
 # extract_style_blocks <file> — write the contents of every <style ...> block
@@ -381,6 +418,8 @@ extract_style_blocks() {
 
 check_file() {
   local file="$1"
+  flush_more
+  FILE_SUPPRESSED=0
   FILES_CHECKED=$((FILES_CHECKED + 1))
   case "$file" in
     *.css)
@@ -392,6 +431,12 @@ check_file() {
       check_inline_attrs "$file"
       ;;
   esac
+  # H2.3 — the escape-hatch registry's per-file limit (≤3) is advisory, but
+  # exceeding it should never be silent.
+  if [ "$FILE_SUPPRESSED" -gt 3 ]; then
+    printf "${YELLOW}advisory: %d suppressions in %s exceed the per-file escape cap (3) — see escape-hatch-registry.md limits${NC}\n" \
+      "$FILE_SUPPRESSED" "$file"
+  fi
 }
 
 # Main --------------------------------------------------------------------
@@ -425,6 +470,7 @@ while IFS= read -r file; do
   [ -n "$file" ] && check_file "$file"
 done <<< "$CSS_FILES"
 
+flush_more
 echo "---"
 [ "$SUPPRESSED" -gt 0 ] && printf "${YELLOW}%d violation(s) suppressed by registered escapes.${NC}\n" "$SUPPRESSED"
 if [ "$VIOLATIONS" -eq 0 ]; then

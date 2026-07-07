@@ -2,7 +2,7 @@
 
 Composable CSS layout primitives, Astro 6 site architecture, archival data engine, and design system tokens for Claude Code. Built on the [Every Layout](https://every-layout.dev) methodology by Andy Bell and Heydon Pickering.
 
-**Version:** 4.8.1 &middot; **Author:** Rare Data Club &middot; **License:** MIT
+**Version:** 4.9.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
 
 ## The commitment
 
@@ -66,7 +66,7 @@ To run **this plugin's own gates** (dogfooding, or CI for this repo), there is a
 bash bin/ci.sh
 ```
 
-It syntax-checks every script in `bin/`, runs the escape-engine acceptance tests, the eval structural validation, and the CSS strict gate against the demo site — exiting non-zero if anything fails.
+It syntax-checks every script in `bin/`, runs both acceptance batteries, the eval validation (including the `ids.json` citation cross-check), the strict gate across demos and stress tests, the CSS-in-JS/Tailwind-bracket lints (including `--docs` regression over the reference-port docs), and the archival external-dependency sweep. Add `--with-build` (requires node) to also build the archive-site demo and run the real `js-budget.sh` against its `dist/`.
 
 ### Registering intentional exceptions (`escapes.md`)
 

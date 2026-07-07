@@ -2,7 +2,7 @@
 
 Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 6 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
 
-**Version:** 4.8.1 | **Author:** Rare Data Club
+**Version:** 4.9.0 | **Author:** Rare Data Club
 
 ## The commitment
 
@@ -42,12 +42,12 @@ hooks/                   PostToolUse CSS linting
 bin/                     Shell utilities
   css-strict.sh            AXIOM GATE — exits non-zero on any ELA_001–006 violation (escape-aware; scans .css plus .html/.astro style blocks and inline attributes)
   js-budget.sh             AXIOM GATE — enforces ELA_005 JS budget (15 KB route / 30 KB page) (escape-aware)
-  ports-lint.sh            CSS-in-JS detector (ELA_005) — warning via hook, --strict for CI
+  ports-lint.sh            CSS-in-JS + Tailwind-bracket detector (ELA_005/ELA_004) — --strict for CI, --docs scans md fenced blocks
   ci.sh                    Single CI entry point — syntax checks, acceptance batteries, evals, corpus scans
   lib/escapes.sh           Shared escapes.md parser — sourced by both gates
   lib/primitive-params.sh  Single source of truth for inline-styleable primitive parameters
   test-escapes.sh          Acceptance test for escape suppression (suppressed/expired/unregistered)
-  test-gates.sh            Acceptance test for the hardened gate checks (17 assertions)
+  test-gates.sh            Acceptance test for the hardened gate checks (24 assertions)
   install-git-hooks.sh     Installs a pre-commit hook that runs both gates on every commit
   css-lint-hook.sh         PostToolUse warning hook (.css + inline-style scan for .astro/.tsx/.jsx/.vue/.svelte)
   css-audit.sh             Directory-wide CSS lint with colored output
@@ -180,3 +180,28 @@ Deprecation process: mark `deprecated: true`, add `deprecated_reason`, add `supe
 - **MAJOR** — ID removal, axiom removal, breaking schema change
 - **MINOR** — new primitive, new principle, new axiom, new optional field
 - **PATCH** — docs, typos, examples, non-breaking bug fixes
+
+## Enforcement Tiers (honesty table)
+
+"Adoption = contract" is realized only at tier 3. The tiers, plainly:
+
+| Tier | Mechanism | Force |
+|---|---|---|
+| 1 | Skills/agents (advice, ID citations, recipes) | Persuasion — Claude follows prose |
+| 2 | PostToolUse hook (`css-lint-hook.sh`, ports-lint warnings) | Visible warnings inside Claude sessions; never blocks |
+| 3 | `install-git-hooks.sh` pre-commit + `bin/ci.sh` in CI | Hard gate — commits/builds fail on axiom violations |
+
+A project that never installs tier 3 has an advisory system, not a contract.
+
+## Release Checklist
+
+Run before every version bump:
+
+1. `bash bin/ci.sh` green (add `--with-build` when node is available)
+2. `claude plugin validate .` passes
+3. Counts in README/CLAUDE.md match reality (`find skills -name SKILL.md | wc -l`, prompts, fixtures, stress tests)
+4. `ids.json` contains any new IDs (run-evals cross-checks citations)
+5. `baseline-registry.md` "Last verified" dates acceptable — re-verify drifted rows
+6. Agent `model:` aliases still valid names
+7. CHANGELOG entry written; version bumped in plugin.json + CLAUDE.md + README.md
+8. Commit, then **push** (and schedule the standalone-repo sync)

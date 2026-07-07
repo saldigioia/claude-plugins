@@ -44,6 +44,11 @@ The CSS Design System extends the Every Layout primitives with a visual and beha
 
 ## Current Project Tokens
 
+<!-- INVARIANT: this dynamic block executes in the consumer's project at
+     skill-load time. It must stay strictly READ-ONLY (find/grep only), touch
+     no state, and never widen — it is one of the plugin's only two
+     skill-load shell surfaces (the other: strict-check's $1 interpolation). -->
+
 ```!
 find . -name "*.css" -path "*/tokens/*" -o -name "*.css" -path "*/global/*" | head -5 | xargs grep -h "^  --" 2>/dev/null | head -20
 ```
