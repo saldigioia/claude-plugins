@@ -30,6 +30,7 @@ if [ -z "$DIR" ]; then
   exit 2
 fi
 [ -d "$DIR" ] || { echo "error: $DIR is not a directory" >&2; exit 2; }
+DIR="${DIR%/}"   # normalize: a trailing slash would break the dist-relative strip below, and with it escape-glob matching
 
 # Canonical budgets mirror skills/css-design-system/references/performance-rules.md
 PER_ROUTE_LIMIT=$((15 * 1024))     # 15 KB compressed

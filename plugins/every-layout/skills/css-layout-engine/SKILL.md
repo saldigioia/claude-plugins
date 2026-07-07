@@ -90,7 +90,7 @@ Ratio 1.5. All spacing values must come from this scale. Arbitrary values (`17px
 --s4: 5.063rem;   --s5: 7.594rem;
 ```
 
-Each `calc()` chain must start from `--ratio` and `--s0` — never hardcode derived values.
+Each `calc()` chain must start from `--ratio` and `--s0` — never hardcode derived values. Changing `--ratio` or `--s0` at `:root` recomputes the whole scale; a *subtree* override additionally requires re-declaring the chain on that subtree (custom properties inherit as computed values — see `css-design-system/references/token-rules.md`, Calc Chain Rule).
 
 ---
 

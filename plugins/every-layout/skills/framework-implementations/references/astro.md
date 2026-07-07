@@ -148,31 +148,29 @@ const {
  */
 
 interface Props {
-  name?: string;
+  containerName?: string;
   class?: string;
 }
 
 const {
-  name,
+  containerName,
   class: className = ''
 } = Astro.props;
 ---
 
+{/* Canonical parameter name per the port contract: --container-name.
+    One static block; the conditional define:vars only controls whether the
+    custom property is emitted (same idiom as Cover's minHeight). */}
 <div class:list={['container', className]}>
   <slot />
 </div>
 
-<style define:vars={name ? { name } : {}}>
+<style define:vars={containerName ? { containerName } : {}}>
   .container {
     container-type: inline-size;
+    container-name: var(--containerName, layout);
   }
 </style>
-
-{name && (
-  <style>
-    .container { container-name: var(--name); }
-  </style>
-)}
 ```
 
 ## Cover.astro
@@ -199,7 +197,6 @@ const {
  */
 
 interface Props {
-  centered?: string;
   space?: string;
   minHeight?: string;
   noPad?: boolean;
@@ -207,17 +204,20 @@ interface Props {
 }
 
 const {
-  centered = '[data-centered]',
   space = 'var(--s1, 1rem)',
   minHeight,
   noPad = false,
   class: className = ''
 } = Astro.props;
-
-const id = `cover-${Math.random().toString(36).slice(2, 9)}`;
 ---
 
-<div class:list={['cover', { 'cover--no-pad': noPad }, className]} id={id}>
+{/* The centered element marks ITSELF: `class="principal"` (canonical) or a
+    bare `data-centered` attribute (port alias) — the static rules below
+    match both. The old selector-string `centered` prop is gone: it fed a
+    per-instance <style> block keyed on a generated id, which Astro never
+    templates (plain <style> blocks are static), and id selectors violate
+    ELA_003 anyway. */}
+<div class:list={['cover', { 'cover--no-pad': noPad }, className]}>
   <slot />
 </div>
 
@@ -235,16 +235,14 @@ const id = `cover-${Math.random().toString(36).slice(2, 9)}`;
   .cover > :global(*) {
     margin-block: var(--space);
   }
-</style>
-
-<style>
-  #{id} > :global(:first-child:not({centered})) {
+  .cover > :global(:first-child:not(.principal):not([data-centered])) {
     margin-block-start: 0;
   }
-  #{id} > :global(:last-child:not({centered})) {
+  .cover > :global(:last-child:not(.principal):not([data-centered])) {
     margin-block-end: 0;
   }
-  #{id} > :global({centered}) {
+  .cover > :global(.principal),
+  .cover > :global([data-centered]) {
     margin-block: auto;
   }
 </style>
@@ -502,11 +500,16 @@ const {
   noStretch = false,
   class: className = ''
 } = Astro.props;
-
-const id = `sidebar-${Math.random().toString(36).slice(2, 9)}`;
 ---
 
-<div class:list={['with-sidebar', { 'with-sidebar--no-stretch': noStretch }, className]} id={id}>
+{/* All variant styling is static: the `side` prop becomes a data attribute
+    the scoped CSS keys on. No per-instance ids, no conditional <style>
+    blocks — plain <style> is never templated in Astro, and generated ids
+    would break both ELA_003 (ID selectors) and build determinism (ELA_006). */}
+<div
+  class:list={['with-sidebar', { 'with-sidebar--no-stretch': noStretch }, className]}
+  data-side={side === 'right' ? 'right' : undefined}
+>
   <slot />
 </div>
 
@@ -520,36 +523,30 @@ const id = `sidebar-${Math.random().toString(36).slice(2, 9)}`;
     flex-grow: 1;
   }
   .with-sidebar > :global(:first-child) {
+    flex-basis: var(--sideWidth);
     min-inline-size: 0; /* ELP_033 — the content pane's contentMin already replaces auto */
+  }
+  .with-sidebar > :global(:last-child) {
+    flex-basis: 0;
+    flex-grow: 999;
+    min-inline-size: var(--contentMin);
+  }
+  /* Right-hand sidebar: same recipe mirrored. data-side is Sidebar-only, so
+     the attribute alone keeps each selector at 0-2-0 (ELA_003). */
+  [data-side="right"] > :global(:first-child) {
+    flex-basis: 0;
+    flex-grow: 999;
+    min-inline-size: var(--contentMin);
+  }
+  [data-side="right"] > :global(:last-child) {
+    flex-basis: var(--sideWidth);
+    flex-grow: 1;
+    min-inline-size: 0; /* ELP_033 */
   }
   .with-sidebar--no-stretch {
     align-items: flex-start;
   }
 </style>
-
-{side === 'left' ? (
-  <style>
-    #{id} > :global(:first-child) {
-      flex-basis: var(--sideWidth);
-    }
-    #{id} > :global(:last-child) {
-      flex-basis: 0;
-      flex-grow: 999;
-      min-inline-size: var(--contentMin);
-    }
-  </style>
-) : (
-  <style>
-    #{id} > :global(:last-child) {
-      flex-basis: var(--sideWidth);
-    }
-    #{id} > :global(:first-child) {
-      flex-basis: 0;
-      flex-grow: 999;
-      min-inline-size: var(--contentMin);
-    }
-  </style>
-)}
 ```
 
 ## Stack.astro
@@ -564,21 +561,22 @@ const id = `sidebar-${Math.random().toString(36).slice(2, 9)}`;
 interface Props {
   space?: string;
   recursive?: boolean;
-  splitAfter?: number;
   class?: string;
 }
 
 const {
   space = 'var(--s1)',
   recursive = false,
-  splitAfter,
   class: className = ''
 } = Astro.props;
-
-const id = `stack-${Math.random().toString(36).slice(2, 9)}`;
 ---
 
-<div class:list={['stack', className]} id={id}>
+{/* To split a stack, mark the CHILD after which the split happens with a
+    bare `data-split-after` attribute — the static rule below handles it.
+    (The numeric splitAfter prop is gone: counting children required
+    per-instance generated CSS, which is exactly what this port must not
+    ship. Same child-marker contract as the React/Vue/Svelte ports.) */}
+<div class:list={['stack', className]} data-recursive={recursive ? '' : undefined}>
   <slot />
 </div>
 
@@ -594,23 +592,13 @@ const id = `stack-${Math.random().toString(36).slice(2, 9)}`;
   .stack > :global(* + *) {
     margin-block-start: var(--space);
   }
+  .stack[data-recursive] :global(* + *) {
+    margin-block-start: var(--space);
+  }
+  .stack > :global([data-split-after]) {
+    margin-block-end: auto;
+  }
 </style>
-
-{recursive && (
-  <style>
-    #{id} :global(* + *) {
-      margin-block-start: var(--space);
-    }
-  </style>
-)}
-
-{splitAfter && (
-  <style>
-    #{id} > :global(:nth-child({splitAfter})) {
-      margin-block-end: auto;
-    }
-  </style>
-)}
 ```
 
 ## Switcher.astro
@@ -625,7 +613,7 @@ const id = `stack-${Math.random().toString(36).slice(2, 9)}`;
 interface Props {
   threshold?: string;
   space?: string;
-  limit?: number;
+  limit?: 2 | 3 | 4;
   class?: string;
 }
 
@@ -635,11 +623,12 @@ const {
   limit,
   class: className = ''
 } = Astro.props;
-
-const id = `switcher-${Math.random().toString(36).slice(2, 9)}`;
 ---
 
-<div class:list={['switcher', className]} id={id}>
+{/* `limit` passes straight through as data-limit; the static rules below
+    match the stylesheet's [data-limit="2|3|4"] contract. data-limit is
+    Switcher-only, so the attribute alone stays at 0-2-0 (ELA_003). */}
+<div class:list={['switcher', className]} data-limit={limit}>
   <slot />
 </div>
 
@@ -654,16 +643,19 @@ const id = `switcher-${Math.random().toString(36).slice(2, 9)}`;
     flex-basis: calc((var(--threshold) - 100%) * 999);
     min-inline-size: 0; /* ELP_033 */
   }
+  [data-limit="2"] > :global(:nth-last-child(n+3)),
+  [data-limit="2"] > :global(:nth-last-child(n+3) ~ *) {
+    flex-basis: 100%;
+  }
+  [data-limit="3"] > :global(:nth-last-child(n+4)),
+  [data-limit="3"] > :global(:nth-last-child(n+4) ~ *) {
+    flex-basis: 100%;
+  }
+  [data-limit="4"] > :global(:nth-last-child(n+5)),
+  [data-limit="4"] > :global(:nth-last-child(n+5) ~ *) {
+    flex-basis: 100%;
+  }
 </style>
-
-{limit && (
-  <style>
-    #{id} > :global(:nth-last-child(n+{limit + 1})),
-    #{id} > :global(:nth-last-child(n+{limit + 1}) ~ *) {
-      flex-basis: 100%;
-    }
-  </style>
-)}
 ```
 
 ## Barrel Export (index.ts)
@@ -705,12 +697,12 @@ All Astro components accept a `class` prop and render a `<slot />` for children.
 | Center | `max`, `gutters`, `intrinsic`, `andText` | `var(--measure, 65ch)`, `var(--s1, 1rem)`, `false`, `false` |
 | Cluster | `space`, `justify`, `align` | `var(--s1, 1rem)`, `flex-start`, `center` |
 | Container | `name` | `undefined` |
-| Cover | `centered`, `space`, `minHeight`, `noPad` | `[data-centered]`, `var(--s1, 1rem)`, `— (stylesheet: 100dvh, 100vh fallback)`, `false` |
+| Cover | `space`, `minHeight`, `noPad` | `var(--s1, 1rem)`, `— (stylesheet: 100dvh, 100vh fallback)`, `false` — mark the centered child itself: `class="principal"` or `data-centered` |
 | Frame | `ratio` | `16 / 9` |
 | Grid | `min`, `space` | `15rem`, `var(--s1, 1rem)` |
 | Icon | `space`, `label` | `0.5em`, `undefined` |
 | Imposter | `breakout`, `margin`, `fixed` | `false`, `0px`, `false` |
 | Reel | `itemWidth`, `space`, `height`, `noBar` | `auto`, `var(--s1, 1rem)`, `auto`, `false` |
 | Sidebar | `side`, `sideWidth`, `contentMin`, `space`, `noStretch` | `left`, `20rem`, `50%`, `var(--s1, 1rem)`, `false` |
-| Stack | `space`, `recursive`, `splitAfter` | `var(--s1)`, `false`, `undefined` |
-| Switcher | `threshold`, `space`, `limit` | `30rem`, `var(--s1, 1rem)`, `undefined` |
+| Stack | `space`, `recursive` | `var(--s1)`, `false` — split via a `data-split-after` attribute on the child |
+| Switcher | `threshold`, `space`, `limit` (2\|3\|4 → `data-limit`) | `30rem`, `var(--s1, 1rem)`, `undefined` |

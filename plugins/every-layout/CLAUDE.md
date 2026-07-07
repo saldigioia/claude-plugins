@@ -2,7 +2,7 @@
 
 Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 6 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
 
-**Version:** 4.8.0 | **Author:** Rare Data Club
+**Version:** 4.8.1 | **Author:** Rare Data Club
 
 ## The commitment
 
@@ -47,7 +47,7 @@ bin/                     Shell utilities
   lib/escapes.sh           Shared escapes.md parser — sourced by both gates
   lib/primitive-params.sh  Single source of truth for inline-styleable primitive parameters
   test-escapes.sh          Acceptance test for escape suppression (suppressed/expired/unregistered)
-  test-gates.sh            Acceptance test for the hardened gate checks (16 assertions)
+  test-gates.sh            Acceptance test for the hardened gate checks (17 assertions)
   install-git-hooks.sh     Installs a pre-commit hook that runs both gates on every commit
   css-lint-hook.sh         PostToolUse warning hook (.css + inline-style scan for .astro/.tsx/.jsx/.vue/.svelte)
   css-audit.sh             Directory-wide CSS lint with colored output

@@ -782,7 +782,7 @@ Every Layout primitives handle zoom naturally:
 
 ### Fluid Typography Handles Zoom
 
-The fluid type scale (`implementations/vanilla/fluid-type.css`) uses `clamp()` with `rem` + `vw` units. Because `rem` scales with zoom, the minimum value of `clamp()` activates at higher zoom levels, preventing text from becoming unusably large:
+The fluid type scale (`skills/css-design-system/references/fluid-type.css`) uses `clamp()` with `rem` + `vw` units. Because `rem` scales with zoom, the minimum value of `clamp()` activates at higher zoom levels, preventing text from becoming unusably large:
 
 ```css
 /* At 200% zoom, --step-0 resolves closer to the 1rem minimum */

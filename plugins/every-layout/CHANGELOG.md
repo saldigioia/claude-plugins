@@ -7,6 +7,48 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.8.1] - 2026-07-07
+
+### Fixed — Campaign 2 Phase H1 (from the ambiguities & vulnerabilities review)
+
+- **gallery.html loaded no primitive CSS** — its stylesheet href still
+  pointed at the never-existing `implementations/vanilla/` path (only the
+  stress tests had been re-pointed in 4.6.0). Now links
+  `every-layout.css`; verified in a real browser (`.grid` computes
+  `display: grid`, Stack owl spacing resolves, Cover honors `--min-height`).
+  Also fixed the same ghost path in cookbook-antipatterns prose.
+- **astro.md per-instance ID machinery removed** (Cover, Sidebar, Stack,
+  Switcher + Container's conditional block): `Math.random()` ids and
+  `#{id}`-keyed `<style>` blocks were wrong three ways — ID selectors
+  (ELA_003), non-deterministic builds (ELA_006), and plain `<style>` blocks
+  are never templated by Astro, so the variant CSS was emitted as literal
+  dead selectors. All variants are now static rules keyed on class/data
+  attributes (`data-side`, `data-limit`, `data-recursive`, child-side
+  `data-split-after`, `.principal`/`[data-centered]`); the selector-string
+  `centered` prop and numeric `splitAfter` are gone, matching the other
+  ports. Container renamed to the canonical `containerName`/
+  `--containerName` parameter. New porting-guide section: the `define:vars`
+  trust boundary (author-controlled CSS only; plain `<style>` is static).
+- **Modular-scale calc chains restored** in `demos/every-layout.css` and the
+  `/scaffold-system` tokens template (resolved values kept as comments) —
+  and the chain's rationale corrected everywhere: custom properties inherit
+  as *computed* values, so the long-documented "override `--ratio` per
+  subtree" pattern never worked in CSS. Verified in-browser: changing
+  `--ratio` at `:root` recomputes the scale (24px → 20px); a subtree
+  override requires re-declaring the chain (pattern added to
+  token-rules.md). Re-applied the frozen-bare-names clarification that had
+  been lost from token-rules.md.
+- **react-port budget honesty** — new `demos/archive-site/escapes.md`
+  registers the demo page's deliberate React-runtime overage
+  (`ESC_JS_EXCESS`: `_astro/*.js` + `page-total`), so a real build passes
+  `js-budget.sh` by registered exception instead of by never being measured;
+  page header documents it.
+- **js-budget.sh trailing-slash bug** — `dist/` (with slash) broke the
+  dist-relative path strip and with it escape-glob matching; normalized, with
+  a regression assertion in `test-gates.sh` (now 17 assertions).
+
+---
+
 ## [4.8.0] - 2026-07-06
 
 ### Added — backlog closed (Improvement Plan Phase 7); the plan is fully executed

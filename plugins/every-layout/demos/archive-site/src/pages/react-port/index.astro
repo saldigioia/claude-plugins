@@ -12,6 +12,12 @@
  * server-rendered state that would break on hydration mismatch because their
  * only output is inline CSS custom properties and class names — both of which
  * Astro serialises correctly into the static HTML shell before hydration fires.
+ *
+ * ELA_005 budget: this page deliberately exceeds the 15/30 KB JS budget (the
+ * React 19 runtime alone dwarfs it) — that overage is REGISTERED, not silent:
+ * see this site's root `escapes.md` (ESC_JS_EXCESS, `_astro/*.js` +
+ * `page-total`), so `bin/js-budget.sh dist` passes honestly on a real build.
+ * Every other route in this demo ships 0 KB of JavaScript.
  */
 import { getCollection } from 'astro:content';
 import Base from '../../layouts/Base.astro';

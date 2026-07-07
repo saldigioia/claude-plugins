@@ -1,4 +1,4 @@
-# Improvement Plan — 4.5.1 → 4.8.0 (fully executed 2026-07-06)
+# Improvement Plan — Campaign 1: 4.5.1 → 4.8.0 (executed 2026-07-06) · Campaign 2: hardening 4.8.1 → 4.9.0 (planned 2026-07-07)
 
 Actionable sequence derived from the 2026-07-06 full plugin review plus the
 field report `layout-edits.md` (swatch-grid column-clipping / automatic
@@ -323,3 +323,157 @@ Reel/Frame exempt by design).
       flagged while writing native-interaction.md (spawned task chip).
 - [x] every-layout.css has no @media print section (vanilla.md's print
       overrides were not carried into the built artifact).
+
+---
+---
+
+# Campaign 2 — Hardening (from the 2026-07-07 ambiguities & vulnerabilities review)
+
+Source: multi-perspective re-examination after 4.8.0 (cautious back-end
+engineer / Claude Code constitutionalist / Astro constitutionalist / futurist
+designer). Three confirmed defects, one latent budget violation, and a set of
+honesty/robustness gaps. Same ground rules as Campaign 1, plus one new one:
+
+- **Push after every release commit.** Three release commits currently exist
+  on one disk only — right now that is the plugin's single largest
+  vulnerability. Pushing is user-gated; the plan marks where.
+
+---
+
+## Phase H1 — Confirmed defects — release **4.8.1 (PATCH)**
+
+- [x] **H1.1 gallery.html ghost stylesheet** — [demos/gallery.html:7] still
+      links `../implementations/vanilla/every-layout.css` (never existed);
+      only stress tests got the href fix. Change to `every-layout.css`
+      (same directory). Also grep demos/artsheet.html for the same ghost
+      href (believed self-contained — verify, don't assume).
+      *Accept:* `grep -rn "implementations/vanilla" demos stress-tests` → 0
+      hits; open gallery.html in a browser — primitives actually render.
+- [x] **H1.2 astro.md ID-machinery rewrite** (the deferred "agent G") —
+      `skills/framework-implementations/references/astro.md` Cover (~217),
+      Sidebar (~506), Stack (~578) + any other component using it: remove
+      `Math.random()` per-instance ids and every `#{id}` styled block
+      (ELA_003 ID selectors; non-deterministic builds vs ELA_006; and plain
+      `<style>` blocks are NOT templated in Astro — the blocks are likely
+      emitted as literal, dead selectors). Replace with the settled
+      contract: static data-attribute selectors in the component's scoped
+      style (`.cover > :global(.principal)`, `[data-centered]` alias;
+      Sidebar side = DOM order; Stack numeric `splitAfter` REMOVED → child
+      `data-split-after` marker; Switcher `limit` → `data-limit`). Drop the
+      `centered` selector-string prop (selector injection surface; already
+      removed from vue/svelte). Add one paragraph to porting-guide.md:
+      `define:vars` values are author-controlled CSS — never route user
+      content into it.
+      *Accept:* `grep -nE "Math.random|#\{id\}|splitAfter" …/astro.md` → 0
+      hits; every fenced ```astro block extracted and eyeballed against the
+      port contract; prop tables updated.
+- [x] **H1.3 Calc-chain contradiction** — restore derived-token calc chains
+      (`--s1: calc(var(--s0) * var(--ratio))` …) in `demos/every-layout.css`
+      `:root` and in the `/scaffold-system` tokens.css template
+      (`skills/scaffold-system/SKILL.md`), keeping the resolved values as
+      trailing comments (`/* = 0.132rem */`). This re-enables the
+      per-subtree `--ratio` override that SKILL.md:93 / token-rules.md
+      promise and my Phase-3 pinned spec broke.
+      *Accept:* `bash bin/ci.sh` green (token definitions don't hit the
+      value gates); a quick HTML scratch test: setting `--ratio: 1.25` on a
+      subtree visibly recomputes spacing.
+- [x] **H1.4 react-port budget honesty** — create
+      `demos/archive-site/escapes.md`: `ESC_JS_EXCESS` rows for the React
+      vendor/island chunks glob and `page-total` (far-future expiry,
+      justification: deliberate React-port demo; the rest of the site ships
+      0 KB). Note in `react-port/index.astro`'s header comment.
+      *Accept:* row format parses (`ESCAPES_FILE=demos/archive-site/escapes.md
+      bash -c '. bin/lib/escapes.sh; escapes_load; …'` sanity), documented.
+- [x] **H1.5 js-budget trailing-slash bug** — normalize `DIR="${DIR%/}"`
+      before the `${file#$DIR/}` strip so escape globs match dist-relative
+      paths regardless of how the argument was written.
+      *Accept:* new assertion in `bin/test-gates.sh` calling js-budget with
+      `dist/` (trailing slash) against a temp over-budget file + escape.
+- [x] **H1.6 Release** — CHANGELOG 4.8.1, bump, full `bin/ci.sh`, commit.
+      → **USER: push.**
+
+---
+
+## Phase H2 — Gate truthfulness & new tripwires — release **4.9.0 (MINOR)**
+
+- [ ] **H2.1 True violation counts** — `bin/css-strict.sh`: keep the 5-line
+      display cap per check but count ALL matches; print "… and N more" when
+      truncated, so "FAIL — N violation(s)" is the real N.
+      *Accept:* test-gates fixture with >5 violations of one axiom asserts
+      the true count and the "more" line.
+- [ ] **H2.2 js-budget semantics honesty** — rename output labels to what is
+      measured ("Per-file (route proxy)" / "Dist total (page proxy)") and
+      document the heuristic + its code-splitting limits in the script
+      header and `performance-rules.md`. No behavior change.
+- [ ] **H2.3 Escape-limit visibility** — the advisory limits (≤10 escapes
+      per project, ≤3 per file, 15% audit threshold) become *visible*:
+      `escapes.sh` warns on load when the registry exceeds 10 rows;
+      `css-strict.sh` warns when one file's suppressions exceed 3. Warn-tier
+      only — limits stay advisory, but silent drift ends.
+      *Accept:* test-gates assertions for both warnings.
+- [ ] **H2.4 Tailwind arbitrary-value tripwire (ELA_004)** — extend
+      `bin/ports-lint.sh` (or the lint hook) to flag arbitrary-value
+      utilities (`-\[[^\]]+\]` inside class attributes) in
+      .html/.astro/.tsx/.jsx/.vue/.svelte — the axiomatic-values regime is
+      currently CSS-file-shaped and Tailwind moves values into markup.
+      Warn-tier in hook, `--strict` in CI (demos are Tailwind-free → green).
+      *Accept:* fixture pair + test-gates assertions.
+- [ ] **H2.5 ports-lint `--docs` mode** — extract fenced code blocks from a
+      .md file to temp and scan them, giving the reference ports (react.md /
+      vue.md / svelte.md) standing regression protection instead of
+      one-time agent verification; wire into ci.sh for the three files.
+      *Accept:* ci step green; deliberately violating scratch md fails.
+- [ ] **H2.6 ci `--with-build` (opt-in)** — when node+npm are present and
+      the flag is passed: `npm ci && npm run build` in demos/archive-site,
+      then `js-budget.sh dist` (expects H1.4's escapes to suppress the
+      react-port overage). Default ci stays offline/dependency-free.
+      *Accept:* documented in README; offline ci unchanged.
+- [ ] **H2.7 Enforcement-tiers honesty section** — README + CLAUDE.md: one
+      short table separating the three tiers (skill advice → PostToolUse
+      warnings → pre-commit/CI hard gates) and stating plainly that
+      "adoption = contract" is realized only at tier 3; point to
+      install-git-hooks.sh / ci.sh as the teeth.
+- [ ] **H2.8 Shell-surface invariants** — comment headers on the two
+      skill-load shell surfaces (css-design-system SKILL dynamic block;
+      strict-check `$1` interpolation): read-only invariant, no state
+      changes, keep it that way.
+- [ ] **H2.9 Baseline-registry verification pass** — verify every row
+      against webstatus.dev/MDN (network session), correct any drifted
+      Baseline dates, add a `Last verified` column + date; add "re-verify
+      rows" to the release checklist (H2.10).
+- [ ] **H2.10 Release checklist in CLAUDE.md** — small list run before any
+      release: model aliases in agents still valid; baseline-registry
+      last-verified acceptable; counts in README/CLAUDE match `find`;
+      `claude plugin validate`; ci green; push.
+- [ ] **H2.11 Release** — CHANGELOG 4.9.0, bump, full ci, commit.
+      → **USER: push.**
+
+---
+
+## Phase H3 — Ops (user-gated, no version)
+
+- [ ] **H3.1 Push** monorepo `main` (`ee5529e`, `024888b`, `259c2d2` + H1/H2
+      commits) — until then everything lives on one disk.
+- [ ] **H3.2 Reverse-sync standalone** — monorepo → standalone `master`
+      (inverts the old vendoring direction, one time): copy the plugin tree,
+      decide whether IMPROVEMENT-PLAN.md travels (old rule stripped it),
+      commit, and record in memory that the repos are level again.
+- [ ] **H3.3 Reinstall the local plugin** — the installed marketplace copy
+      still predates 4.3.0 ("Astro 5" descriptions in-session).
+
+## Explicitly accepted (no task)
+
+- Escape registry remains trust-by-design for a cloned repo (visible
+  suppressions + H2.3 warnings are the mitigation; hard limits would fight
+  the "disciplined freedom" philosophy).
+- ports-lint stays a tripwire, not a wall (documented evadability).
+- No vnu/HTML-validity gate; no 15th conventions skill (Campaign 1
+  decisions stand).
+
+## Release map (Campaign 2)
+
+| Release | Phase | Nature |
+|---|---|---|
+| 4.8.1 | H1 | PATCH — ghost stylesheet, astro.md ID machinery, calc chains, budget escapes, slash bug |
+| 4.9.0 | H2 | MINOR — true counts, semantics honesty, escape-limit warnings, Tailwind tripwire, --docs mode, opt-in build gate, honesty docs, registry verification |
+| — | H3 | ops: push, reverse-sync, reinstall |

@@ -51,17 +51,20 @@ Tier 1 (global, invariant scale — frozen API per `skills/css-design-system/ref
      Do not rename. Do not add off-scale values.
      ============================================ */
   --ratio: 1.5;
-  --s-5: 0.132rem;
-  --s-4: 0.198rem;
-  --s-3: 0.296rem;
-  --s-2: 0.444rem;
-  --s-1: 0.667rem;
+  /* Derived via calc chains, never hardcoded: change --ratio or --s0 at
+     :root and the whole scale recomputes (a subtree override requires
+     re-declaring the chain there — see token-rules.md, Calc Chain Rule). */
+  --s-5: calc(var(--s-4) / var(--ratio)); /* = 0.132rem */
+  --s-4: calc(var(--s-3) / var(--ratio)); /* = 0.198rem */
+  --s-3: calc(var(--s-2) / var(--ratio)); /* = 0.296rem */
+  --s-2: calc(var(--s-1) / var(--ratio)); /* = 0.444rem */
+  --s-1: calc(var(--s0) / var(--ratio));  /* = 0.667rem */
   --s0: 1rem;
-  --s1: 1.5rem;
-  --s2: 2.25rem;
-  --s3: 3.375rem;
-  --s4: 5.063rem;
-  --s5: 7.594rem;
+  --s1: calc(var(--s0) * var(--ratio));   /* = 1.5rem */
+  --s2: calc(var(--s1) * var(--ratio));   /* = 2.25rem */
+  --s3: calc(var(--s2) * var(--ratio));   /* = 3.375rem */
+  --s4: calc(var(--s3) * var(--ratio));   /* = 5.063rem */
+  --s5: calc(var(--s4) * var(--ratio));   /* = 7.594rem */
 
   --measure: 65ch;
   --border-thin: 1px;

@@ -209,3 +209,22 @@ Primitive: ELC_XXX
 Props: [list]
 Ready for: Integration and testing
 ```
+
+---
+
+## Astro `define:vars` trust boundary
+
+`define:vars` turns component props into CSS custom-property values at build
+time. Two rules keep that safe and idiomatic:
+
+1. **Props are author-controlled CSS.** Only ever pass values the page author
+   wrote (`space="var(--s2)"`, `sideWidth="14rem"`). Never route
+   user-generated or CMS content into `define:vars` — a value is injected
+   into a style attribute, and content does not belong in styling.
+2. **Plain `<style>` blocks are static.** Astro does not template them —
+   `#{expr}` inside a `<style>` is emitted literally. Every variant must be a
+   static rule keyed on a class or data attribute the markup sets
+   (`data-side`, `data-limit`, `data-recursive`, `.principal`). Per-instance
+   generated ids for styling are wrong three times over: ELA_003 (ID
+   selectors), ELA_006 (non-deterministic builds), and they simply do not
+   interpolate.

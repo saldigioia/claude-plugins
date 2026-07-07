@@ -77,6 +77,18 @@ assert "bespoke style-object keys flagged" 1 "bespoke key" "-" "$ec" "$out"
 out=$(bash "$SCRIPT_DIR/ports-lint.sh" --strict "$GATES/ports/cssinjs-compliant.tsx" 2>&1); ec=$?
 assert "class + --custom-property port pattern is CLEAN" 0 "CLEAN" "bespoke key" "$ec" "$out"
 
+echo "js-budget.sh — trailing-slash dist argument"
+TS="$(mktemp -d)"
+head -c 20000 /dev/urandom | base64 > "$TS/big.app.js"
+cat > "$TS/escapes.md" <<'MD'
+| ESC ID | Target (glob) | Axiom | Lines | Expires | Owner | Justification |
+|--------|---------------|-------|-------|---------|-------|---------------|
+| ESC_JS_EXCESS | `big.*.js` | ELA_005 | - | 2099-12-31 | @test | Trailing-slash arg must still match dist-relative escape globs. |
+MD
+out=$(ESCAPES_FILE="$TS/escapes.md" bash "$SCRIPT_DIR/js-budget.sh" "$TS/" 2>&1); ec=$?
+assert "dist/ with trailing slash still matches escape globs" 0 "suppressed by ESC_JS_EXCESS" "FAIL" "$ec" "$out"
+rm -rf "$TS"
+
 echo "escapes.sh — malformed-date guard"
 TMP="$(mktemp -d)"
 cat > "$TMP/escapes.bad.md" <<'MD'
