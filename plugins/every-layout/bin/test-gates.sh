@@ -7,6 +7,12 @@
 # the escapes.sh malformed-date guard — plus a regression guard for the
 # prefers-reduced-motion !important whitelist.
 #
+# 4.10.0 (Campaign 3 C1/C2) additions: the light-dark ⇒ color-scheme gate
+# (ELP_016), the painted-ground gate (ELP_035), the scoped-typographic-
+# permissions gate (ELP_034), the near-duplicate-token and adjacent-
+# breakpoint warn tripwires, and the css-lint-hook infinite-motion +
+# ELP_034 warning tiers.
+#
 # Companion to test-escapes.sh (escape suppression battery).
 # Exit codes: 0 — all assertions passed; 1 — one or more failed.
 
@@ -143,6 +149,70 @@ assert "named utilities + primitive params stay CLEAN" 0 "CLEAN" "-" "$ec" "$out
 echo "ports-lint.sh — --docs mode on a reference port"
 out=$(bash "$SCRIPT_DIR/ports-lint.sh" --strict --docs "$ROOT/skills/framework-implementations/references/react.md" 2>&1); ec=$?
 assert "react.md fenced blocks scan CLEAN via --docs" 0 "CLEAN" "-" "$ec" "$out"
+
+echo "css-strict.sh — C1.1 light-dark ⇒ color-scheme (ELP_016)"
+CS1="$(mktemp -d)"
+cp "$GATES/gate-colorscheme-fail.css" "$CS1/"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$CS1" 2>&1); ec=$?
+assert "dir-mode: light-dark without color-scheme fails" 1 "ELP_016" "-" "$ec" "$out"
+rm -rf "$CS1"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$GATES/gate-colorscheme-fail.css" 2>&1); ec=$?
+assert "single-file scan downgrades to a warning" 0 "ELP_016" "FAIL" "$ec" "$out"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$GATES/gate-colorscheme-pass.css" 2>&1); ec=$?
+assert "light-dark with color-scheme passes silently" 0 "PASS" "ELP_016" "$ec" "$out"
+
+echo "css-strict.sh — C1.2 painted ground (ELP_035)"
+PG="$(mktemp -d)"
+cp "$GATES/gate-painted-ground-fail.css" "$PG/"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$PG" 2>&1); ec=$?
+assert "dir-mode: unpainted canvas under gradient fails" 1 "ELP_035" "-" "$ec" "$out"
+rm -rf "$PG"
+PG="$(mktemp -d)"
+cp "$GATES/gate-painted-ground-pass.css" "$PG/"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$PG" 2>&1); ec=$?
+assert "painted ground beneath the gradient passes" 0 "PASS" "ELP_035" "$ec" "$out"
+cat > "$PG/page.html" <<'HTML'
+<!doctype html>
+<html><head><style>
+body {
+  background: linear-gradient(180deg, #dbeafe, #eff6ff);
+  background-size: 100% 37.5rem;
+}
+</style></head><body><p>content</p></body></html>
+HTML
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$PG/page.html" 2>&1); ec=$?
+assert ".html documents fail per-file even in file mode" 1 "ELP_035" "-" "$ec" "$out"
+rm -rf "$PG"
+
+echo "css-strict.sh — C2.2 scoped typographic permissions (ELP_034)"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$GATES/gate-wordbreak-global.css" 2>&1); ec=$?
+assert "body/*/heading grants fail (3 violations)" 1 "3 violation(s)" "-" "$ec" "$out"
+assert "failure text cites ELP_034" 1 "ELP_034" "-" "$ec" "$out"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$GATES/gate-wordbreak-scoped.css" 2>&1); ec=$?
+assert "content/print/manual grants stay legal" 0 "PASS" "ELP_034" "$ec" "$out"
+
+echo "css-strict.sh — C2.6/C2.7 warn-tier tripwires"
+TW="$(mktemp -d)"
+cp "$GATES/gate-token-drift.css" "$TW/"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$TW" 2>&1); ec=$?
+assert "near-duplicate ink tokens warn without failing" 0 "near-duplicate color tokens" "FAIL" "$ec" "$out"
+rm -rf "$TW"
+TW="$(mktemp -d)"
+cp "$GATES/gate-breakpoint-adjacent.css" "$TW/"
+out=$(bash "$SCRIPT_DIR/css-strict.sh" "$TW" 2>&1); ec=$?
+assert "640/641 breakpoints warn without failing" 0 "adjacent breakpoints" "FAIL" "$ec" "$out"
+rm -rf "$TW"
+
+echo "css-lint-hook.sh — C1.4 infinite-motion warning tier"
+out=$(bash "$SCRIPT_DIR/css-lint-hook.sh" "$GATES/gate-motion-infinite-decorative.css" 2>&1); ec=$?
+assert "decorative infinite animation warns" 0 "INFINITE ANIMATION" "-" "$ec" "$out"
+out=$(bash "$SCRIPT_DIR/css-lint-hook.sh" "$GATES/gate-motion-infinite-status.css" 2>&1); ec=$?
+out="${out}__CLEAN__"
+assert "motion: status marker silences the warning" 0 "__CLEAN__" "INFINITE ANIMATION" "$ec" "$out"
+
+echo "css-lint-hook.sh — C2.2 warn tier (ELP_034)"
+out=$(bash "$SCRIPT_DIR/css-lint-hook.sh" "$GATES/gate-wordbreak-global.css" 2>&1); ec=$?
+assert "hook warns on global typographic grants" 0 "ELP_034" "-" "$ec" "$out"
 
 echo "---"
 printf 'gate hardening tests: %d passed, %d failed\n' "$PASS" "$FAIL"

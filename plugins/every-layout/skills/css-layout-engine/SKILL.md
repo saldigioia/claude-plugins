@@ -74,8 +74,9 @@ The Every Layout system provides 13 composable CSS layout primitives that replac
 | ELP_031 | Scroll Snap Enhancement — progressive, not mandatory |
 | ELP_032 | Font-Display Contract — `font-display: optional` for `ch`-unit CLS prevention |
 | ELP_033 | Neutralized Auto-Minimum — `minmax(0|definite, 1fr)` tracks; `min-inline-size: 0` children |
+| ELP_034 | Scoped Typographic Permissions — `word-break`/`overflow-wrap`/`hyphens` on the content container, never body/`:root`/`*`/headings |
 
-> Full specs for all 33 principles: `references/principles.md`
+> Full specs for all 35 principles: `references/principles.md` (the design-system subset, incl. ELP_035 Painted Ground, lives in `css-design-system/references/principles.md`)
 
 ---
 

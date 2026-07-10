@@ -28,7 +28,9 @@ The axioms are distilled from Andy Bell and Heydon Pickering's *Every Layout*, w
 
 **Enforcement:** `bin/css-strict.sh` fails on physical properties (`width`, `height`, `margin-left/right/top/bottom`, `padding-left/right/top/bottom`). Fixed pixel values (`[0-9]+px`) outside the accepted list (`1px|2px|3px` for borders) are failures, not warnings. Documented gate behaviors: C-style comments are stripped before px detection; `width`/`height` with icon-sized `em`/`cap`/`ex` values are whitelisted (the ELC_ICON pattern, per ELP_024 — see `physical-properties.md` accepted exceptions); in `.html`/`.astro` files both `<style>` blocks (line numbers preserved) and inline `style=""` attributes are scanned — only the primitive-parameter custom properties in `bin/lib/primitive-params.sh` may ride inline.
 
-**Violates:** ELP_002, ELP_004
+Two context checks also live under this axiom — both are "the author only saw one setup" failures: (1) `light-dark()` anywhere in the corpus without a `color-scheme` declaration fails, citing ELP_016 (light-dark() is inert without the opt-in; dark-preference users get a page the author never saw); (2) a `background-image`/gradient/`background-size` painted on `body`/`html`/`:root` with no `background-color` ground anywhere on the root fails, citing ELP_035 (the UA canvas shows through wherever the image stops). `.html` files are judged per-document (a document cannot borrow its ground from a sibling file; `<meta name="color-scheme">` satisfies the opt-in); `.css`/`.astro` fragments are judged as one corpus; a single-file scan downgrades both to warnings.
+
+**Violates:** ELP_002, ELP_004, ELP_016, ELP_035
 
 ---
 
@@ -41,7 +43,9 @@ The axioms are distilled from Andy Bell and Heydon Pickering's *Every Layout*, w
 
 **Enforcement:** `bin/css-strict.sh` fails when a file contains `!important`, ID selectors, or any selector exceeding the 0-2-0 specificity cap. Two documented gate behaviors: (1) `!important` inside a `@media (prefers-reduced-motion: reduce)` block is whitelisted — that is the canonical WCAG reset, and ELP_028 outranks this axiom. (2) The cap counts classes + attributes + pseudo-classes per complex selector as a deliberate approximation: pseudo-elements, and the functional wrappers `:not()/:is()/:where()/:has()` *including their arguments*, are not counted — the cap exists to block class-chaining escalation (`.a .b .c`), and the canonical primitives (e.g. Cover's `:first-child:not(.principal)`) stay legal. Class-based styling is permitted only when a global rule (element or `:root` custom property) cannot express the intent.
 
-**Violates:** ELP_011, budget rule "Max selector specificity 0-2-0"
+The reach discipline also runs in reverse: a *content-tier grant carried by a far-reaching rule* fails. `word-break`/`overflow-wrap`/`hyphens` declared on `body`, `html`, `:root`, a bare universal subject, or a heading subject fails, citing ELP_034 — the fix for token overflow belongs on the token's container, and a global grant is a site-wide license display type eventually cashes in. Whitelisted: `@media print`/`@page` blocks and the non-grant values (`normal`, `keep-all`, `none`, `manual`, `unset`, `initial`, `revert`). Scanner: `bin/lib/typo-scope.sh` (shared with the PostToolUse warning hook).
+
+**Violates:** ELP_011, ELP_034, budget rule "Max selector specificity 0-2-0"
 
 ---
 

@@ -1,0 +1,14 @@
+/* Gate fixture — C1.1 FAIL case: light-dark() with no color-scheme opt-in
+   anywhere in the corpus (ELP_016). A dir-mode scan of a directory holding
+   only this file must FAIL citing ELP_016; a single-file scan downgrades to
+   a warning (the declaration could live in a sibling file). */
+
+:root {
+  --br-color-surface: light-dark(#fafafa, #1a1a1a);
+  --br-color-text: light-dark(#1a1a1a, #e5e5e5);
+}
+
+.card {
+  color: var(--br-color-text);
+  background-color: var(--br-color-surface);
+}

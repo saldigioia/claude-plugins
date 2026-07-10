@@ -99,6 +99,12 @@ Memory lines for quick recall of principles and primitives.
 ### Neutralized Auto-Minimum (ELP_033)
 > Bare 1fr hides an auto floor; minmax(0, 1fr) and min-inline-size: 0 let content wrap instead of clip.
 
+### Scoped Typographic Permissions (ELP_034)
+> Word-break is a permission, not a default; grant it to the container that holds the token — never to body, :root, *, or headings.
+
+### Painted Ground (ELP_035)
+> The canvas is not a color; paint background-color on the root and layer gradients above it.
+
 ---
 
 ## Container Query Hooks

@@ -1,0 +1,16 @@
+/* Gate fixture — C1.4 WARN case: decorative infinite animation. Properly
+   reduced-motion gated and composited, yet still a violation of the
+   infinite-motion rule (motion-allowlist.md): infinite iteration is allowed
+   only for status/progress indication. The PostToolUse hook must print an
+   INFINITE ANIMATION warning. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .hero-badge {
+    animation: bounce 2s ease-in-out infinite;
+  }
+
+  @keyframes bounce {
+    from { transform: translateY(0); }
+    to { transform: translateY(-0.296rem); }
+  }
+}

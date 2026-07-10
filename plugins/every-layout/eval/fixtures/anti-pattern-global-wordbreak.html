@@ -1,0 +1,57 @@
+<!--
+  FIXTURE: Anti-pattern — body-wide word-break / the global permission (ELP_034).
+  Distilled from the Window Classics field report: a body-wide
+  word-break: break-word shipped in the reset, and the hero heading
+  "The Manufacturers We Trust" fractured at 390px into
+  "The Manufacturer / s We Trust" — a single-letter orphan opening a line.
+
+  EXPECTED AUDIT RESULT: Score: 10-14/24
+    The body block grants word-break: break-word site-wide; the h2 display
+    heading inherits the license and cashes it in at narrow widths. Works at
+    every width the author tested, fractures at the one they didn't. The
+    .prose grant below is the CORRECT form (content-tier container) and must
+    not be flagged.
+
+  The auditor must recommend: delete the body-level grant; keep (or add) the
+  permission on the prose/data container that actually holds unbreakable
+  tokens (ELP_034); headings never receive it. A media query or a smaller
+  heading font is NOT the fix.
+-->
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    /* VIOLATION: content-tier permission granted site-wide — inheritance
+       carries it into every heading, and display type eventually fractures
+       mid-word at an untested width (ELP_034). The grant belongs on .prose. */
+    word-break: break-word;
+  }
+
+  .hero {
+    max-inline-size: var(--measure, 65ch);
+    margin-inline: auto;
+    padding: var(--s1, 1.5rem);
+  }
+
+  .hero h2 {
+    font-size: var(--step-3, 2.25rem);
+    text-wrap: balance;
+  }
+
+  .prose {
+    /* Correct: the container that holds untrusted-length content is the
+       one that carries the permission (ELP_034, failure-mechanics.md §2). */
+    overflow-wrap: break-word;
+    hyphens: auto;
+  }
+</style>
+
+<main class="hero">
+  <h2>The Manufacturers We Trust</h2>
+  <div class="prose">
+    <p lang="en">
+      Warranty documentation lives at
+      https://example.com/support/warranty-claims/2025/window-hardware-status
+      and each unit carries serial tokens like WC-390XT-EXTRUSION-04431.
+    </p>
+  </div>
+</main>

@@ -1,0 +1,15 @@
+/* Gate fixture — C1.2 FAIL case: a sized gradient painted over a transparent
+   canvas (ELP_035). No background-color reaches body/html/:root, so every
+   dark-preferring browser renders the page on black wherever the gradient
+   stops — the exact Window Classics field-report shape. Dir-mode must FAIL
+   citing ELP_035; single-file scans warn. */
+
+body {
+  background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 100%);
+  background-size: 100% 37.5rem;
+  background-repeat: no-repeat;
+}
+
+.hero {
+  padding: var(--s1);
+}

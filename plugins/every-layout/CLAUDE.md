@@ -2,7 +2,7 @@
 
 Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 6 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
 
-**Version:** 4.9.0 | **Author:** Rare Data Club
+**Version:** 4.10.0 | **Author:** Rare Data Club
 
 ## The commitment
 
@@ -14,8 +14,8 @@ This plugin treats **simple, durable, CSS-dominant web design as a requirement, 
 skills/                  14 skills (knowledge base + task workflows)
 
   Knowledge skills (auto-invokable)
-    css-layout-engine/       13 primitives, 27 layout principles, 17 reference files
-    css-design-system/       Tokens, theming, fluid type, 6 design-system principles, 18 reference files
+    css-layout-engine/       13 primitives, 28 layout principles, 17 reference files
+    css-design-system/       Tokens, theming, fluid type, 7 design-system principles, 18 reference files
     framework-implementations/ Ports for Astro, React, Vue, Svelte, Tailwind, Vanilla
     astro-site-architect/    Astro 6 project structure, content layer, routing, performance
     archival-data-engine/    SQLite/libSQL/Drizzle, custom loaders, schema patterns
@@ -46,8 +46,9 @@ bin/                     Shell utilities
   ci.sh                    Single CI entry point — syntax checks, acceptance batteries, evals, corpus scans
   lib/escapes.sh           Shared escapes.md parser — sourced by both gates
   lib/primitive-params.sh  Single source of truth for inline-styleable primitive parameters
+  lib/typo-scope.sh        Shared ELP_034 scanner (typographic permissions at global/heading scope)
   test-escapes.sh          Acceptance test for escape suppression (suppressed/expired/unregistered)
-  test-gates.sh            Acceptance test for the hardened gate checks (24 assertions)
+  test-gates.sh            Acceptance test for the hardened gate checks (38 assertions)
   install-git-hooks.sh     Installs a pre-commit hook that runs both gates on every commit
   css-lint-hook.sh         PostToolUse warning hook (.css + inline-style scan for .astro/.tsx/.jsx/.vue/.svelte)
   css-audit.sh             Directory-wide CSS lint with colored output
@@ -67,14 +68,14 @@ demos/                   Reference implementations
   artsheet.html            Single-page vanilla demo — modular scale + core primitives
   gallery.html             Single-page vanilla demo — all primitives rendered inline
 
-stress-tests/            Edge-case tests (1 per primitive, 8–9 tests each)
+stress-tests/            Edge-case tests (1 per primitive + typography, 8–9 tests each)
 ```
 
 ## Skill Dependency Graph
 
 ```
-css-layout-engine          (foundation — no dependencies; owns ELP_001–015, 019–021, 025–033)
-  └─ css-design-system     (builds on layout primitives; owns ELP_016–018, 022–024)
+css-layout-engine          (foundation — no dependencies; owns ELP_001–015, 019–021, 025–034)
+  └─ css-design-system     (builds on layout primitives; owns ELP_016–018, 022–024, 035)
   └─ framework-implementations (ports layout primitives into framework components)
 astro-site-architect       (depends on both CSS skills)
 archival-data-engine       (independent — data layer only)
@@ -96,7 +97,7 @@ The site-builder agent wires all 5 knowledge skills. The css-auditor and css-dia
 
 ### IDs Are Canonical
 - Primitives: `ELC_STACK`, `ELC_BOX`, `ELC_CENTER`, etc. (13 total)
-- Principles: `ELP_001` through `ELP_033`
+- Principles: `ELP_001` through `ELP_035`
 - Every recommendation must cite IDs. Never invent new ones.
 
 ### CSS Rules

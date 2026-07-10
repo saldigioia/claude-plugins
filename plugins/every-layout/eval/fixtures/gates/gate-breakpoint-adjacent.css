@@ -1,0 +1,16 @@
+/* Gate fixture — C2.7 WARN case: two min-width breakpoints 1px apart
+   (the Window Classics 640/641 case). The tripwire prints a warning; the
+   scan still PASSES (warn-tier). Note the queries deliberately contain no
+   layout properties — ELA_001 is not under test here. */
+
+@media (min-width: 640px) {
+  .cta {
+    color: rebeccapurple;
+  }
+}
+
+@media (min-width: 641px) {
+  .cta-banner {
+    color: rebeccapurple;
+  }
+}

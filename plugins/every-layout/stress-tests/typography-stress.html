@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Typography Stress Test — Scoped Permissions (ELP_034)</title>
+  <link rel="stylesheet" href="../demos/every-layout.css">
+  <style>
+    body { padding: var(--s2); font-family: system-ui; }
+    .test-section { margin-block-end: var(--s3); }
+    .test-section h2 { margin-block-end: var(--s0); }
+    .pass { color: green; }
+    .fail { color: red; }
+
+    /* Narrow phone-width containers: 320 / 360 / 390 CSS px expressed on the
+       rem grid (16px root): 20rem / 22.5rem / 24.375rem. */
+    .vp-320 { max-inline-size: 20rem; }
+    .vp-360 { max-inline-size: 22.5rem; }
+    .vp-390 { max-inline-size: 24.375rem; }
+    .viewport-sim { border: 1px dashed #ccc; padding: var(--s-2); }
+
+    .display-heading {
+      font-size: var(--step-3, 2.25rem);
+      line-height: 1.2;
+      margin-block: 0;
+    }
+    .balanced { text-wrap: balance; }
+
+    /* CORRECT (ELP_034): the permission lives on the container that holds
+       untrusted-length tokens — and only there. */
+    .prose {
+      overflow-wrap: break-word;
+    }
+    .prose-hyphenated {
+      overflow-wrap: break-word;
+      hyphens: auto; /* fires because <html lang="en"> is set */
+    }
+
+    /* FAILURE EXHIBIT (deliberate): this class SIMULATES the body-wide grant
+       by letting word-break inherit through a subtree that contains display
+       type. On a real site this declaration sits on body/:root — a form
+       bin/css-strict.sh hard-fails (ELP_034, gate-wordbreak-global.css).
+       Scoping the simulation to a class keeps this stress page gate-clean
+       while demonstrating exactly what the global permission does. */
+    .simulated-global-grant {
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>Typography Stress Tests — Scoped Permissions (ELP_034)</h1>
+  <p>Long-word display type at 320/360/390 containers, with and without content-scoped grants. A heading must wrap at word boundaries or overflow visibly — it must never fracture mid-word.</p>
+
+  <section class="test-section">
+    <h2>Test 1: Manufacturers-class heading, no grant, 390px</h2>
+    <p>The field-report case. No typographic permission reaches this heading.</p>
+    <div class="viewport-sim vp-390">
+      <h3 class="display-heading">The Manufacturers We Trust</h3>
+    </div>
+    <p class="pass">✓ Pass if the line wraps between words ("The Manufacturers" / "We Trust") — never "The Manufacturer / s We Trust"</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 2: Manufacturers-class heading, no grant, 320px</h2>
+    <p>Same heading at the narrowest common viewport.</p>
+    <div class="viewport-sim vp-320">
+      <h3 class="display-heading">The Manufacturers We Trust</h3>
+    </div>
+    <p class="pass">✓ Pass if every line break falls between words at 320px</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 3: All-caps single-token heading, no grant, 360px</h2>
+    <p>One long unbreakable brand token. The honest outcomes are word-boundary wrap (impossible here) or visible overflow — the overflow is the signal that the <em>content</em> is the problem.</p>
+    <div class="viewport-sim vp-360">
+      <h3 class="display-heading">WEATHERTIGHTENING</h3>
+    </div>
+    <p class="pass">✓ Pass if the token overflows the dashed border intact (or fits) — it must not fracture mid-word</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 4: URL-class token in scoped prose, 320px</h2>
+    <p>The container that holds the token carries the grant — the correct form.</p>
+    <div class="viewport-sim vp-320">
+      <div class="prose">
+        <p>Docs: https://example.com/support/warranty-claims/2025/window-hardware-status</p>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if the URL breaks inside the token and never escapes the container</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 5: URL-class token WITHOUT a grant, 320px</h2>
+    <p>No permission anywhere: the token overflows visibly. That overflow points at the one container that needs the grant — the signal a global permission silences.</p>
+    <div class="viewport-sim vp-320">
+      <p>Docs: https://example.com/support/warranty-claims/2025/window-hardware-status</p>
+    </div>
+    <p class="pass">✓ Pass if the URL overflows the dashed border intact — visible, diagnosable, fixable at the container</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 6: Hyphenation as enhancement, 320px</h2>
+    <p><code>hyphens: auto</code> layered over <code>overflow-wrap: break-word</code> on the prose container, with <code>lang</code> set.</p>
+    <div class="viewport-sim vp-320">
+      <div class="prose-hyphenated">
+        <p>Uncharacteristically straightforward weatherproofing recommendations.</p>
+      </div>
+    </div>
+    <p class="pass">✓ Pass if long words break at syllable points (hyphen shown), not at arbitrary characters</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 7: Balanced heading, no grant, 390px</h2>
+    <p><code>text-wrap: balance</code> (ELP_030) is the layout-side tool for ragged display lines — it rebalances word wraps, never fractures words.</p>
+    <div class="viewport-sim vp-390">
+      <h3 class="display-heading balanced">Precision Extrusions For Coastal Weather</h3>
+    </div>
+    <p class="pass">✓ Pass if the two lines are visually balanced and every break falls between words</p>
+  </section>
+
+  <section class="test-section">
+    <h2>Test 8: FAILURE EXHIBIT — the simulated global grant, 390px</h2>
+    <p>The same heading as Test 1 inside a subtree that inherits <code>word-break: break-word</code> — the body-wide permission in miniature. This section is <em>supposed</em> to look broken.</p>
+    <div class="viewport-sim vp-390 simulated-global-grant">
+      <h3 class="display-heading">The Manufacturers We Trust</h3>
+    </div>
+    <p class="fail">✗ Expected fracture: at some width in 320–390 the heading opens a line mid-word (the "The Manufacturer / s We Trust" signature). On a real site this grant sits on body — bin/css-strict.sh fails that form (ELP_034)</p>
+  </section>
+</body>
+</html>

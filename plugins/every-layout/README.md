@@ -2,7 +2,7 @@
 
 Composable CSS layout primitives, Astro 6 site architecture, archival data engine, and design system tokens for Claude Code. Built on the [Every Layout](https://every-layout.dev) methodology by Andy Bell and Heydon Pickering.
 
-**Version:** 4.9.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
+**Version:** 4.10.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
 
 ## The commitment
 
@@ -21,7 +21,7 @@ Adoption = contract. Exceptions live in `escapes.md` with expiry dates, not in s
 
 ## What this plugin gives you
 
-When Claude Code edits CSS, HTML, or Astro files with this plugin enabled, it applies 13 composable layout primitives (Stack, Box, Center, Cluster, Sidebar, Switcher, Cover, Grid, Frame, Reel, Imposter, Icon, Container) and 33 numbered design principles — no media queries, logical properties only, modular-scale spacing, zero-JS by default.
+When Claude Code edits CSS, HTML, or Astro files with this plugin enabled, it applies 13 composable layout primitives (Stack, Box, Center, Cluster, Sidebar, Switcher, Cover, Grid, Frame, Reel, Imposter, Icon, Container) and 35 numbered design principles — no media queries, logical properties only, modular-scale spacing, zero-JS by default.
 
 It also provides:
 
@@ -95,7 +95,7 @@ for reproducible runs. Format and field rules: `escapes.md.template` and
 | `bin/` | Axiom gates (`css-strict.sh` — scans `.html`/`.astro` too, `js-budget.sh`), CSS-in-JS detector (`ports-lint.sh`), CI entry point (`ci.sh`), acceptance batteries (`test-escapes.sh`, `test-gates.sh`), git-hook installer, CSS lint/audit/budget scripts, Astro typecheck, eval runner, SQLite schema dump |
 | `demos/archive-site/` | Reference implementation: Astro + SQLite archive site using all 5 knowledge skills, plus React-port examples |
 | `eval/` | 24-point scoring rubric, 31 fixtures (compliant, anti-pattern, archival-schema, astro-layout, gate, diagnose), 10 scoring prompts, `ids.json` cross-check |
-| `stress-tests/` | 13 HTML files, one per primitive, 8–9 test cases each |
+| `stress-tests/` | 14 HTML files — one per primitive plus typography (ELP_034) — 8–9 test cases each |
 | `escapes.md.template` | Template for the intentional-exception registry (axiom waivers with expiry dates) |
 
 ## Quick usage

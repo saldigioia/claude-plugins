@@ -1,0 +1,22 @@
+/* Gate fixture — C1.4 CLEAN case: infinite animation that indicates status
+   or progress, whitelisted by the adjacent marker (preceding line or same
+   line). The PostToolUse hook must print no INFINITE ANIMATION warning. */
+
+@media (prefers-reduced-motion: no-preference) {
+  .loading-spinner {
+    /* motion: status */
+    animation: spin 1s linear infinite;
+  }
+
+  .progress-pulse {
+    animation: pulse 2s ease-in-out infinite; /* motion: status */
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  @keyframes pulse {
+    50% { opacity: 0.5; }
+  }
+}

@@ -43,6 +43,12 @@ The modular scale calc chain (`--s1: calc(var(--s0) * var(--ratio))`) MUST use `
 }
 ```
 
+## Near-Duplicate Tokens Are Drift
+
+Two distinct tokens holding *almost* the same color (`--ink-heading: #111827` here, `--ink-display: #251f1b` there) are not two decisions — they are one decision made twice, slightly differently, usually months apart. The reader sees one muddy near-black that never quite matches itself; the maintainer sees two tokens with no rule for which applies. One token per role; derive variants with `light-dark()`/relative color (ELP_018), and if two roles genuinely share an ink, alias one token to the other (identical values are fine — the tripwire ignores exact aliases).
+
+`bin/css-strict.sh` prints a warn-tier pair report when two distinct hex-literal tokens sit within a max per-channel delta of 16 (documented limits: bare `#rrggbb`/`#rgb` values only — `light-dark()`/`oklch()`-wrapped tokens are not compared; a tripwire, not colorimetry). A warned pair is either merged, aliased, or consciously kept — silently shipping it is the drift.
+
 ## Budget
 
 | Metric | Limit |

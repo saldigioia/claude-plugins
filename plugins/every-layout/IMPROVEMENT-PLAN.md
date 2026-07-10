@@ -452,14 +452,19 @@ honesty/robustness gaps. Same ground rules as Campaign 1, plus one new one:
 
 ## Phase H3 — Ops (user-gated, no version)
 
-- [ ] **H3.1 Push** monorepo `main` (`ee5529e`, `024888b`, `259c2d2` + H1/H2
-      commits) — until then everything lives on one disk.
-- [ ] **H3.2 Reverse-sync standalone** — monorepo → standalone `master`
+- [x] **H3.1 Push** monorepo `main` (`ee5529e`, `024888b`, `259c2d2` + H1/H2
+      commits) — until then everything lives on one disk. *(Done: origin/main
+      at e1e66b6, tag every-layout--v4.9.0 pushed.)*
+- [x] **H3.2 Reverse-sync standalone** — monorepo → standalone `master`
       (inverts the old vendoring direction, one time): copy the plugin tree,
       decide whether IMPROVEMENT-PLAN.md travels (old rule stripped it),
       commit, and record in memory that the repos are level again.
-- [ ] **H3.3 Reinstall the local plugin** — the installed marketplace copy
-      still predates 4.3.0 ("Astro 5" descriptions in-session).
+      *(Resolved differently: the standalone repo was RETIRED — the monorepo
+      saldigioia/claude-plugins is the single canonical home; recorded in
+      memory.)*
+- [x] **H3.3 Reinstall the local plugin** — the installed marketplace copy
+      still predates 4.3.0 ("Astro 5" descriptions in-session). *(Done:
+      installed copy at 4.9.0.)*
 
 ## Explicitly accepted (no task)
 
@@ -477,3 +482,270 @@ honesty/robustness gaps. Same ground rules as Campaign 1, plus one new one:
 | 4.8.1 | H1 | PATCH — ghost stylesheet, astro.md ID machinery, calc chains, budget escapes, slash bug |
 | 4.9.0 | H2 | MINOR — true counts, semantics honesty, escape-limit warnings, Tailwind tripwire, --docs mode, opt-in build gate, honesty docs, registry verification |
 | — | H3 | ops: push, reverse-sync, reinstall |
+
+---
+---
+
+# Campaign 3 — Composition & Seeing (from the Window Classics performance review)
+
+Source: `/Users/salvatore/Downloads/CURATION-RETRO.md` — the postmortem of the
+plugin's largest field deployment (`/Users/salvatore/Downloads/2025-wc-dev`,
+reviewed 2026-07-09, remediated under `CURATION-PLAN.md` there). The verdict
+that matters here: **the site passed every gate this plugin ships and still
+carried seven composition/context defects** — an h1 outranked by its own
+sections, two near-black inks in one heading system, a CTA living in two
+bodies, a word fracturing mid-heading at 390px, an unpainted canvas in
+dark-preference contexts, two infinite hero animations, and a breakpoint one
+pixel off the grid. Worse: one of the seven violated doctrine the plugin
+already publishes — ELP_016 mandates `color-scheme` alongside `light-dark()`,
+and nothing enforced it. The campaign theme is the retro's closing line: the
+system audited *values*; nobody audited *rank, axis, species, and context*.
+Two thrusts: **teeth** for doctrine that already exists (C1–C2), and **eyes**
+— a rendered, adversarial review tier that static gates cannot replace
+(C3–C4).
+
+Ground rules: Campaign 1 + 2 rules stand (ci green per phase, CHANGELOG +
+version bump per release, fixture pair for every new check, prefer fixing to
+escaping, **push after every release commit** — H3.1's push landed 2026-07-08;
+origin/main is level as of e1e66b6). New rule from
+the retro: when any check lands and fires on real code, grep for the
+violation's *siblings* before closing the item — the WC word-break fix
+missed the same disease in Accordion headings until a later pass (314d9f3).
+
+---
+
+## Phase C1 — Teeth: enforce what the doctrine already claims — part of **4.10.0 (MINOR)**
+
+The ELP_016 class: principles with no mechanical witness. Same spirit as
+Campaign 1 Phase 2 ("enforce what axioms.md claims").
+
+- [x] **C1.1 `light-dark()` ⇒ `color-scheme` gate** — `bin/css-strict.sh`:
+      when a scanned project uses `light-dark(` anywhere, require a
+      `color-scheme:` declaration somewhere in the same corpus (dir-mode
+      check, not per-file; a lone file scan downgrades to a warning). Cite
+      ELP_016 in the failure text. This is the exact WC F7 miss: the token
+      docs *claimed* `color-scheme: light` and no gate noticed it never
+      shipped. *Accept:* fixture pair `eval/fixtures/gate-colorscheme-{fail,pass}.css`;
+      `bin/test-gates.sh` assertions; run over `demos/` — fix or escape any hit.
+- [x] **C1.2 Painted-ground check (new ELP_035)** — `bin/css-strict.sh`
+      dir-mode: a `body`/`html`/`:root` block that sets `background-image`
+      (or a `background:` shorthand containing `gradient(`/`url(`) and/or
+      `background-size` must also carry a reachable `background-color`. The
+      WC body painted a 600px gradient over a transparent canvas; every
+      dark-preferring browser rendered the site on black below the fold.
+      *Accept:* fixture pair; test-gates assertions.
+- [x] **C1.3 ELP_035 "Painted Ground" spec** —
+      `skills/css-design-system/references/principles.md`, full spec format:
+      the canvas is not a color; `background-color` on the root is the
+      contract, sized/gradient images are decoration layered above it; pairs
+      with ELP_016 (`color-scheme` decides what an *unpainted* canvas would
+      have been). Testable assertion: with `prefers-color-scheme: dark`
+      emulated and no site CSS overridden, no route shows UA-canvas ground.
+      Register in `ids.json`; add hook(s) to
+      `skills/css-layout-engine/references/hooks.md`; update counts (SKILL.md).
+- [x] **C1.4 Infinite-motion rule** —
+      `skills/css-design-system/references/motion-allowlist.md` currently has
+      **no position on `animation-iteration-count: infinite`** — the WC hero
+      ran two perpetual animations (word-flip + bounce) through this file
+      unremarked. Add the rule: infinite animation is allowed only for
+      status/progress indication; decorative infinite motion is a violation
+      even under `prefers-reduced-motion: no-preference`. Add a warn-tier
+      check to `bin/css-lint-hook.sh` (`animation[^;]*infinite`, whitelisted
+      by an adjacent `/* motion: status */` marker or escape row);
+      `eval/rubric.md` dimension 7 (Motion Safety) guidance gains one line.
+      *Accept:* fixture pair; hook prints the warning; rubric line present.
+
+---
+
+## Phase C2 — ELP_034 "Scoped Typographic Permissions" — part of **4.10.0 (MINOR)**
+
+The word-break fracture, run through the full field-report pipeline exactly
+as ELP_033 was (Campaign 1 Phase 5 is the template). Careful alignment: the
+plugin already *prescribes* `overflow-wrap: break-word` for unbreakable-token
+**content** (`failure-mechanics.md:47`, `cookbook-recipes.md:1033`,
+antipatterns:861) and uses print-scoped `word-break: break-all` for URLs
+(`vanilla.md:558`). Those stay correct — the new principle draws the line at
+*where the permission is granted*, not whether it exists.
+
+- [x] **C2.1 ELP_034 spec** — `skills/css-layout-engine/references/principles.md`:
+      "Scoped Typographic Permissions" — `word-break` / `overflow-wrap` /
+      `hyphens` are content-tier grants: legal on prose/data containers,
+      never on `body`, `:root`, `*`, or heading selectors. A global grant is
+      a site-wide license that display type eventually cashes in (WC:
+      "The Manufacturer / s We Trust", single-letter orphan at 390px; same
+      disease found later in Accordion headings). Testable assertion: a
+      heading containing a long word at 320px wraps at word boundaries or
+      overflows visibly — it never fractures mid-word. Register in
+      `ids.json`; hooks.md + counts.
+- [x] **C2.2 Gate** — `bin/css-strict.sh` (with the shared selector logic in
+      `bin/lib/` per the 2.8 pattern): flag `word-break|overflow-wrap|hyphens`
+      declarations in blocks whose selector list includes `body`, `html`,
+      `:root`, bare `*`, or `h1`–`h6` compounds. Whitelist: inside
+      `@media print` (the vanilla.md URL case), and `hyphens: manual`.
+      Warn-tier in `bin/css-lint-hook.sh`, hard in `--strict`/ci.
+      *Accept:* fixture pair incl. a print-scoped pass case; test-gates
+      assertions; dogfood sweep over `demos/` + `stress-tests/` green.
+- [x] **C2.3 Failure-mechanics entry** —
+      `skills/css-layout-engine/references/failure-mechanics.md`
+      unbreakable-tokens section: add the "blanket permission" trap —
+      the fix for token overflow belongs on the token's container; granting
+      it globally converts every narrow heading into a fracture site.
+- [x] **C2.4 Anti-pattern #9** —
+      `skills/css-layout-engine/references/cookbook-antipatterns.md`:
+      "Body-wide word-break — the global permission." Signature: a
+      single-letter orphan opening a line at narrow widths; works at every
+      width the author tested, fractures at the one they didn't. Fix +
+      reviewer heuristic ("who granted this, and to whom?"). Fixture
+      `eval/fixtures/anti-pattern-global-wordbreak.html`; wire into run-evals.
+- [x] **C2.5 Heading-tier contract** —
+      `skills/css-design-system/references/typography-scale.md` +
+      `typography-pairing.md`: one ink and one family per heading tier; the
+      page title participates in the same ramp as section titles (rank must
+      be monotonic — WC shipped a 40px/700 h1 above 48px/500 h2s, in a cool
+      near-black no other heading used). Document near-duplicate inks as
+      drift, citing the `#111827`-vs-`#251f1b` case.
+- [x] **C2.6 Near-duplicate token tripwire** — `bin/css-strict.sh` dir-mode
+      warn (never hard-fail): parse `#rrggbb` custom-property values; when
+      two distinct tokens sit within a small channel distance (max per-channel
+      delta ≤ 16), print the pair. Honest limits documented in the script
+      header: hex-literal only, no oklch/color-mix math — a tripwire, not
+      colorimetry. *Accept:* fixture with a near-black pair triggers the warn;
+      `token-rules.md` gains a "near-duplicate = drift" line pointing at it.
+- [x] **C2.7 Breakpoint-proximity tripwire** — `bin/css-strict.sh` dir-mode
+      warn: collect distinct `@media` `min-width` px values; warn when two
+      values differ by ≤ 2px (WC shipped 640 and 641 in one component).
+      *Accept:* fixture pair; test-gates assertion.
+- [x] **C2.8 Stress test** — new `stress-tests/typography-stress.html`:
+      long-word headings (Manufacturers-class, URL-class, all-caps-class) at
+      320/360/390 containers, with and without a content-scoped
+      `overflow-wrap`, plus a deliberately-global-permission block marked as
+      the failure exhibit. Update stress-test counts in `README.md` /
+      CLAUDE.md and any assertions in `bin/run-evals.sh`.
+- [x] **C2.9 Release** — CHANGELOG 4.10.0 (C1+C2), bump, full `bin/ci.sh`
+      green, commit. → **USER: push.**
+
+---
+
+## Phase C3 — Eyes: the rendered adversarial tier — part of **4.11.0 (MINOR)**
+
+The retro's central finding: every screenshot the WC build ever took was
+light-mode, comfortable-width, motion-on. Composition defects (rank, axis,
+species, optical centering) are invisible to file-shaped checks *by nature* —
+this tier renders and looks. It stays **opt-in** (H2.6 precedent): default
+`bin/ci.sh` remains offline and dependency-free.
+
+- [ ] **C3.1 `bin/render-sweep.sh`** — opt-in harness (generalized from the
+      WC `tmp/curation` fullsweep): detects `node` + a resolvable local
+      `playwright` (else exits "SKIP — render tier unavailable", code 0
+      unless `--strict`). Given a base URL + route list (flags or
+      `render-sweep.config.json`): full-page screenshots at
+      320/360/390/414/640/768/834/1024/1280/1440, light **and**
+      dark-emulated, reduced-motion, plus per-route probes printed as a
+      table: `scrollWidth` overflow, dark-canvas ground sample (body bottom
+      pixel), mid-word-fracture heuristic (any rendered text line beginning
+      with a single orphan letter inside a heading). Wire as
+      `bin/ci.sh --with-render` against a served `demos/archive-site` build.
+      *Accept:* sweep over demos produces shots + a clean probe table;
+      SKIP path proven on a playwright-less shell.
+- [ ] **C3.2 `/render-audit` skill** — new `skills/render-audit/SKILL.md`
+      (user-invocable): runs C3.1, then reviews the captures against the
+      composition checklist the static rubric cannot judge — heading rank
+      monotonic (h1 ≥ its sections); one ink/family per tier as *rendered*;
+      shared axis between eyebrow and title; any device rendered in two
+      dressings (the CTA-species test); reserved-width animation slots vs
+      optical centering; dark-scheme ground; narrow-width fractures; seams
+      at adjacent breakpoints (640/641-class). Report format mirrors
+      css-auditor's (findings with element + value + severity), explicitly
+      labeled **model-judged** — distinct tier from the 24-point rubric.
+      *Accept:* run against the WC repo reproduces ≥5 of the retro's 7
+      findings from pre-remediation HEAD (`27a1883`); documented in README.
+- [ ] **C3.3 css-auditor honesty + static composition greps** —
+      `agents/css-auditor.md`: add the static subset it *can* check (heading
+      selectors' color/font tokens per tier from source; ELP_034/035/016
+      citations; duplicate component species by filename/class heuristic),
+      and a mandatory closing line when auditing a whole project: "static
+      audit does not judge rendered composition — run `/render-audit`."
+      Mirror one line in `skills/audit-layout/SKILL.md`.
+- [ ] **C3.4 Composition eval fixture** —
+      `eval/fixtures/composition-page.html`: a single page embodying the WC
+      seven in miniature (subordinate h1, two near-black tokens, body-wide
+      `word-break`, `light-dark()` without `color-scheme`, unpainted gradient
+      body, 640+641 pair, decorative infinite animation). New prompt
+      `eval/prompts/composition_audit.md` with expected findings; wire into
+      `bin/run-evals.sh` (this fixture also feeds the C1/C2 gate fixtures —
+      one artifact, many teeth).
+- [ ] **C3.5 Scaffold the discipline into new projects** —
+      `skills/scaffold-system/SKILL.md` emissions grow: (a) tokens template
+      already carries `color-scheme` — verify, and add root
+      `background-color` (ELP_035); (b) `render-sweep.config.json` template;
+      (c) `PROTECTED-COPY.md` template — named prose zones, the
+      copy-vs-decoration classification question, and the per-sentence
+      sign-off rule (the WC revert lesson: pass-level approval is not
+      sentence-level approval; a rotating headline's word list is *content*).
+      *Accept:* scaffold run emits all three; template text cites ELP_034/035.
+
+---
+
+## Phase C4 — Authority & process — part of **4.11.0 (MINOR)**
+
+- [ ] **C4.1 Constitution additions** —
+      `skills/css-layout-engine/references/constitution.md` code-review
+      checklist: (a) *hunt the class* — any confirmed violation triggers a
+      corpus grep for siblings before the finding closes; (b) *species rule*
+      — a visual device that exists twice gets one owner file; a second
+      variant costs a recorded decision; (c) *backlog aging* — a diagnosed
+      finding older than one release cycle is either scheduled or explicitly
+      wontfixed (a backlog that only accumulates is a diary, not a queue).
+- [ ] **C4.2 site-builder copy authority** — `agents/site-builder.md`
+      constraints: classify every text touch as copy vs decoration *before*
+      editing; never invent, reword, or delete owner copy — subtraction/move
+      requires the owner's exact surviving sentence; visible design
+      decisions ship as options-with-renders, never landed unpicked. (WC
+      precedent: six "approved" copy edits reverted wholesale; the rule now
+      lives in that repo's CLAUDE.md — this bakes it into the toolchain.)
+- [ ] **C4.3 Diagnostician symptom paths** — `agents/css-diagnostician.md`
+      + `skills/diagnose-layout/SKILL.md`: two new traces — "site renders on
+      black in dark mode" → `color-scheme` declared? root
+      `background-color` painted? sized/no-repeat background stopping short?
+      (ELP_016/035); "word fractures mid-heading at narrow width" → walk the
+      cascade for the granting selector (`body`? `*`? heading?) → ELP_034.
+- [ ] **C4.4 Enforcement-tiers table gains the render tier** — README +
+      CLAUDE.md (H2.7's table): tier 4 — rendered review (`/render-audit` +
+      `render-sweep.sh`), model-judged, opt-in; states plainly which defect
+      classes live *only* here. Add "render-sweep demos before release" to
+      the CLAUDE.md release checklist (H2.10).
+- [ ] **C4.5 Dogfood sweep** — run the full C1/C2 gate set plus
+      `--with-render` over `demos/` + `stress-tests/`; fix violations
+      (expected: none structural; possibly gallery/artsheet heading
+      permissions) or register escapes with expiry. Self-compliance is the
+      Phase-3 precedent: the plugin passes its own new teeth.
+- [ ] **C4.6 Release** — CHANGELOG 4.11.0 (C3+C4), bump, `claude plugin
+      validate`, full ci green incl. new fixtures, commit. → **USER: push
+      (and clear H3.1/H3.2 while at it — two campaigns of history still
+      live on one disk).**
+
+---
+
+## Explicitly accepted (no task) — Campaign 3
+
+- **No Playwright dependency in default ci.** The render tier is opt-in
+  forever; the zero-dependency `bin/` ethos (the vnu decision, Campaign 1
+  Phase 7) stands. A machine without node/playwright still gets every
+  file-shaped gate.
+- **Optical judgment stays model-judged.** No pixel-math "rank checker" or
+  fake-mechanized centering metric — pretending composition is grep-able is
+  exactly the failure mode the retro documents. The mechanical tripwires
+  (C1–C2) catch the *causes* that are textual; `/render-audit` owns the rest.
+- **The 24-point rubric keeps its shape.** Composition gets its own rendered
+  checklist (C3.2) rather than a ninth static dimension — a static auditor
+  scoring "rendered rank" it cannot see would be dishonest scoring.
+- **Copy gates ship as scaffold templates, not plugin CI.** The plugin has no
+  site copy to gate; projects do. `PROTECTED-COPY.md` + the WC copy-diff
+  pattern travel via `/scaffold-system` (C3.5).
+
+## Release map (Campaign 3)
+
+| Release | Phases | Nature |
+|---|---|---|
+| 4.10.0 | C1–C2 | MINOR — teeth: ELP_016 enforcement, ELP_035 painted ground, infinite-motion rule, **ELP_034** full pipeline, near-duplicate + breakpoint tripwires, typography stress |
+| 4.11.0 | C3–C4 | MINOR — eyes: render-sweep + `/render-audit`, composition fixture, scaffold discipline, constitution/site-builder/diagnostician authority, dogfood |

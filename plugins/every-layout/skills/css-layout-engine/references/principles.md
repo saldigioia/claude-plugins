@@ -581,3 +581,33 @@ A grid/flex child's automatic minimum size is `auto`, not `0`: by spec it will n
 **Tags:** intrinsic-sizing, containment
 
 > An `aspect-ratio: 2/1` child with a wrapping text label inside `repeat(3, minmax(0, 1fr))` tracks must never be clipped at any container width; with bare `repeat(3, 1fr)` the same markup clips at narrow widths — that difference is this principle
+
+---
+
+## Scoped Typographic Permissions (ELP_034)
+
+**`word-break`, `overflow-wrap`, and `hyphens` are content-tier permissions granted to the specific container that holds untrusted-length content — never to `body`, `html`, `:root`, the universal selector, or heading selectors**
+
+These properties license the browser to fracture words. That license is the correct fix exactly where unbreakable tokens live (the ELP_033 companion — see `failure-mechanics.md` §2: a zero-floor track still cannot shrink below its longest unbreakable run). But the properties inherit, so a global grant travels silently into every element — including display type — and display type eventually cashes it in: a heading at the one width the author never tested opens a line with a single orphan letter ("The Manufacturer / s We Trust" at 390px). The fracture appears far from the declaration that caused it, which is why the bug class survives review: the grant looks like a defensive default, and it works at every width that was actually looked at.
+
+**Applies when:** Granting `word-break`, `overflow-wrap` (or its legacy alias `word-wrap`), or `hyphens` anywhere; reviewing typography for narrow-width behavior; auditing a stylesheet's resets
+
+**Fails when:** The context genuinely is print URL-breaking (`@media print` scoped, see the vanilla port's print rules), the value grants nothing (`normal`, `keep-all`, `none`, `hyphens: manual`), or the whole surface is a token wall (a log viewer, a hash table) where the "content container" legitimately spans the main region — the grant still stops short of headings
+
+**Tradeoffs:** Per-container grants are more verbose than one global line, and a genuinely missing grant surfaces as ELP_033-style overflow — which is the correct failure: visible overflow at the token's container points to the right fix; a silent global permission hides the decision
+
+**Sources:**
+
+1. Field report `CURATION-RETRO.md` (2026-07-09, Window Classics): body-wide `word-break: break-word` fractured "The Manufacturers We Trust" mid-word at 390px; the same disease was later found in Accordion headings (314d9f3) — the grant was global, so the fracture sites were everywhere
+2. CSS Text Module Level 3, [Overflow Wrapping](https://drafts.csswg.org/css-text-3/#overflow-wrap-property) (accessed 2026-07-10) — `overflow-wrap` and `word-break` are inherited properties; inheritance is the transmission mechanism that makes a root grant site-wide
+3. `failure-mechanics.md` §2 (Unbreakable Tokens Raise Min-Content) — the legitimate content-tier use this principle scopes, not forbids
+
+**Tags:** composition, accessibility
+
+> A heading containing a long word at 320px wraps at word boundaries or overflows visibly — it never fractures mid-word; a prose paragraph containing an 80-character token breaks *inside* the token because its own container carries `overflow-wrap: break-word` — where the permission lives is this principle
+
+---
+
+## Painted Ground (ELP_035) → design-system
+
+Defined in `css-design-system/references/principles.md` (design-system-native: the canvas is not a color; `background-color` on the root is the contract, gradients are decoration above it — pairs with ELP_016).

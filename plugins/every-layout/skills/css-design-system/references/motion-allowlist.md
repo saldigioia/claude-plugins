@@ -147,10 +147,33 @@ Use `0.01ms`, not `0s`. A zero duration can prevent `animationend` and `transiti
 | Scroll-jacking (`wheel` event override) | Violates ELP_010 (browser delegation) | Native scroll + optional `scroll-snap` |
 | Parallax scrolling | Triggers motion sickness, layout-heavy | Static backgrounds |
 | Auto-playing carousels | WCAG 2.2.2 failure | User-initiated Reel scroll |
-| Infinite looping animations | Distracting, inaccessible | Single-run with `animation-iteration-count: 1` |
+| Infinite looping animations | Distracting, inaccessible | Single-run with `animation-iteration-count: 1`; status/progress indication is the sole exception (see below) |
 | Animated counters / number tickers | Distracting, content inaccessible during animation | Show final value immediately |
 | Page-entry animations longer than 300ms | Blocks perceived interactivity | Keep under 200ms |
 | `@scroll-timeline` without motion gate | New API, easy to forget the gate | Always wrap in `prefers-reduced-motion: no-preference` |
+
+---
+
+## The Infinite-Motion Rule
+
+`animation-iteration-count: infinite` is allowed **only when the animation indicates status or progress** — a loading spinner, an indeterminate progress pulse, a live-recording dot. There, perpetual motion *is* the information: it says "still working."
+
+**Decorative infinite motion is a violation even under `prefers-reduced-motion: no-preference`.** A bouncing hero badge or a perpetually flipping headline word is not gated content — it is a permanent attention tax on every user who did not opt out, and `no-preference` is the browser default, not an opt-in. The field case that produced this rule: a hero ran two perpetual animations (a word-flip and a bounce) through every review because the reduced-motion gate was present and nothing asked *what* was looping forever.
+
+Mark the legitimate exception with an adjacent comment so the lint tier can tell status from decoration:
+
+```css
+@media (prefers-reduced-motion: no-preference) {
+  .loading-spinner {
+    /* motion: status */
+    animation: spin 1s linear infinite;
+  }
+}
+```
+
+`bin/css-lint-hook.sh` warns on any `animation … infinite` without a `/* motion: status */` marker on the same or the preceding line. The marker is a claim reviewers can audit: if the animation does not report system status or progress, the marker is a lie and the animation goes.
+
+Status animations still obey every other rule on this page: allowlisted properties only, reduced-motion gated, and they stop when the status resolves.
 
 ---
 
@@ -163,6 +186,7 @@ Easing: ease-out (enter), ease-in (exit)
 Gate: ALWAYS @media (prefers-reduced-motion: no-preference)
 Reset: ALWAYS 0.01ms global reset in prefers-reduced-motion: reduce
 Forbidden: transition: all, layout properties, scroll-jacking, parallax, auto-play
+Infinite: status/progress indication ONLY, marked /* motion: status */
 ```
 
 ---

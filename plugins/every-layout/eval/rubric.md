@@ -112,6 +112,7 @@ This rubric provides structured criteria for evaluating CSS layouts against Ever
 - [ ] Scroll-driven animations wrapped in `prefers-reduced-motion: no-preference`
 - [ ] `animation-duration` and `transition-duration` set to `0.01ms` (not `0s`) in reduced-motion context
 - [ ] No JavaScript scroll-jacking or custom momentum
+- [ ] No decorative `animation-iteration-count: infinite` — infinite motion only for status/progress indication, marked `/* motion: status */` (motion-allowlist.md); a reduced-motion gate does not excuse a perpetual decoration
 
 **Reference:** ELP_028, WCAG 2.1 SC 2.3.3
 

@@ -1,0 +1,14 @@
+/* Gate fixture — C1.2 PASS case: the same sized gradient, but the canvas is
+   painted first (ELP_035). The gradient is decoration layered above an
+   explicit background-color ground. */
+
+body {
+  background-color: #eff6ff;
+  background-image: linear-gradient(180deg, #dbeafe 0%, #eff6ff 100%);
+  background-size: 100% 37.5rem;
+  background-repeat: no-repeat;
+}
+
+.hero {
+  padding: var(--s1);
+}

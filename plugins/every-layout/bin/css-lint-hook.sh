@@ -14,9 +14,18 @@
 #   1. Physical properties (width/height/margin-left etc.)
 #   2. Layout media queries (@media min-width/max-width)
 #   3. Arbitrary pixel values outside var() context
+#   4. Bare 1fr grid tracks (hidden auto floor, ELP_033)
+#   5. Infinite animations without a /* motion: status */ marker — infinite
+#      iteration is allowed only for status/progress indication
+#      (motion-allowlist.md); decorative infinite motion is a violation even
+#      under prefers-reduced-motion: no-preference.
+#   6. Content-tier typographic permissions (word-break/overflow-wrap/
+#      hyphens) granted at body/:root/*/heading scope (ELP_034; shared
+#      scanner in bin/lib/typo-scope.sh — the hard version lives in
+#      css-strict.sh).
 #
 # Lints framework templates (.astro/.tsx/.jsx/.vue/.svelte) for:
-#   4. Bespoke declarations inside style="..." attributes.
+#   7. Bespoke declarations inside style="..." attributes.
 #      Only primitive-parameter custom properties are allowed inline;
 #      everything else emits ELA_002.
 
@@ -27,6 +36,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/primitive-params.sh
 . "$SCRIPT_DIR/lib/primitive-params.sh"
+# shellcheck source=lib/typo-scope.sh
+. "$SCRIPT_DIR/lib/typo-scope.sh"
 
 FILE="${1:-}"
 [ -z "$FILE" ] && exit 0
@@ -64,10 +75,37 @@ case "$FILE" in
       | while IFS= read -r line; do
           echo "BARE 1fr TRACK: $line — bare 1fr is minmax(auto, 1fr); use minmax(0, 1fr) or a definite minimum (ELP_033)"
         done || true
+
+    # 5. Infinite animations — allowed only for status/progress indication.
+    #    Whitelist: a /* motion: status */ marker on the same or the
+    #    immediately preceding line. (Warn-tier; a project keeping one
+    #    deliberately registers the escape or carries the marker.)
+    awk '
+      BEGIN { prev = "" }
+      {
+        if ($0 ~ /animation[^;]*infinite/ \
+            && $0 !~ /motion:[[:space:]]*status/ \
+            && prev !~ /motion:[[:space:]]*status/) {
+          printf "INFINITE ANIMATION: %d: %s — infinite iteration is allowed only for status/progress indication; mark it /* motion: status */ or make it single-run (motion-allowlist.md, ELP_028)\n", NR, substr($0, 1, 100)
+          n++
+        }
+        prev = $0
+        if (n >= 3) exit
+      }
+    ' "$FILE" 2>/dev/null || true
+
+    # 6. Typographic permissions at global/heading scope (ELP_034) — the
+    #    shared scanner; css-strict.sh fails these, the hook warns.
+    typo_scope_scan "$FILE" \
+      | head -5 \
+      | while IFS="$(printf '\t')" read -r lineno sel decl; do
+          [ -z "$lineno" ] && continue
+          echo "GLOBAL TYPO PERMISSION: $lineno: $sel { $decl } — word-break/overflow-wrap/hyphens are content-tier grants; scope them to the content container, never body/:root/*/headings (ELP_034)"
+        done || true
     ;;
 
   *.astro|*.tsx|*.jsx|*.vue|*.svelte)
-    # 4. Inline style="..." scan. Primitive-parameter custom properties are the
+    # 7. Inline style="..." scan. Primitive-parameter custom properties are the
     #    only declarations legitimately carried on a template element (they
     #    parameterize ELC_STACK, ELC_SIDEBAR, ELC_SWITCHER, ELC_COVER,
     #    ELC_CLUSTER, ELC_FRAME, ELC_IMPOSTER, ELC_GRID, ELC_CENTER,

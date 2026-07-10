@@ -97,6 +97,7 @@ Uses `light-dark()` for automatic dark-mode support. Surface elevation derived f
 | ELP_016 | Theme-Aware Color Tokens — `light-dark()` + `color-scheme` |
 | ELP_017 | Surface Elevation via Lightness — lightness increment in dark mode |
 | ELP_018 | Derived Color Variants — relative colors with `calc()` |
+| ELP_035 | Painted Ground — explicit root `background-color`; gradients/images are decoration above it, never the ground |
 
 ### Token Groups
 

@@ -871,3 +871,62 @@ The `auto` floor (or an explicit floor) is *correct* when not shrinking is the p
 ## Reviewer Heuristic
 
 > If a rule lays out children with `1fr` tracks **or** flex, and a child can contain an image, an `aspect-ratio`, or a long unbreakable string: confirm the track is `minmax(0|definite, …)` **or** the child has `min-inline-size: 0`. If neither is present, it will clip at some width. (ELP_033)
+
+---
+
+# Anti-Pattern: Body-Wide Word-Break (The Global Permission)
+
+## The Problem
+
+`overflow-wrap: break-word` (or worse, `word-break: break-all`) granted on `body`, `:root`, or `*` reads as a defensive default — "nothing will ever overflow again." But these properties inherit, so the grant is a site-wide license to fracture words, and display type eventually cashes it in: a heading at a width the author never tested opens a line with a single orphan letter. The signature is **"works at every width the author tested, fractures at the one they didn't"** — the declaration sits in a reset file, far from every fracture site it creates.
+
+## Bad Example
+
+```css
+/* DON'T DO THIS — a site-wide license display type will cash in */
+body {
+  font-family: var(--br-font-body);
+  overflow-wrap: break-word;
+}
+```
+
+```html
+<!-- Rendered at 390px, the h2 becomes:
+     The Manufacturer
+     s We Trust                          -->
+<h2>The Manufacturers We Trust</h2>
+```
+
+## Why It's Bad
+
+1. **Inheritance is the blast radius**: one declaration, every element — headings, buttons, navigation labels
+2. **Distance hides the cause**: the fracture appears in a hero at 390px; the grant lives in `reset.css`
+3. **It silences the useful signal**: visible overflow at one container points to the one container that needs the grant; the global permission converts that signal into silent fractures
+4. **Display type is the victim**: prose rarely holds 30-character words — headings, product names, and brand phrases are where mid-word breaks actually land, and they are exactly where breaks are least acceptable
+
+## The Fix
+
+Grant the permission to the container that holds the tokens — and only there:
+
+```css
+/* The prose/data container that actually holds untrusted-length content */
+.prose {
+  overflow-wrap: break-word;
+  hyphens: auto; /* enhancement; requires lang on html or this element */
+}
+.data-table td {
+  word-break: break-all; /* hashes, SKUs — breaking anywhere is correct here */
+}
+```
+
+Headings never receive the grant. A heading containing a genuinely long word either wraps at word boundaries or overflows visibly — and visible overflow is a *content* problem to solve with the copy's owner, not a license to fracture (`text-wrap: balance` per ELP_030 helps the layout; it never breaks words).
+
+## Legitimate Uses
+
+- **Print URL-breaking** — `@media print { a[href]::after { … } }` blocks conventionally carry `word-break: break-all` for printed URLs; the print scope is the container
+- **`hyphens: manual`** — grants nothing automatic; `&shy;` stays author-controlled anywhere
+- **Token walls** — a log viewer or hash browser may scope the grant to its main content region; the grant still stops short of headings
+
+## Reviewer Heuristic
+
+> For every `word-break` / `overflow-wrap` / `hyphens` declaration ask: **who granted this, and to whom?** If the answer is "everyone, from a reset," it is a fracture waiting for a narrow viewport. The grant is legal exactly where the unbreakable content lives. (ELP_034 — `bin/css-strict.sh` fails the global form; the fixture pair is `eval/fixtures/gates/gate-wordbreak-{global,scoped}.css`)

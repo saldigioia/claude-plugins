@@ -59,7 +59,17 @@ Don't reach for `min-block-size: 0` reflexively — most Stacks aren't block-con
 
 This is the same fix already shipped in the Fixed-N Equal Columns recipe (`cookbook-recipes.md`) — apply it anywhere content is untrusted-length, not just swatch grids. It also bears on the Measure (ELP_006): a `65ch` measure assumes wrapping prose; an unbroken 80-character token defeats the measure the same way it defeats a grid track.
 
-**Cite:** ELP_033, ELP_006
+**The blanket-permission trap:** the defense above belongs on the *token's container* — and only there. The tempting shortcut is to grant it once, globally:
+
+```css
+body {
+  overflow-wrap: break-word; /* DON'T — this is a site-wide license */
+}
+```
+
+Because these properties inherit, a `body`/`:root`/`*` grant converts every narrow heading into a fracture site: display type cashes the license in at whatever width the author never tested, opening a line with a single orphan letter mid-word. The overflow the global grant "fixes" was the useful signal — visible overflow at one container points to the one container that needs the grant. Scope the permission to the prose/data container that actually holds unbreakable tokens; never grant it through `body`, `:root`, `*`, or heading selectors (ELP_034 — `bin/css-strict.sh` fails the global form, and `cookbook-antipatterns.md` "Body-Wide Word-Break" dissects the signature).
+
+**Cite:** ELP_033, ELP_034, ELP_006
 
 ---
 

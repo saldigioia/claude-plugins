@@ -233,6 +233,8 @@ Each pairing is mapped to a design posture (from `density-patterns.md` and the i
 | No fallback stack | Flash of unstyled text, layout shift | Always specify 3+ fallbacks with similar metrics |
 | `font-display: swap` | Causes layout shift when font loads | Use `font-display: optional` (ELP_032) |
 | Decorative/script fonts for body | Illegible at sustained reading length | Reserve decorative faces for display only, 2-3 words max |
+| Two inks in one heading system | Near-duplicate near-blacks (`#111827` here, `#251f1b` there) read as one muddy color that never quite matches — drift, not design | One ink token per heading tier (typography-scale.md heading-tier contract); the near-duplicate tripwire in `bin/css-strict.sh` prints the pairs |
+| Second family inside a tier | An h2 set in the display face on one page and the text face on another breaks rank legibility | One family per tier, declared once via the heading element selector |
 
 ---
 

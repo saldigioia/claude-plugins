@@ -1,0 +1,13 @@
+/* Gate fixture — C1.1 PASS case: light-dark() with the color-scheme opt-in
+   in the same corpus (ELP_016). Both dir-mode and single-file scans pass. */
+
+:root {
+  color-scheme: light dark;
+  --br-color-surface: light-dark(#fafafa, #1a1a1a);
+  --br-color-text: light-dark(#1a1a1a, #e5e5e5);
+}
+
+.card {
+  color: var(--br-color-text);
+  background-color: var(--br-color-surface);
+}

@@ -1,0 +1,19 @@
+/* Gate fixture — C2.6 WARN case: two distinct ink tokens within a max
+   per-channel delta of 16 — near-duplicate inks are drift, one ink per role
+   (token-rules.md). The tripwire prints a warning; the scan still PASSES
+   (warn-tier, never a hard failure). --surface sits far away and must not
+   pair with either ink. */
+
+:root {
+  --ink-heading: #16181d;
+  --ink-display: #1d232b;
+  --surface: #fefefe;
+}
+
+h1 {
+  color: var(--ink-heading);
+}
+
+.display-title {
+  color: var(--ink-display);
+}

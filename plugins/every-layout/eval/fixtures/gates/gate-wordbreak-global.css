@@ -1,0 +1,28 @@
+/* Gate fixture — C2.2 FAIL case: content-tier typographic permissions
+   granted at global/heading scope (ELP_034). Exactly three grants must be
+   flagged (body, universal, heading); the content-scoped, manual, and
+   print-scoped grants below them must stay legal. */
+
+body {
+  font-family: system-ui, sans-serif;
+  overflow-wrap: break-word; /* flagged — global grant, display type inherits it */
+}
+
+* {
+  word-break: break-word; /* flagged — universal grant */
+}
+
+h2 {
+  hyphens: auto; /* flagged — heading grant, fractures display type */
+}
+
+.prose {
+  overflow-wrap: break-word; /* legal — the container that holds the tokens */
+  hyphens: manual; /* legal — manual grants nothing automatic */
+}
+
+@media print {
+  a[href] {
+    word-break: break-all; /* legal — print URL breaking */
+  }
+}

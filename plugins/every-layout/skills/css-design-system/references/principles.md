@@ -1,6 +1,6 @@
 # CSS Design System Principles
 
-> Design-system principles that were previously numbered within the layout-engine catalog but belong semantically to theming, tokens, shadows, and icon sizing. IDs are preserved to keep existing cross-references valid. The `css-layout-engine/references/principles.md` file retains pointer stubs at each relocated slot. This file defines ELP_016–018 and ELP_022–024 only; the complete ELP_001–033 catalog spans both files.
+> Design-system principles: the subset relocated from the layout-engine catalog (theming, tokens, shadows, icon sizing — IDs preserved so existing cross-references stay valid; `css-layout-engine/references/principles.md` retains pointer stubs at each relocated slot) plus principles born design-system-native (ELP_035+). This file defines ELP_016–018, ELP_022–024, and ELP_035; the complete ELP_001–035 catalog spans both files.
 
 ---
 
@@ -121,3 +121,27 @@
 **Tags:** intrinsic-sizing, accessibility
 
 > Increasing font-size on parent should proportionally scale icon without CSS changes
+
+---
+
+## Painted Ground (ELP_035)
+
+**The document canvas gets an explicit `background-color` on the root; gradients and images are decoration layered above the painted ground, never a substitute for it**
+
+The UA canvas is not a color you chose. With `color-scheme: light dark` (ELP_016) an unpainted canvas follows the user's preference — white for light-preference users, near-black for dark-preference users — and without `color-scheme` it is whatever the browser defaults to. A `background-image` or gradient with `background-size` / `no-repeat` covers only the region it is told to; everywhere it stops, the canvas shows through. The field-report failure: a body painted a 600px-tall gradient over a transparent canvas, so every dark-preferring browser rendered the entire site below the fold on black — invisible in every light-mode screenshot the project ever took.
+
+**Applies when:** Any `body`/`html`/`:root` rule declares `background-image`, a `background:` shorthand containing `gradient()`/`url()`, or `background-size`
+
+**Fails when:** The ground is already in the shorthand — `background: #eff6ff url(…) no-repeat` paints color and decoration in one declaration; or the design deliberately adopts the UA canvas as its ground (`background-color: Canvas` with `color-scheme` set), which is a recorded decision, not an omission
+
+**Tradeoffs:** An explicit ground must itself be theme-aware (`light-dark()`) or it fights `color-scheme` — painting `#ffffff` under a dark-preference user is honest but jarring, so the ground token belongs in the same `light-dark()` regime as the ink tokens (ELP_016 pairs with this principle: `color-scheme` decides what an *unpainted* canvas would have been; ELP_035 says never to find out by accident)
+
+**Sources:**
+
+1. Field report `CURATION-RETRO.md` (2026-07-09, Window Classics): 600px body gradient over a transparent canvas — UA-canvas black below the fold in dark-preference contexts, shipped because every screenshot was light-mode
+2. CSS Color Adjustment Module Level 1, [Preferred Color Schemes](https://drafts.csswg.org/css-color-adjust-1/#color-scheme-prop) (accessed 2026-07-10) — the canvas surface color is determined by the used color scheme when no author background is set
+3. ELP_016 (Theme-Aware Color Tokens) — the companion principle this one has mechanical teeth for
+
+**Tags:** composition, responsiveness
+
+> With `prefers-color-scheme: dark` emulated and no site CSS overridden, no route shows the UA canvas as ground — scroll past any hero gradient and sample the body's bottom pixel: it is a color the stylesheet painted, not the UA default

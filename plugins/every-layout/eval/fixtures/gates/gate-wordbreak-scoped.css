@@ -1,0 +1,26 @@
+/* Gate fixture — C2.2 PASS case: every typographic permission is granted at
+   content tier, print-scoped, or is a non-grant value (ELP_034). Must scan
+   CLEAN. */
+
+.prose {
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+.data-table td {
+  word-break: break-all;
+}
+
+@media print {
+  a[href^="http"] {
+    word-break: break-all;
+  }
+}
+
+h1 {
+  hyphens: manual; /* manual hyphenation grants nothing automatic */
+}
+
+body {
+  word-break: normal; /* a reset is not a grant */
+}

@@ -7,6 +7,93 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.10.0] - 2026-07-10
+
+Campaign 3 Phases C1–C2 ("teeth"), from the Window Classics performance
+review (`CURATION-RETRO.md`): the site passed every gate this plugin ships
+and still carried seven composition/context defects — one of which violated
+doctrine the plugin already publishes. This release gives that doctrine
+mechanical witnesses and runs the word-break fracture through the full
+field-report pipeline.
+
+### Added — enforce what the doctrine already claims (Phase C1)
+
+- **`light-dark()` ⇒ `color-scheme` gate (ELP_016)** — `css-strict.sh` fails
+  when a corpus uses `light-dark()` but declares no `color-scheme` anywhere
+  (the exact WC F7 miss: the token docs claimed it, nothing noticed it never
+  shipped). `.html` documents are judged per-file (`<meta
+  name="color-scheme">` satisfies the opt-in); `.css`/`.astro` fragments are
+  judged as one corpus; single-file scans downgrade to a warning. Fixture
+  pair `gates/gate-colorscheme-{fail,pass}.css`.
+- **Painted-ground gate (new ELP_035)** — a `body`/`html`/`:root` block that
+  paints a `background-image`/gradient or sets `background-size` must have a
+  reachable `background-color` ground; the WC body painted a 600px gradient
+  over a transparent canvas and every dark-preferring browser rendered the
+  site on black below the fold. Same document/corpus/warning split. Fixture
+  pair `gates/gate-painted-ground-{fail,pass}.css`.
+- **ELP_035 "Painted Ground" spec** — full spec in
+  `css-design-system/references/principles.md` (the canvas is not a color;
+  gradients are decoration layered above the painted ground; pairs with
+  ELP_016), registered in `ids.json`, hook in `hooks.md`, pointer stub in
+  the layout catalog.
+- **Infinite-motion rule** — `motion-allowlist.md` now takes a position on
+  `animation-iteration-count: infinite`: allowed ONLY for status/progress
+  indication, marked `/* motion: status */`; decorative infinite motion is a
+  violation even under `prefers-reduced-motion: no-preference` (the WC hero
+  ran two perpetual animations through this file unremarked). Warn-tier
+  check in `css-lint-hook.sh`; rubric dimension 7 gains the check line.
+  Fixture pair `gates/gate-motion-infinite-{decorative,status}.css`.
+
+### Added — ELP_034 "Scoped Typographic Permissions", full pipeline (Phase C2)
+
+- **ELP_034 spec** — `word-break`/`overflow-wrap`/`hyphens` are content-tier
+  grants: legal on the container that holds untrusted-length content, never
+  on `body`, `html`, `:root`, `*`, or heading selectors. A global grant is a
+  site-wide license display type eventually cashes in ("The Manufacturer /
+  s We Trust" at 390px). The existing content-tier prescriptions
+  (failure-mechanics §2, print URL-breaking) stay correct — the principle
+  draws the line at *where the permission is granted*.
+- **ELP_034 gate** — hard in `css-strict.sh` (ELA_003; subject-compound
+  analysis, `@media print`/`@page` + non-grant values whitelisted), warn in
+  `css-lint-hook.sh`; shared scanner `bin/lib/typo-scope.sh` (the 2.8
+  single-source pattern). Fixture pair `gates/gate-wordbreak-{global,scoped}.css`.
+- **Anti-pattern #9 "Body-Wide Word-Break (The Global Permission)"** —
+  cookbook entry with the "works at every width the author tested" signature
+  and the reviewer heuristic ("who granted this, and to whom?"); eval
+  fixture `anti-pattern-global-wordbreak.html` distilled from the WC case.
+- **Failure-mechanics §2 gains the blanket-permission trap** — the defense
+  belongs on the token's container; the global shortcut converts every
+  narrow heading into a fracture site.
+- **Heading-tier contract** — `typography-scale.md`: one ink and one family
+  per tier, monotonic rank (the page title participates in the same ramp —
+  WC shipped a 40px/700 h1 above 48px/500 h2s), sizes from the `--step-*`
+  ramp; `typography-pairing.md` anti-patterns gain the two-inks and
+  second-family-in-tier rows, citing the `#111827`-vs-`#251f1b` drift case.
+- **Near-duplicate token tripwire** (warn-tier, never fails) —
+  `css-strict.sh` prints pairs of distinct hex-literal tokens within a max
+  per-channel delta of 16; exact-value aliases are ignored. Honest limits
+  documented (bare hex only — no oklch/color-mix math; a tripwire, not
+  colorimetry). `token-rules.md` gains the "near-duplicates are drift"
+  section. Fixture `gates/gate-token-drift.css`.
+- **Breakpoint-proximity tripwire** (warn-tier) — two distinct `@media`
+  `min-width` px values ≤ 2px apart print a warning (WC shipped 640 and 641
+  in one component); `max-width` deliberately ignored so the 640/641
+  max/min hand-off idiom stays legal. Fixture `gates/gate-breakpoint-adjacent.css`.
+- **`stress-tests/typography-stress.html`** — Manufacturers-class, URL-class,
+  and all-caps headings at 320/360/390 containers, with and without
+  content-scoped grants, plus a deliberately-scoped failure exhibit
+  simulating the global grant (the real global form fails the gate).
+
+### Changed
+
+- `axioms.md` enforcement notes synced to the new checks (ELA_002 gains the
+  two context checks; ELA_003 gains the reach-in-reverse rule).
+- `test-gates.sh` grows from 24 to 38 assertions (C1/C2 batteries).
+- Counts: 35 principles (28 layout + 7 design-system), 14 stress tests;
+  `ids.json` registers ELP_034/ELP_035.
+
+---
+
 ## [4.9.0] - 2026-07-07
 
 ### Added — gate truthfulness & new tripwires (Campaign 2 Phase H2)
