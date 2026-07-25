@@ -253,10 +253,16 @@ verdicts** (ffmpeg 8.1.2; verdicts in `references/qtff-claims.md`):
   plugin behavior), fragmented/DRM edges (C50/C51 — WAIVED: detection-only
   doctrine), two-pass alignment bound (gap 10 — queued with 3a/3c for the
   real-Mac session).
-- Still open (needs a human/Mac or real captures): 3a `fiel` deinterlacing,
-  3c caption rendering, 4a/3b confirmation listens, C53–C59 playability
-  matrix, 5e auto-vs-mov audio-policy divergence (decision item), 5h local
-  real-PAFF fixture note.
+- **5e RESOLVED as documented divergence** — auto.sh is the single-track
+  ladder driver, mov.sh the dual-track deliverable builder; the one seam where
+  /mov rides auto's copy rung (full-TS reordered PAFF) now announces its
+  single-track audio and points at dual-track.sh.
+- **5h BLOCKED** — no original `.ts` survives on T9 (only the rebuilt `.mov`
+  deliverables); cut the <10 s local fixture when the S34E12 source
+  re-download lands, and keep it OUTSIDE the repo.
+- Still open (needs a human at a Mac): 3a `fiel` deinterlacing, 3c caption
+  rendering, 4a/3b confirmation listens, C53–C59 playability matrix, plus the
+  QuickTime-scrub halves noted inside individual claim rows.
 
 ## Execution order & exit criteria
 
