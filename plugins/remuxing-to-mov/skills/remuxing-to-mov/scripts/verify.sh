@@ -341,8 +341,14 @@ if [ "$SIG" -eq 1 ]; then
   echo "-- (--signaling) color / HDR / caption preservation (source vs output) --"
   sg () { ffprobe -v error -select_streams v:0 -show_entries stream="$2" -of default=nw=1:nk=1 "$1" 2>/dev/null | head -1; }
   sdrift=0
-  for k in color_primaries color_transfer color_space color_range; do
+  # sample_aspect_ratio rides the pasp atom — anamorphic broadcast (e.g. 40:33)
+  # displays stretched/squeezed if it drops, and nothing else checks it (QTFF
+  # audit 3d: pasp survives -c copy, but drift here used to ship silently)
+  for k in color_primaries color_transfer color_space color_range sample_aspect_ratio; do
     a=$(sg "$SRC" "$k"); b=$(sg "$OUT" "$k")
+    # undefined SAR (N/A / 0:1) in the source is not a signal; don't false-DRIFT
+    # against a defaulted 1:1 in the output
+    if [ "$k" = sample_aspect_ratio ]; then case "$a" in ''|N/A|0:1) echo "   $k: source undefined — skipped"; continue;; esac; fi
     if [ "$a" != "$b" ]; then echo "   $k: source=$a output=$b  (DRIFT)"; sdrift=1; else echo "   $k=$a (preserved)"; fi
   done
   if [ "$PF_CODEC" = hevc ]; then
