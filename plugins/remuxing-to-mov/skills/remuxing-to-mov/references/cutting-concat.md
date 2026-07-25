@@ -30,6 +30,15 @@ random-access frame** (verified against the QuickTime File Format spec):
   and depend on the **previous** GOP (`sdtp` flag *EarlierDisplayTimesAllowed*).
   **Not** self-contained at a join.
 
+**Do NOT trust the atoms to make that distinction for you** (QTFF audit 2a,
+probed 2026-07-25 on ffmpeg 8.1.2): on a `-c copy` of open-GOP H.264, ffmpeg
+marks every non-IDR recovery I-frame as a FULL sync sample in `stss` and writes
+no `stps` and no `sdtp` at all — the container *overclaims* seekability. That is
+`stps` as the spec intends it, not as ffmpeg writes it, and it is exactly why a
+player seek to such a "sync" sample tears, and why `gop-probe.sh` decides from
+the **display-order frame pattern** (a `B` before the first `I`) instead of
+reading the sample tables.
+
 If a segment **starts on an open-GOP (partial-sync) I-frame**, its leading
 B-frames still carry motion + residual that point into the GOP you deleted.
 Decoded **alone**, the decoder fills the missing reference with black → looks

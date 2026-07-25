@@ -162,6 +162,53 @@ written.
 
 ---
 
+## Findings log (running)
+
+**2026-07-25 — Phases 0, 1, 2a, 3b/3d, 4a/4b executed** (ffmpeg 8.1.2, macOS;
+probe artifacts under the session scratchpad `qtff-audit/`; claim verdicts
+recorded in `references/qtff-claims.md`):
+
+- **Phase 0 DONE** — 62 claims (C01–C62) inventoried in
+  `references/qtff-claims.md`, all spec-anchored; 11 gaps listed there await
+  triage into phase items.
+- **1a CONFIRMED** (C04) — ffmpeg represents pts>dts as unsigned v0 `ctts`
+  shifted by the preroll plus a two-entry edit list (empty edit + media time =
+  preroll); no `cslg`. Spec-compliant.
+- **1b BUG FOUND + FIXED** (C05) — a wrong-cadence DTS ramp (field-rate ramp on
+  frame-per-packet input) passed every point gate while writing linearly
+  growing `ctts` (max 192192 vs preroll 12012) and `mdhd` ≠ Σ`stts`. pairfill
+  now gates max(PTS−DTS) ≤ preroll+pair and decode-vs-presentation span skew
+  ≤ 2 pairs; regression pins both the pass and the refusal. The E2E fixture's
+  rate was itself corrected (frame-per-packet ⇒ `--rate 30000/1001`).
+- **1c CONFIRMED** (C02) — 90 kHz mdhd timescale kept on TS→MOV; 1501/1502
+  stts durations as assumed. Per-CI-version pin still owed (5d).
+- **1d CONFIRMED** (C06) — elst empty-edit for the start offset; ffprobe
+  stream durations are media durations, so the parity gate measures the right
+  thing. 1e (priming articles vs the 0.25 s tolerance) still open.
+- **2a REFUTED → doctrine corrected** (C18) — ffmpeg marks open-GOP non-IDR
+  I-frames as FULL sync in `stss`, writes no `stps`/`sdtp`: the container
+  overclaims seekability. `cutting-concat.md` now says so explicitly; gop-probe
+  already decides from display order and needed no change. This also answers
+  half of 2b: no `sdtp` is written on copies at all.
+- **3b SUSPICION REFUTED on 8.1.2** (C31) — 6-ch PCM gets QTFF v1 `in24` +
+  `chan` (MPEG_5_1_A, positionally 1:1 with 5.1(side)); AC-3 keeps its own
+  `chan`. Older-ffmpeg pin + speaker-ident listen remain.
+- **3d HALF-CONFIRMED + FIXED** — `pasp` survives `-c copy` (40:33 preserved),
+  but `--signaling` never checked it; `sample_aspect_ratio` drift is now
+  compared (undefined-SAR sources skipped to avoid false drift).
+- **4a SUSPICION REFUTED on 8.1.2** (C41) — dual-track tkhd flags are 3/3/2:
+  the preserved original is written NOT-enabled, so QuickTime plays only the
+  PCM access track. No mixing.
+- **4b CONFIRMED** (C37/C39) — chapters produce a `text`-handler track +
+  `chap` trefs on both A/V traks; metadata.sh's strip removes track AND trefs
+  (nothing dangles); `--keep-chapters` keeps all three pieces.
+- **5a FIXED** — pairfill now warns loudly when the source has >1 audio track
+  (only a:0 is carried). **5f partially** — a live bash-3.2 parse bug in
+  pairfill's sign-off line (`$(case …)` inside double quotes) was found by
+  probe and fixed; the full unguarded-array sweep is still owed.
+- Still open: 1e, 2b (`sdtp` seek-impact half), 3a (`fiel` playback evidence),
+  3c (captions-render reality), 4c/4d, 5b–5e, 5g/5h, and the 11 Phase-0 gaps.
+
 ## Execution order & exit criteria
 
 Run 0 → 1 → 4a/3b (the two suspected live bugs jump the queue after Phase 1)
