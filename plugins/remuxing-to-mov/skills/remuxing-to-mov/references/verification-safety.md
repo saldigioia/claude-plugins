@@ -23,7 +23,16 @@ Selecting tracks, proving losslessness, and not destroying source material.
 
 AC-3/E-AC-3 captures often carry a small `Delay relative to video`. It's in the
 timestamps and **preserved by `-c copy`** — leave it. Only the Rung-3 rebuild
-rezeros it; reapply a real offset with `-itsoffset` there.
+rezeros it; reapply a real offset with `-itsoffset` there. Probed 2026-07-25
+(ffmpeg 8.1.2): a 0.4 s TS audio delay survives the copy as a QTFF **empty
+edit** on the audio track (`elst` media time −1) — the spec's own mechanism.
+
+**Why the 0.25 s A/V parity tolerance is sound** (QTFF audit 1e): the largest
+*legitimate* duration skew the spec blesses is AAC encoder priming — implicit
+convention 2112 samples ≈ **44 ms @ 48 kHz** (QTFF Appendix G), represented via
+edit lists / sample groups. That sits an order of magnitude under the 0.25 s
+gate, while gap-collapse desync grows past it on any real capture — so the
+tolerance passes every legitimate file and still catches the defect class.
 
 ## Verifying a lossless remux (run before trusting output)
 

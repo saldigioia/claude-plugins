@@ -84,6 +84,14 @@ echo "   video=$PR_VCODEC  audio=$PR_ACODEC  paff=$PF_PAFF"
 if [ "$PF_PAFF" = yes ]; then
   echo "   field-coded (PAFF) -> timeline repair via auto.sh (routed by timestamp profile:"
   echo "   pair-fill keeps real PTS + original audio; the rebuild decodes audio to PCM)"
+  if [ "${PF_HALF_TS:-no}" = no ] && [ "${PF_REORDER:-no}" = yes ]; then
+    # full-TS reordered PAFF goes through auto's COPY rung, whose audio policy is
+    # single-track (auto is the ladder driver, not the deliverable builder) — so
+    # the /mov dual-track promise does not apply on this one path. Say so (5e).
+    echo "   note: this profile rides the copy rung — audio lands single-track (auto.sh"
+    echo "   policy). For the dual-track deliverable, run scripts/dual-track.sh on the"
+    echo "   source after this verifies OK (same copy mux + PCM access track)."
+  fi
   set +e; bash "$SELF_DIR/auto.sh" "$IN" "$OUT" $FULL; rc=$?; set -e
   [ "$rc" -eq 0 ] && { apply_metadata "$OUT" || rc=$?; }
   exit "$rc"

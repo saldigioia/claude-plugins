@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ffmpeg: ["4.4", "6.1", "7.1"]   # span the version-gated behaviors
+        ffmpeg: ["4.4", "6.1", "7.1", "8.1.2"]   # span the version-gated behaviors incl. the verified-on 8.1.x
     steps:
       - uses: actions/checkout@v4
       - name: Install static ffmpeg ${{ matrix.ffmpeg }}

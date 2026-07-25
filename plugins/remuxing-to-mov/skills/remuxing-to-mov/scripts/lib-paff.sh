@@ -106,6 +106,7 @@ pf_detect () {
   pf_field=$(ffprobe -v error -select_streams v:0 -show_entries stream=field_order -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   pf_af=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   pf_rf=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  # shellcheck disable=SC2046  # word splitting is the point: "RATE TOTAL MISSING"
   set -- $(pf_coded_rate "$IN"); pf_cr="${1:-0}"; pf_tot="${2:-0}"; pf_miss="${3:-0}"
   pf_nf=$(pf_eval_fps "${pf_af:-0}")
   awk "BEGIN{exit !(${pf_nf:-0}>0)}" || pf_nf=$(pf_eval_fps "${pf_rf:-0}")

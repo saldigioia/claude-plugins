@@ -206,8 +206,57 @@ recorded in `references/qtff-claims.md`):
   (only a:0 is carried). **5f partially** — a live bash-3.2 parse bug in
   pairfill's sign-off line (`$(case …)` inside double quotes) was found by
   probe and fixed; the full unguarded-array sweep is still owed.
-- Still open: 1e, 2b (`sdtp` seek-impact half), 3a (`fiel` playback evidence),
-  3c (captions-render reality), 4c/4d, 5b–5e, 5g/5h, and the 11 Phase-0 gaps.
+- Still open after round 1: 1e, 2b (`sdtp` seek-impact half), 3a (`fiel`
+  playback evidence), 3c (captions-render reality), 4c/4d, 5b–5e, 5g/5h, and
+  the 11 Phase-0 gaps.
+
+**2026-07-25 round 2 — 1e, 4c/4d, 5b/5c/5d/5f/5g + 13 structural claim
+verdicts** (ffmpeg 8.1.2; verdicts in `references/qtff-claims.md`):
+
+- **1e CONFIRMED (spec-bound, C11)** — QTFF Appendix G pins implicit AAC
+  priming at 2112 samples ≈ 44 ms @48 kHz, an order of magnitude under the
+  0.25 s parity tolerance; rationale recorded in verification-safety.md.
+  Bonus (C12): a 0.4 s TS audio delay survives copy as a QTFF **empty edit** —
+  which also REFINED C08: the container has a gap mechanism and ffmpeg uses it
+  for *initial* offsets; it writes none *mid-stream*, which is where collapse
+  happens (timeline-repair.md wording corrected: the limitation is the writer,
+  not the container).
+- **4c CONFIRMED (C42)** — `language=eng` lands as mdhd language 0x0000 =
+  legacy Mac code English (spec-valid), ffprobe round-trips `eng`.
+- **4d CONFIRMED (C43/C44)** — metadata.sh writes the spec-exact
+  `meta→hdlr(mdta)+keys+ilst` tree; naive `-metadata` writes legacy `udta/©nam`.
+- **C34 REFINED** — in a `qt`-brand MOV, mov_text is classic QT TEXT media
+  (`text` entry/handler), not tx3g (that's the MP4 form); color-hdr-subs.md
+  corrected. Also CONFIRMED structurally: C15 (header consistency), C22/C23
+  (colr nclc nested in avc1; written by default only for FULLY tagged sources —
+  partial tags get none, matching the don't-fabricate doctrine), C29 (avcC),
+  C30/C32/C33 (sowt/.mp2/.mp3 fourccs), C45 (faststart atom order), C52 (tmcd
+  track + tref).
+- **5b MEASURED — non-issue** — gate (d)'s whole-file scan on the real 955 MB
+  incident capture (19,527 packets): 1.1 s cold / 0.23 s warm. No merge with
+  disc_scan warranted.
+- **5c FIXED** — the tiny-duration FAIL now escalates lazily to a SOURCE
+  duration-profile comparison (matching counts = inherent VFR → pass with
+  note; unreadable source → REVIEW; unmatched → FAIL as before).
+- **5d DONE** — CI matrix gained the 8.1.2 leg (mwader/static-ffmpeg:8.1.2
+  verified to exist).
+- **5f DONE** — array-expansion sweep: every remaining `"${arr[@]}"` site is
+  provably behind a count guard; the suite itself runs under macOS bash 3.2.
+- **5g DONE** — shellcheck (warning level): one finding, the intentional
+  word-split in lib-paff.sh, now annotated.
+- **Phase-0 gaps triage** — closed by probes: faststart order (gap 2, C45),
+  ©-atom structure half (gap 3, C44), tmcd (gap 7, C52), AC-3 delay (gap 11,
+  C12). Remaining open gaps: co64 >4 GiB (C46 — WAIVED until a real >4 GiB
+  deliverable exists to dump), playability matrix on a real Mac (C53–C59),
+  Mediabunny re-pin (C60), mov_text timescale overflow (C13 half), malformed-
+  atom/wrong-handler doctrine (C47/C49 — WAIVED: validation doctrine, not
+  plugin behavior), fragmented/DRM edges (C50/C51 — WAIVED: detection-only
+  doctrine), two-pass alignment bound (gap 10 — queued with 3a/3c for the
+  real-Mac session).
+- Still open (needs a human/Mac or real captures): 3a `fiel` deinterlacing,
+  3c caption rendering, 4a/3b confirmation listens, C53–C59 playability
+  matrix, 5e auto-vs-mov audio-policy divergence (decision item), 5h local
+  real-PAFF fixture note.
 
 ## Execution order & exit criteria
 

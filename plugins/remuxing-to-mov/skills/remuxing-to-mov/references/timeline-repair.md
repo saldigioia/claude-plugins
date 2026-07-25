@@ -243,10 +243,13 @@ monotonic**, so every mux test passes — but a blind `-c copy` desyncs the audi
 
 - **Video survives.** It carries per-frame timestamps, so the jump is preserved
   and the video timeline still spans the true real-time duration, gaps and all.
-- **Raw PCM cannot.** PCM in MOV/MP4 is a contiguous sample array at a fixed rate
-  with no edit-list/empty-edit per drop — there is nowhere to put a gap. ffmpeg
-  packs the surviving samples end-to-end, so the audio timeline is **shorter**
-  than the video by the total dropped time, and slides progressively earlier.
+- **Raw PCM cannot — as ffmpeg writes it.** QTFF itself *can* represent gaps
+  (a track may carry multiple edits with empty edits between segments, and
+  ffmpeg does write an initial empty edit for a start delay — probed
+  2026-07-25). But ffmpeg's muxer writes **no mid-stream empty edit per drop**
+  on a copy: it packs the surviving PCM samples end-to-end, so the audio
+  timeline is **shorter** than the video by the total dropped time, and slides
+  progressively earlier. The limitation is the writer, not the container.
 - **Packetized tracks (AC-3/DTS/MP2) drift *less* than PCM** — a frame-based codec
   tolerates gap collapse better than a raw sample stream. A per-track duration
   spread is the fingerprint: a clean remux has identical durations on every track.

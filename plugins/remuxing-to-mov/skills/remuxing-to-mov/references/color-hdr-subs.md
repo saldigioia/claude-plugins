@@ -40,7 +40,10 @@ it by re-encoding.
 
 ## Subtitle tracks (SubRip etc.)
 
-MOV/MP4 has no SubRip carriage; it needs `mov_text` (tx3g):
+MOV/MP4 has no SubRip carriage; it needs `mov_text` — which lands as `tx3g`
+(3GPP timed text) in MP4 but as classic **QT text media** (a `text` sample
+entry + `text` handler) in a `qt`-brand MOV (probed 2026-07-25, ffmpeg 8.1.2 —
+the native QuickTime text-track form, per the spec's text_media pages):
 ```
 ffmpeg -nostdin -i IN.mkv -map 0:v:0 -map 0:a:0 -map 0:s:0 \
   -c:v copy -c:a copy -c:s mov_text -movflags +faststart -f mov OUT.mov

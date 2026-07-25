@@ -203,8 +203,23 @@ if [ "${TL_BACK:-0}" -ne 0 ] || [ "${TL_DUP:-0}" -ne 0 ]; then
   note="${note:+$note }Output DTS not strictly monotonic (backward=$TL_BACK duplicate=$TL_DUP)."
 fi
 if [ "${TL_TINY:-0}" -gt 2 ]; then   # first/last sample may legitimately stray
-  verdict=FAIL
-  note="${note:+$note }$TL_TINY sample durations <1/10 of modal ($TL_MODAL) — invented-timeline signature."
+  # Genuine VFR (web sources) legitimately has micro-durations — but then the
+  # SOURCE shows the same profile. Per doctrine, "inherent" requires MATCHING
+  # counts, so escalate lazily: scan the source the same way and FAIL only when
+  # the output's near-zero count is not matched there (QTFF audit 5c).
+  src_tiny=$(ffprobe -v error -select_streams v:0 -show_entries packet=duration -of csv=p=0 "$SRC" 2>/dev/null | \
+    awk -F, 'NF && $1!="N/A"{ du=$1+0; h[du]++; n++; if(h[du]>hm){hm=h[du]; modal=du} }
+      END{ t=0; if(n>0 && modal>0) for(k in h){ if((k+0)*10<modal) t+=h[k] }; if(n==0){print "na"} else print t+0 }')
+  if [ "$src_tiny" = na ]; then
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }$TL_TINY near-zero sample durations in the output and the source's duration profile is unreadable — cannot prove inherent; inspect before shipping."
+    echo "   >> $TL_TINY near-zero durations; source profile unreadable — REVIEW."
+  elif [ "${TL_TINY:-0}" -le $((src_tiny + 2)) ]; then
+    echo "   near-zero durations: output=$TL_TINY vs source=$src_tiny — matching profile (inherent VFR), not invented."
+  else
+    verdict=FAIL
+    note="${note:+$note }$TL_TINY sample durations <1/10 of modal ($TL_MODAL) vs only $src_tiny in the source — invented-timeline signature."
+  fi
 fi
 
 echo "-- (e) scrub gate: player-style off-keyframe seeks + keyframe sanity --"
