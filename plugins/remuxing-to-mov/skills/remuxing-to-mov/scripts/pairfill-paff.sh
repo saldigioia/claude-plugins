@@ -114,6 +114,15 @@ fi
 echo "   DTS pre-roll=$PREROLL ticks"
 
 # --- audio: preserve the original where QuickTime needs help (dual-track) ---
+# a:0 only. A source with MORE audio tracks (SAP/secondary/commentary) loses
+# them here — say so LOUDLY instead of dropping them silently (QTFF audit 5a).
+NAUD=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
+if [ "${NAUD:-0}" -gt 1 ]; then
+  echo "** WARNING: source has $NAUD audio tracks; pairfill carries ONLY a:0."
+  echo "**          Secondary/SAP tracks are NOT in the output. Extract and remux"
+  echo "**          them separately, or run the manual pairfill mux with extra"
+  echo "**          -map 0:a:N entries (references/timeline-repair.md, Rung 3-PAIR)."
+fi
 acodec=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 alang=$(ffprobe -v error -select_streams a:0 -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 case "$alang" in ""|und|unknown) alang=eng;; esac
@@ -160,35 +169,52 @@ if [ "${conf:-0}" -gt 0 ]; then
 fi
 
 # --- gate the OUTPUT's timeline before blessing it (never trust the exit code) ---
-echo "-- output timeline gates (want: 0 N/A, strictly monotonic DTS, only ${A}/${B}-tick durations) --"
+# Beyond N/A + monotonicity + duration histogram, two BOUNDEDNESS gates (QTFF
+# audit 1b, 2026-07-25): a DTS ramp at the wrong cadence (e.g. field-rate ramp
+# on a frame-per-packet stream) passes all the point checks yet writes linearly
+# GROWING ctts offsets and a decode span half the presentation span — an
+# internally inconsistent file (mdhd != sum stts) that still "plays". So:
+#   * max(PTS-DTS) over the whole output must stay <= PREROLL + one pair;
+#   * the decode span (last DTS - first DTS) must equal the presentation span
+#     (max PTS - min PTS) within 2 pairs.
+echo "-- output timeline gates (want: 0 N/A, strictly monotonic DTS, only ${A}/${B}-tick durations, bounded PTS-DTS) --"
 eval "$(ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 "$PART" 2>/dev/null | \
   awk -F, -v a="$A" -v b="$B" 'NF{
       n++
-      if($1=="N/A"||$1=="") nap++
-      if($2=="N/A"||$2==""){ nad++ } else { if(havd && $2+0<pd) back++; else if(havd && $2+0==pd) dup++; pd=$2+0; havd=1 }
+      if($1=="N/A"||$1==""){ nap++ } else { p=$1+0; if(!havp){mnp=mxp=p; havp=1} else {if(p<mnp)mnp=p; if(p>mxp)mxp=p} }
+      if($2=="N/A"||$2==""){ nad++ } else { d=$2+0; if(!havd){fd=d} else { if(d<pd) back++; else if(d==pd) dup++ }; pd=d; havd=1
+        if($1!="N/A" && $1!="" ){ off=($1+0)-d; if(off>mxo) mxo=off } }
       if($3!="N/A" && $3!=""){ h[$3]++; if($3+0!=a && $3+0!=b) od++ }
     }
     END{
-      top=""; for(k in h){ line=sprintf("%dx%s ",h[k],k); top=top line }
-      printf "PG_N=%d PG_NAPTS=%d PG_NADTS=%d PG_BACK=%d PG_DUP=%d PG_OFFHIST=%d\n", n+0, nap+0, nad+0, back+0, dup+0, od+0
+      pspan=(havp?mxp-mnp:0); dspan=(havd?pd-fd:0); skew=pspan-dspan; if(skew<0)skew=-skew
+      printf "PG_N=%d PG_NAPTS=%d PG_NADTS=%d PG_BACK=%d PG_DUP=%d PG_OFFHIST=%d PG_MAXOFF=%d PG_SKEW=%d\n", \
+        n+0, nap+0, nad+0, back+0, dup+0, od+0, mxo+0, skew+0
     }')"
 echo "   packets=$PG_N  N/A-PTS=$PG_NAPTS  N/A-DTS=$PG_NADTS  backward-DTS=$PG_BACK  duplicate-DTS=$PG_DUP  off-histogram durations=$PG_OFFHIST"
+echo "   max PTS-DTS=$PG_MAXOFF (limit $((PREROLL + PAIR)))  presentation-vs-decode span skew=$PG_SKEW ticks (limit $((2 * PAIR)))"
 gates_ok=1
 [ "${PG_NAPTS:-1}" -eq 0 ] || gates_ok=0
 [ "${PG_NADTS:-1}" -eq 0 ] || gates_ok=0
 [ "${PG_BACK:-1}"  -eq 0 ] || gates_ok=0
 [ "${PG_DUP:-1}"   -eq 0 ] || gates_ok=0
 [ "${PG_OFFHIST:-9}" -le 2 ] || gates_ok=0   # first/last sample may legitimately stray
+[ "${PG_MAXOFF:-999999999}" -le $((PREROLL + PAIR)) ] || gates_ok=0
+[ "${PG_SKEW:-999999999}" -le $((2 * PAIR)) ] || gates_ok=0
 if [ "$gates_ok" -ne 1 ]; then
   echo ">> TIMELINE GATES FAILED — the written timeline is not the derived one."
   echo "   NOT blessing the output. Kept: $PART (log: $MUXLOG)"
-  echo "   (a broken result here usually means the preconditions were mis-read — rerun scripts/diagnose.sh)"
+  echo "   (unbounded PTS-DTS / span skew = the DTS ramp cadence does not match the"
+  echo "    stream's packets-per-field — wrong --rate, or not the pair class at all;"
+  echo "    rerun scripts/diagnose.sh)"
   exit 1
 fi
 rm -f "$MUXLOG"
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
-echo "sign-off: scripts/verify.sh \"$IN\" \"$OUT\"$(case "$acodec" in ac3|dts|dca|mp2|mp1) printf ' %s' --audio;; esac)"
+# bash 3.2 can't parse $(case ...) inside a double-quoted string — precompute
+AUDFLAG=""; case "$acodec" in ac3|dts|dca|mp2|mp1) AUDFLAG=" --audio";; esac
+echo "sign-off: scripts/verify.sh \"$IN\" \"$OUT\"$AUDFLAG"
 echo "  (the scrub gate + A/V parity there are still required — these gates prove the"
 echo "   container timeline, not the decode; a FAIL there is a defect until every gate"
 echo "   is individually explained)"

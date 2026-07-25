@@ -498,21 +498,32 @@ o=$(bash "$SC/pairfill-paff.sh" "$M2" "$WORK/pf2.mov" 2>&1); rc=$?
 { [ "$rc" -eq 3 ] && case "$o" in *"not H.264"*) true;; *) false;; esac; } \
   && ok "pairfill: non-H.264 -> exit 3" || no "pairfill mishandled MPEG-2 (rc=$rc)"
 # fully-timestamped input + explicit rate: preconditions pass, setts preserves the
-# real PTS untouched, and the built-in output gates run (plumbing E2E).
-# Capability-gated: the PREV_OUT* setts vars need ffmpeg >= 5.x (CI runs 4.4).
+# real PTS untouched, and the built-in output gates run (plumbing E2E). On this
+# frame-per-packet fixture one "pair" = one FRAME, so the matching rate is
+# 30000/1001 (3003-tick steps). Capability-gated: the PREV_OUT* setts vars need
+# ffmpeg >= 5.x (CI runs 4.4).
 if ! ffmpeg -nostdin -v error -i "$S" -map 0:v:0 -c:v copy \
     -bsf:v 'setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+1\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS\,PREV_OUTDTS+1)' \
     -f null - 2>/dev/null; then
   echo "  (skip: this ffmpeg's setts lacks the PREV_OUT* expression vars — pairfill E2E needs >= 5.x)"
   rc=skip
 else
-  o=$(bash "$SC/pairfill-paff.sh" "$S" "$WORK/pf3.mov" --rate 60000/1001 2>&1); rc=$?
+  o=$(bash "$SC/pairfill-paff.sh" "$S" "$WORK/pf3.mov" --rate 30000/1001 2>&1); rc=$?
 fi
 if [ "$rc" = skip ]; then :; elif [ "$rc" -eq 0 ] && [ -f "$WORK/pf3.mov" ]; then
-  ok "pairfill: fully-timestamped source + explicit --rate builds and passes its own gates"
+  ok "pairfill: fully-timestamped source + matching --rate builds and passes its own gates"
   vseq () { ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -frames:v 40 -f framemd5 - 2>/dev/null | grep -v '^#' | awk -F', *' '{print $NF}' | md5sum | awk '{print $1}'; }
   [ "$(vseq "$S")" = "$(vseq "$WORK/pf3.mov")" ] && ok "pairfill output decodes in the SOURCE presentation order (real PTS kept)" \
     || no "pairfill changed presentation order on a healthy stream"
+  # QTFF audit 1b: a DTS ramp at the WRONG cadence (field-rate ramp on frame
+  # packets) passes every point check but writes growing ctts offsets and a
+  # decode span half the presentation span — the boundedness gates must refuse
+  # to bless it (mp4dump evidence: mdhd != sum stts, ctts max 192192).
+  o=$(bash "$SC/pairfill-paff.sh" "$S" "$WORK/pf4.mov" --rate 60000/1001 2>&1); rc=$?
+  { [ "$rc" -eq 1 ] && case "$o" in *"TIMELINE GATES FAILED"*) true;; *) false;; esac; } \
+    && ok "pairfill: wrong-cadence ramp -> boundedness gates FAIL (span/max-offset)" \
+    || no "pairfill blessed a wrong-cadence timeline (rc=$rc)"
+  [ -f "$WORK/pf4.mov" ] && no "wrong-cadence output was blessed to its final name" || ok "wrong-cadence output NOT blessed (.part kept)"
 else
   no "pairfill E2E plumbing failed (rc=$rc): $(printf '%s' "$o" | tail -2)"
 fi
