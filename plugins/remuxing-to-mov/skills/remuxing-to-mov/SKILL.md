@@ -135,7 +135,7 @@ fraction + reorder scan). Detail and the manual commands live in
 | Embed metadata into a .mov | `scripts/metadata.sh IN OUT --title … --description …` — proper QuickTime (`mdta`) keys, `-c copy`, drops the generic chapter "menu" + the encoder tag. **Opt-in only, never automatic**; also `mov.sh … --title …` |
 | Asked to remux a file onto itself | Never — scripts refuse; write the output beside the source under a new name |
 | New machine / CI, or "is my ffmpeg OK?" | `scripts/doctor.sh` — reports required vs degraded capabilities (muxers/bsfs), plus platform / VideoToolbox / optional tools (report-only), before you trust verify.sh |
-| A whole folder of captures | `scripts/batch.sh DIR --out OUTDIR` — auto.sh per file + provenance sidecars + a report; idempotent resume, never deletes sources |
+| A whole folder of captures | `scripts/batch.sh DIR --out OUTDIR` — auto.sh per file + provenance sidecars + a report; idempotent resume, never deletes sources. **Ladder policy** (single-track audio, no signaling check) — for the dual-track deliverable run `mov.sh` per file |
 | "Will QuickTime actually play it?" (macOS) | `scripts/playable-check.sh OUT.mov` — AVFoundation render probe; the playable≠valid half ffmpeg can't prove. **A floor, not a sign-off**: a thumbnail proves one frame decodes, nothing about the timeline |
 
 ## House defaults (baked into the scripts)

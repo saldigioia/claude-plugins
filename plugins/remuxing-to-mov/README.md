@@ -11,7 +11,7 @@ whole video.
 scripts/doctor.sh                  # one-time: is this ffmpeg capable?
 scripts/mov.sh IN.ts               # the everyday one: QuickTime-ready, dual-track only if needed, verified
 scripts/auto.sh IN.ts OUT.mov      # the lossless ladder, hands-off (single-track audio)
-scripts/batch.sh DIR --out OUTDIR  # a whole folder, with provenance + resume
+scripts/batch.sh DIR --out OUTDIR  # a whole folder, with provenance + resume (ladder policy: single-track)
 ```
 
 In Claude Code these are also a slash command — **`/remuxing-to-mov:mov FILE`**

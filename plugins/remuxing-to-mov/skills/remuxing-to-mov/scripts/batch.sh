@@ -11,6 +11,11 @@
 #
 # Sidecar (<output>.provenance.kv) records source id+hash, rung, ffmpeg version,
 # verdict, and timestamp — so a file's origin is auditable and re-verifiable.
+#
+# AUDIO POLICY: batch drives auto.sh, the LADDER (single-track audio, no
+# --signaling drift check) — not mov.sh, the deliverable builder. For the
+# dual-track PCM-access deliverable per file, run mov.sh on each instead;
+# `-- --audio pcm` here only changes the codec, not the track layout.
 # Exit: 0 if nothing FAILed, 1 otherwise.
 set -eu
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"

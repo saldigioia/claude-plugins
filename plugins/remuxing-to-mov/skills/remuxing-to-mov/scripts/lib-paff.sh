@@ -127,10 +127,10 @@ pf_detect () {
 # disc_scan — forward-timestamp-gap (discontinuity) scan of the video track.
 # A discontinuity is a FORWARD DTS jump larger than a frame: the capture dropped
 # frames and the broadcast clock skipped ahead. Stream-copy preserves these jumps
-# in the video timeline but COLLAPSES them in raw PCM audio (MOV/MP4 PCM is a
-# contiguous sample array with no gap/edit mechanism), so a blind `-c copy` of a
-# discontinuous source slides the audio progressively out of sync (see the
-# remux-sync post-mortem). This is distinct from MISSING or BACKWARD timestamps:
+# in the video timeline but COLLAPSES them in raw PCM audio (ffmpeg's muxer
+# writes no mid-stream empty edit per drop — QTFF has the mechanism, the writer
+# doesn't use it), so a blind `-c copy` of a discontinuous source slides the
+# audio progressively out of sync (see the remux-sync post-mortem). This is distinct from MISSING or BACKWARD timestamps:
 # the timestamps here are present AND monotonic, so the mux tests pass — the gap
 # is forward, and only a delta scan finds it. NO decode; whole stream (a gap can
 # sit anywhere in a long capture, so this is deliberately not window-bounded).

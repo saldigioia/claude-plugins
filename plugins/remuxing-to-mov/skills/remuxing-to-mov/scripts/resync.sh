@@ -2,8 +2,9 @@
 # resync.sh — fix a DISCONTINUOUS-source desync while keeping the VIDEO bit-identical.
 # For captures whose source dropped frames (forward timestamp gaps): a blind `-c copy`
 # preserves those gaps in the video timeline but COLLAPSES them in raw PCM audio
-# (MOV/MP4 PCM is a contiguous sample array with no gap mechanism), sliding audio
-# progressively out of sync — the remux-sync post-mortem. This re-times the audio to
+# (ffmpeg's muxer writes no mid-stream empty edit per drop, so the PCM sample
+# array packs end-to-end), sliding audio progressively out of sync — the
+# remux-sync post-mortem. This re-times the audio to
 # the picture by filling the gaps, and never re-encodes the video.
 #
 # Usage: scripts/resync.sh INPUT OUTPUT.mov [--all-audio] [--audio a:N] [--pcm 16|24|32]

@@ -293,6 +293,37 @@ macOS Darwin 25.5; fixture kit at `~/Downloads/qtff-gui-checks/`): ALL PASS.**
 - Still open (needs artifacts, not eyes): 3c caption rendering (needs a
   CC-bearing capture), 5h real-PAFF fixture (needs the source re-download).
 
+**2026-07-25 round 4 — MACRO review: pipeline/sequence common sense.** Walked
+every end-to-end flow (mov, auto ladder, diagnose→repair→verify, batch,
+dual-track incl. the two-pass cut, resync, metadata, cutting, verify's gate
+train) against flow-level QTFF sense. Fixed:
+
+- **Ship-what-you-verified (mov.sh PAFF path)** — the opt-in metadata pass
+  REWRITES the container after auto's verify; that path now re-runs verify on
+  the file actually shipped (the non-PAFF path already verified post-metadata).
+- **--signaling always on in mov.sh** — it is demux-only, untagged fields
+  compare clean, and the old color-gated trigger skipped the new SAR/pasp
+  check exactly where it matters (anamorphic SD with untagged color).
+- **--always-dual on the PAFF path now says it doesn't apply** (audio policy
+  comes from the repair rung).
+- **batch policy transparency** — batch.sh header + SKILL + README now state
+  it ships the LADDER deliverable (single-track, no signaling check); mov.sh
+  per file is the dual-track route.
+- **Wording alignment** — resync.sh and lib-paff.sh gap-collapse comments now
+  blame the writer, not the container (the C08 refinement), matching
+  timeline-repair.md.
+
+Reviewed and KEPT deliberately: verify's gate order (all gates always run,
+verdict only downgrades — evidence-complete beats fail-fast); diagnose's
+triage order (damage → missing TS → monotonicity → gaps); the dual-track
+two-pass cut (the alignment rationale holds; the intermediate is regenerable);
+resync/metadata muxing at `-v error` (confession lines invisible there, but
+every shipped artifact now passes verify's gate (d) timeline scan, which
+catches the same class from the output side); playable-check only after OK
+(floor semantics); faststart/atomic-write/never-touch-source uniform across
+all writers; parity/scrub measuring media durations and post-edit pts
+(edit-list-aware). Suite 122/122.
+
 ## Execution order & exit criteria
 
 Run 0 → 1 → 4a/3b (the two suspected live bugs jump the queue after Phase 1)

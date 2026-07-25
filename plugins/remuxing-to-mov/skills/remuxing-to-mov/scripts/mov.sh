@@ -92,8 +92,19 @@ if [ "$PF_PAFF" = yes ]; then
     echo "   policy). For the dual-track deliverable, run scripts/dual-track.sh on the"
     echo "   source after this verifies OK (same copy mux + PCM access track)."
   fi
+  [ "$ALWAYS" -eq 1 ] && echo "   note: --always-dual does not apply on the PAFF path — audio policy comes from the repair rung (pairfill dual-tracks non-native codecs by itself)."
   set +e; bash "$SELF_DIR/auto.sh" "$IN" "$OUT" $FULL; rc=$?; set -e
-  [ "$rc" -eq 0 ] && { apply_metadata "$OUT" || rc=$?; }
+  if [ "$rc" -eq 0 ] && [ "${#MDARGS[@]}" -gt 0 ]; then
+    apply_metadata "$OUT" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      # the metadata pass REWRITES the container after auto's verify — always
+      # verify the file actually shipped, never its pre-rewrite ancestor
+      echo "-- re-verify after metadata pass --"
+      set +e; o=$(bash "$SELF_DIR/verify.sh" "$IN" "$OUT" $FULL 2>&1); set -e
+      printf '%s\n' "$o" | sed 's/^/   /'
+      case "$o" in *">> OK"*) : ;; *">> REVIEW"*) rc=10;; *) rc=1;; esac
+    fi
+  fi
   exit "$rc"
 fi
 
@@ -124,8 +135,11 @@ esac
 
 apply_metadata "$OUT" || exit $?
 
-# signaling check only when the source actually carries color/HDR tags
-SIG=""; { [ -n "${PR_COLOR_PRIMARIES:-}" ] && [ "${PR_COLOR_PRIMARIES:-unknown}" != unknown ]; } && SIG="--signaling"
+# --signaling always: it is demux-only (a handful of ffprobe reads), untagged
+# fields compare unknown==unknown cleanly, and it now also guards SAR/pasp —
+# which anamorphic broadcast carries even when color is untagged (macro review:
+# the old color-gated trigger would have skipped the pasp check exactly there)
+SIG="--signaling"
 
 echo "-- verify --"
 set +e
