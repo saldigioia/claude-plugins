@@ -1,7 +1,7 @@
 {
   "name": "remuxing-to-mov",
   "displayName": "Remux to MOV",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. One-command /mov shortcut; escalation ladder (copy → PCM audio → genpts → timeline repair routed by timestamp profile: pair-mate PTS fill or elementary rebuild → scoped re-encode); dual-track PCM-access + bit-exact-original audio only when QuickTime needs it; field-coded (PAFF) repair including the half-timestamped pair class; muxer-confession hard stop; whole-file timeline, presentation-order, scrub, and A/V-parity verification gates; opt-in QuickTime metadata. The source file is never touched; every codec/container fact verified against a named ffmpeg version.",
   "author": {
     "name": "Rare Data Club",
