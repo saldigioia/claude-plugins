@@ -1,0 +1,171 @@
+# QTFF Spec Audit Plan — hunting lingering bugs & bad engineering choices
+
+**Reference:** `/Users/salvatore/quicktime-docs` — a complete local archive of
+Apple's QuickTime File Format spec (1,152 pages, fetched 2026-06-19).
+Query it, don't browse it:
+
+```bash
+DB=/Users/salvatore/quicktime-docs/quicktime-file-format.sqlite
+sqlite3 "$DB" "SELECT path,title FROM pages_fts WHERE pages_fts MATCH '<term>' LIMIT 10"
+sqlite3 "$DB" "SELECT DISTINCT page_path FROM symbols WHERE atom_code='<fourcc>'"
+# page bodies: /Users/salvatore/quicktime-docs/markdown/<section>/<page>.md
+```
+
+**Method (every item follows the post-mortem discipline):**
+1. State the plugin's claim or behavior as a falsifiable sentence.
+2. Resolve it against the spec page (cited per item below).
+3. Probe a REAL artifact — `mp4dump`/`ffprobe` on an output the scripts built —
+   never reason from the command that made it.
+4. Classify: **BUG** (fix + regression pin) / **DOC-DRIFT** (fix the reference)
+   / **CONFIRMED** (record the verification date). A divergence is a defect
+   until every probe is individually explained.
+
+Tooling: `ffprobe`, Bento4 `mp4dump` (doctor.sh already reports it), the
+sqlite FTS above. Synthesized fixtures via `tests/regression.sh` recipes; real
+PAFF probes against the T9 captures (read-only — never commit media).
+
+---
+
+## Phase 0 — Claim inventory
+
+Grep `references/*.md`, `SKILL.md`, and script headers for every
+container-level assertion ("verified 8.1.1", "chapters survive -c copy",
+"no fiel atom on copy", "E-AC-3 plays natively", "QuickTime won't play X").
+Emit a checklist table (claim → spec anchor → probe → status) as
+`references/qtff-claims.md`. Everything below feeds off this list; anything
+the list surfaces that this plan missed gets appended as a Phase-item.
+
+## Phase 1 — Timeline semantics vs sample tables (highest risk)
+
+The post-mortem lived entirely in `stts`/`ctts` territory; these are the
+claims we now depend on but have never checked against the atoms actually
+written.
+
+- **1a. `ctts` signedness / `cslg`.** Pairfill and rebuild outputs put
+  pts>dts everywhere; QTFF `ctts` offsets are unsigned in the classic form,
+  with `cslg` covering the shifted/negative composition case. Probe: `mp4dump`
+  a pairfill output — are offsets non-negative, is `cslg` present, and does
+  QuickTime Player honor whichever ffmpeg wrote?
+  Spec: `sample_atoms/composition_offset_atom`,
+  `composition_shift_least_greatest_atom`, `time-to-sample_atom`.
+- **1b. Pairfill offset bound is derived, not gated.** `PREROLL` is measured
+  from packets carrying BOTH timestamps; filled mates get `pts=prev+A` against
+  a constant DTS ramp. Prove (or gate) that max(pts−dts) over ALL output
+  packets ≤ PREROLL — add a max-offset line to pairfill's output gates instead
+  of trusting the derivation.
+- **1c. Timescale assumption in the histogram gate.** Pairfill's duration gate
+  assumes the MOV muxer keeps the source 90 kHz timescale (durations 1501/1502).
+  If any ffmpeg version rescales the track timescale on TS→MOV, the gate
+  false-fails or worse, false-passes. Probe `mdhd`/`stts` per CI ffmpeg
+  version; pin with a fixture. Spec: `media_atom/media_header_atom`.
+- **1d. Edit lists.** ffmpeg writes `elst` for nonzero starts and negative
+  initial DTS. Are verify.sh's duration-parity (stream durations) and scrub
+  gate (seek targets) edit-list-aware, or do they measure media duration while
+  QuickTime plays track duration? Probe a capture starting at pts≈1.4 s.
+  Spec: `edit_list_atom`, `playing_with_edit_lists`.
+- **1e. Encoder delay / priming on audio.** The spec has a whole article
+  chain on representing encoder delay via track structures — directly relevant
+  to the dual-track build (decoded PCM vs copied AAC/AC-3 alignment) and the
+  0.25 s A/V parity tolerance. Verify the alignment QC against these pages
+  rather than our own folklore.
+  Spec: `historical_solution_implicit_encoder_delay`,
+  `using_track_structures_to_represent_encode_delay_explictly`.
+
+## Phase 2 — Seekability atoms
+
+- **2a. `stss` vs `stps` claims in gop-probe.** The open-GOP doctrine maps
+  partial-sync frames to `stps`. Confirm ffmpeg actually writes `stps` on copy
+  of open-GOP H.264 (vs marking everything sync in `stss`), because
+  `seam-check`'s premise depends on it. Spec: `sample_atoms` (sync sample +
+  partial sync sample atoms).
+- **2b. `sdtp` sample dependencies.** Does its absence on our copies degrade
+  QuickTime scrubbing (the exact user-facing symptom we gate on)? If ffmpeg
+  writes it only sometimes, the scrub gate may be testing different file
+  shapes per source. Spec: `sample_atoms` (sample dependency flags).
+
+## Phase 3 — Sample descriptions (media-specific)
+
+- **3a. Interlaced signaling: `fiel`.** Plugin doctrine: "no `fiel` atom on
+  copy; bitstream VUI carries field order — fine." The spec lists `fiel` as
+  the video sample description extension QuickTime uses for field handling.
+  Probe: does AVFoundation deinterlace a PAFF deliverable correctly without
+  `fiel`? If not, decide: inject it (new, small tool) or document the player
+  matrix. Spec: `video_sample_description_extensions`.
+- **3b. Multichannel PCM needs `chan`.** ⚠ suspected live bug. Dual-track,
+  pairfill, and resync decode AC-3 5.1 → 6-ch `pcm_s24le`. QTFF maps >2-ch
+  PCM through the sound description v2 + `audio_channel_layout_atom`. Probe a
+  5.1 fixture: is `chan` written, and does QuickTime map L/R/C/LFE/Ls/Rs
+  correctly — or play scrambled channels? All current fixtures are mono/stereo,
+  so this path is untested. Spec: `sound_sample_descriptions`,
+  `sound_sample_description_extensions`, `audio_channel_layout_atom`.
+- **3c. Closed captions.** `--signaling` checks CC *presence* via ffprobe, but
+  QuickTime renders captions from a `clcp`/c608 TRACK, not from H.264 SEI.
+  Verify whether "captions preserved" as we report it means "QuickTime shows
+  captions" — if not, the check over-promises. Spec: `closed_captioning_media`.
+- **3d. `pasp`/`clap`/`gama` drift.** `--signaling` compares color
+  primaries/transfer/space/range but not pixel aspect (`pasp`) or clean
+  aperture (`clap`) — broadcast anamorphic SAR loss would ship undetected.
+  Also confirm no deprecated `gama` is ever written alongside `colr` (the spec
+  says they conflict). Spec: `clean_aperture`, `color_parameter_atom`.
+
+## Phase 4 — Track & metadata structure
+
+- **4a. Dual-track: do BOTH audio tracks play?** ⚠ suspected live bug.
+  QuickTime plays every *enabled* track; "default" is an ISO-BMFF disposition,
+  while QT semantics are `tkhd` enabled flags + alternate groups. If ffmpeg
+  maps `-disposition:a:1 0` to anything other than disabled/alternate-grouped,
+  QuickTime Player may mix the PCM access track WITH the AC-3 original.
+  Probe `tkhd` flags + `alternate_group` on a dual-track output; listen once
+  on a real Mac. Spec: `track_header_atom`, `chapter_lists` sibling pages on
+  alternate groups.
+- **4b. Chapter machinery.** QT chapters = text track + `chap` track
+  reference. metadata.sh strips *data* tracks; confirm the generic "menu" is
+  always a data track (not text), that stripping never leaves a dangling
+  `chap` tref, and that `--keep-chapters` keeps both halves. Spec:
+  `chapter_lists`, `track_reference_type_atom`, `text_media`.
+- **4c. Track language codes.** `language=eng` → `mdhd` packed ISO-639-2/T vs
+  legacy Mac codes; confirm what ffmpeg writes and what Finder/QuickTime
+  display for our rebuilt tracks. Spec: `basic_data_types/language_code_values`.
+- **4d. mdta structure conformance.** metadata.sh round-trips via ffprobe;
+  additionally `mp4dump` the `meta`/`keys`/`ilst` tree once against the spec
+  layout so "proper QuickTime format" is verified structurally, not just
+  read-back. Spec: `metadata_atoms_and_types/*`.
+
+## Phase 5 — Engineering-choice sweep (no spec needed)
+
+- **5a. pairfill maps `a:0` only.** rebuild-paff carries every audio track;
+  pairfill silently drops SAP/secondary audio. Add `--all-audio` (or a loud
+  warning when more tracks exist). Known gap — fix, don't debate.
+- **5b. Whole-file scan cost.** verify.sh (d) + `disc_scan` are now two
+  whole-file demux passes; measure on a multi-GB capture and merge into one
+  pass if material.
+- **5c. Histogram-gate false positives on VFR.** The tiny-duration FAIL
+  assumes CFR broadcast; the skill also claims web video (VFR is legitimate
+  there). Decide: scope the FAIL to CFR-detected outputs, or downgrade to
+  REVIEW with an explanation.
+- **5d. Confession regexes vs ffmpeg wording drift.** The three patterns are
+  tied to current English log text; CI matrix (4.4/6.1/7.1) should assert the
+  wording per version, and the matrix needs an 8.x leg (facts were verified on
+  8.1.x but CI never runs it).
+- **5e. auto.sh vs mov.sh audio-policy divergence.** auto's rungs 0/1 build
+  single-track (PCM) while mov.sh builds dual-track for the same codecs; the
+  PAFF full-TS branch of auto therefore ships a different deliverable than
+  /mov would. Unify or document the intent.
+- **5f. bash 3.2 sweep.** The metadata.sh crash class (`"${arr[@]}"` under
+  `set -u`) — grep every script for unguarded array expansions and run the
+  whole suite once under `/bin/bash` (3.2), not just the dev shell.
+- **5g. shellcheck all scripts**; fix or annotate every finding.
+- **5h. Real-PAFF fixture.** libx264 can't mint field-coded streams, so the
+  pair class is only injection-tested. Keep a tiny (<10 s) cut of a real T9
+  capture OUTSIDE the repo as a local manual-validation fixture, and document
+  the path in a gitignored note — never commit media.
+
+---
+
+## Execution order & exit criteria
+
+Run 0 → 1 → 4a/3b (the two suspected live bugs jump the queue after Phase 1)
+→ 2 → 3 → 5. Each item lands as its own commit: probe evidence in the message,
+reference updated, regression pinned where a behavior changed. The audit is
+done when `references/qtff-claims.md` has zero unverified rows and the two ⚠
+items are either fixed or disproven with recorded evidence.
