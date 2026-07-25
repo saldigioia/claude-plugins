@@ -41,13 +41,25 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     never deletes sources, and resumes idempotently (skips already-OK, unchanged).
 13. **Phase 5** — `playable-check.sh` skips cleanly on non-macOS (exit 3) and
     `auto.sh --playable` keeps OK when playability is unknown.
-14. **Review fix #4** — `rebuild-paff.sh` preserves real per-track audio language
-    (fra/spa), not a hard-coded `eng`.
+14. **Rebuild scope limit + review fix #4** — `rebuild-paff.sh` REFUSES a
+    reordered (B-frame) source (exit 3; the constant-rate restamp would play it
+    in decode order), `--force` bypasses only the refusal while the output
+    timeline gates still decide blessing, and on a legit no-reorder source it
+    preserves real per-track audio language (fra/spa), not a hard-coded `eng`.
 15. **Open-GOP seam glitch** — `gop-probe.sh` flags an open-GOP (partial-sync) cut
     point and names the nearest closed-GOP keyframe (exit 10), clears a closed one,
     and false-positives on neither real H.264 IDR media; `seam-check.sh` catches a
     one-frame flash (by before/after continuity), does NOT flag a legitimate hard
     cut, and passes a clean continuous join.
+19. **Post-mortem 2026-07-25 safeguards** — the coded-picture-rate detector
+    counts untimestamped packets (a half-timestamped window reads ~2×, not the
+    old false-negative ~1×) and the ~0.5 missing fraction reads as the pair
+    signature; `pf_reorder_scan` fires on B-pyramid tick tables and stays quiet
+    on flat PTS==DTS; `mux_confessions` counts the three muxer confession
+    classes; `remux.sh` HARD-STOPs (exit 1, output not blessed) on a confessing
+    mux log; `pairfill-paff.sh` refuses non-matching streams (exit 3), builds a
+    fully-timestamped source end-to-end, and keeps the source presentation
+    order; `probe.sh --kv` carries the routing profile (PF_HALF_TS/PF_REORDER).
 
 ## Synthesis limit (why some things aren't tested directly)
 
@@ -59,6 +71,13 @@ seek. The harness therefore validates the surrounding machinery (seekability
 sanity, gate execution, hash invariance, detector math) rather than re-creating
 the corruption. A **real capture played in a real player** remains the final
 arbiter — the skill's standing "playable ≠ valid" rule.
+
+Likewise a **pair-timestamped PAFF capture** (PES timestamps only on the first
+field of each pair) cannot be minted — encoders and muxers stamp every packet.
+Section 19 pins its mechanisms through the same injection-hook style the other
+un-mintable classes use (`PF_PKT_FILE`, `PF_PKT_TICKS_FILE`,
+`RTM_MUX_LOG_APPEND`), and the pairfill E2E run uses a fully-timestamped source
+(where the fill is a no-op by design) to prove the plumbing and gates.
 
 The same applies to the **open-GOP seam glitch**: libx264/x265 won't emit true
 leading B-frames on synthetic content, so `gop-probe.sh`'s detector is unit-tested

@@ -36,7 +36,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # become code. If you ever add a PR_ value that embeds $IN/$OUT, parse, don't eval.
 eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"   # PR_* + PF_*
 echo "== auto: $IN -> $OUT =="
-echo "   probe: vcodec=$PR_VCODEC audio=$PR_ACODEC($PR_AUDIO_ACTION) paff=$PF_PAFF -> first rung $PR_REC_RUNG"
+echo "   probe: vcodec=$PR_VCODEC audio=$PR_ACODEC($PR_AUDIO_ACTION) paff=$PF_PAFF half_ts=${PF_HALF_TS:-no} reorder=${PF_REORDER:-no} -> first rung $PR_REC_RUNG"
 
 # For a non-PAFF broken timeline, the Rung-3 rebuild rate comes from the measured
 # coded-picture rate; fall back to a clean mapping.
@@ -45,12 +45,14 @@ if [ "$RB_RATE" = unknown ]; then sg=$(pf_suggest_field_rate "$PF_CODED_RATE"); 
 
 rung_desc () { case "$1" in
   0) echo "Rung 0 (pure copy)";; 1) echo "Rung 1 (copy video + PCM audio)";;
-  2) echo "Rung 2 (copy + genpts)";; 3) echo "Rung 3 (field-rate rebuild @ $RB_RATE)";; esac; }
+  2) echo "Rung 2 (copy + genpts)";; 3) echo "Rung 3 (field-rate rebuild @ $RB_RATE)";;
+  P) echo "Rung 3-PAIR (pair-mate PTS fill — keeps every real PTS)";; esac; }
 run_rung () { case "$1" in
   0) bash "$SELF_DIR/remux.sh" "$IN" "$OUT" ${AUDIO:+--audio "$AUDIO"} $ALLAUD;;
   1) bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio "${AUDIO:-pcm}" $ALLAUD;;
   2) bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --genpts ${AUDIO:+--audio "$AUDIO"} $ALLAUD;;
   3) bash "$SELF_DIR/rebuild-paff.sh" "$IN" "$OUT" "$RB_RATE" "$RB_TS";;
+  P) bash "$SELF_DIR/pairfill-paff.sh" "$IN" "$OUT";;
 esac; }
 
 RESULT=FAIL; USED_RUNG=""
@@ -64,22 +66,54 @@ attempt () {  # $1 = rung; sets RESULT to OK|REVIEW|FAIL
   case "$o" in *">> OK"*) RESULT=OK;; *">> REVIEW"*) RESULT=REVIEW;; *) RESULT=FAIL;; esac
 }
 
+# PAFF routing by TIMESTAMP PROFILE (post-mortem 2026-07-25). "All PAFF ->
+# constant-rate rebuild" was wrong: on a stream with a reorder pyramid the
+# rebuild sets PTS=DTS and plays fields in DECODE order — shuffled motion the
+# default verify tier cannot see. So a reordered stream must KEEP its real PTS,
+# and auto NEVER falls back from pairfill to the flattening rebuild when a
+# pyramid is present.
+BASE_RUNG="$PR_REC_RUNG"; [ "$PF_PAFF" = yes ] && { BASE_RUNG=0; [ "$PR_AUDIO_ACTION" = pcm ] && BASE_RUNG=1; }
+
 if [ "$DRY" -eq 1 ]; then
   echo ">> DRY-RUN — no files written."
   if [ "$PF_PAFF" = yes ]; then
-    echo "   plan: $(rung_desc 3)  [field-coded -> genpts is guilty-until-proven]"
-    echo "   cmd : rebuild-paff.sh \"$IN\" \"$OUT\" $RB_RATE $RB_TS"
+    if [ "${PF_HALF_TS:-no}" = yes ]; then
+      echo "   plan: $(rung_desc P)  [pair-timestamped PAFF -> fill the pair-mates]"
+      echo "   cmd : pairfill-paff.sh \"$IN\" \"$OUT\""
+      [ "${PF_REORDER:-no}" = yes ] && echo "   no rebuild fallback: reorder pyramid present (rebuild would shuffle motion)." \
+        || echo "   escalation if verify is not OK: Rung 3 (rebuild @ $RB_RATE — no reorder survives)."
+    elif [ "${PF_REORDER:-no}" = yes ]; then
+      echo "   plan: $(rung_desc "$BASE_RUNG")  [full-TS reordered PAFF: a copy KEEPS the true pyramid; scrub-gated]"
+      echo "   escalation if verify is not OK: $(rung_desc P). Never the flattening rebuild."
+    else
+      echo "   plan: $(rung_desc 3)  [field-coded, no reorder -> genpts is guilty-until-proven]"
+      echo "   cmd : rebuild-paff.sh \"$IN\" \"$OUT\" $RB_RATE $RB_TS"
+    fi
   else
     echo "   plan: $(rung_desc "$PR_REC_RUNG")"
     echo "   cmd : $PR_REC_CMD"
-    echo "   escalation if verify is not OK: Rung 2 (genpts) -> Rung 3 (rebuild @ $RB_RATE)."
+    echo "   escalation if verify is not OK: Rung 2 (genpts) -> Rung 3 (rebuild @ $RB_RATE; refuses reordered streams)."
   fi
   echo "   then: verify.sh \"$IN\" \"$OUT\" $FULL  (re-encode/Rung 4 is never automatic)"
   exit 0
 fi
 
 if [ "$PF_PAFF" = yes ]; then
-  attempt 3                                   # field-coded: straight to rebuild
+  if [ "${PF_HALF_TS:-no}" = yes ]; then
+    attempt P                                  # pair class: keep real PTS, fill mates
+    if [ "$RESULT" != OK ] && [ "${PF_REORDER:-no}" = no ]; then
+      echo "-- verdict $RESULT and no reorder pyramid -> field-rate rebuild --"
+      attempt 3
+    fi
+  elif [ "${PF_REORDER:-no}" = yes ]; then
+    attempt "$BASE_RUNG"                       # full-TS pyramid: copy keeps the truth; scrub-gated
+    if [ "$RESULT" != OK ]; then
+      echo "-- verdict $RESULT -> pair-fill (keeps real PTS; never the flattening rebuild) --"
+      attempt P
+    fi
+  else
+    attempt 3                                  # no reorder survives: constant-rate rebuild is safe
+  fi
 else
   attempt "$PR_REC_RUNG"                       # Rung 0/1
   if [ "$RESULT" != OK ]; then
@@ -87,7 +121,7 @@ else
     attempt 2                                  # genpts
     if [ "$RESULT" != OK ] && [ "$RB_RATE" != unknown ]; then
       echo "-- verdict $RESULT -> escalating (field-rate rebuild) --"
-      attempt 3
+      attempt 3                                # refuses by itself on a reordered stream
     fi
   fi
 fi

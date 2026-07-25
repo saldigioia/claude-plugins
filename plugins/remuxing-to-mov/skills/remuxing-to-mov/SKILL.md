@@ -59,13 +59,21 @@ Rung 1  Copy video, PCM audio   scripts/remux.sh IN OUT.mov --audio pcm
 Rung 2  Copy + rebuild timestamps   scripts/remux.sh IN OUT.mov --genpts
         forced by: missing/unset PTS. Bitstream untouched.
         GUILTY-UNTIL-PROVEN on field-coded (PAFF) H.264: genpts can pass the
-        strict-mux test yet leave a timeline that tears on scrub — for PAFF skip
-        to Rung 3, or gate the output through verify.sh's scrub test first.
+        strict-mux test yet leave a timeline that tears on scrub — for PAFF use
+        Rung 3-PAIR/3, or gate the output through verify.sh's scrub test first.
+        NO HELP on pair-timestamped packets (PTS and DTS both absent): genpts
+        has nothing to derive from — that class is Rung 3-PAIR, full stop.
+Rung 3-PAIR  Pair-mate PTS fill    scripts/pairfill-paff.sh IN OUT.mov
+        for PAFF whose pair-mates carry no timestamps (~half the packets, the
+        post-mortem class) OR whose surviving PTS shows a reorder pyramid:
+        KEEPS every real PTS, fills each mate at +1 field, synthesizes a clean
+        DTS ramp. Video bits untouched; gates its own output before blessing.
 Rung 3  Rebuild timeline from the elementary stream
         scripts/rebuild-paff.sh IN OUT.mov FIELD_RATE [TIMESCALE]
-        the DEFAULT for field-coded (PAFF) H.264 — probe.sh/diagnose.sh route
-        here directly, NOT via genpts. Video stays bit-identical; access units +
-        timestamps are re-derived at the field rate.
+        for field-coded (PAFF) H.264 with NO surviving reorder pyramid — it
+        re-stamps at a constant rate (PTS=DTS), which plays a reordered stream
+        in DECODE order (shuffled motion), so it now REFUSES those (use 3-PAIR).
+        probe.sh/diagnose.sh route between 3-PAIR and 3 by timestamp profile.
 Rung 4  Re-encode (last resort)
         only: QuickTime PLAYBACK of 4:2:2 MPEG-2 or Dolby Vision, or a
         frame-exact cut at a non-keyframe. Minimize footprint. See
@@ -90,14 +98,18 @@ tears on scrub, it is almost always **timestamps, not the video** — run
    a delta scan finds them, and they are what desyncs raw PCM audio on a blind
    copy (the video keeps the gap; MOV PCM can't, so it collapses).
 
-Verdict → action: damaged → re-capture; missing TS → Rung 2 then Rung 3;
-non-monotonic DTS → Rung 3; **discontinuous source → `scripts/resync.sh` (video
-bit-identical, audio gap-filled), then the verify parity gate**. **Field-coded
-(PAFF) H.264 is routed straight to
-Rung 3 regardless of the timing verdict** — genpts is guilty-until-proven there,
-because the strict-mux test proves timestamps are *present and monotonic*, not
-that the timeline is *seekable*, and that gap is where PAFF corrupts silently.
-Detail and the manual commands live in `references/timeline-repair.md`.
+Verdict → action: damaged → re-capture; missing TS on the **pair signature**
+(~half the packets untimestamped, strictly alternating) → **Rung 3-PAIR
+(`pairfill-paff.sh`)**; other missing TS → Rung 2 then Rung 3; non-monotonic
+DTS → Rung 3-PAIR when real PTS/reorder survives, Rung 3 otherwise;
+**discontinuous source → `scripts/resync.sh` (video bit-identical, audio
+gap-filled), then the verify parity gate**. **Field-coded (PAFF) H.264 never
+goes down the genpts path** — genpts is guilty-until-proven there, because the
+strict-mux test proves timestamps are *present and monotonic*, not that the
+timeline is *seekable*, and that gap is where PAFF corrupts silently. diagnose
+picks between 3-PAIR and 3 from the measured timestamp profile (untimestamped
+fraction + reorder scan). Detail and the manual commands live in
+`references/timeline-repair.md`.
 
 ## Instant answers (recurring symptom → rule)
 
@@ -109,7 +121,9 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 | Video plays, audio silent in QuickTime | Audio QT can't play (AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm`. **E-AC-3 (Dolby Digital Plus) plays natively — just copy it** |
 | Glitches/tears only on scrub | Timestamps, not the video → `scripts/diagnose.sh` |
 | Audio drifts out of sync over a long capture (leads/lags the picture) | Discontinuous source: dropped frames the video keeps but raw PCM collapses on copy. `scripts/diagnose.sh` finds the forward gaps → `scripts/resync.sh IN OUT.mov` (video bit-identical, audio gap-filled) → `verify.sh` parity gate confirms |
-| Field-coded (PAFF) H.264 (coded-pic rate ≈ 2× frame rate) | genpts is guilty-until-proven → rebuild at the field rate (`scripts/rebuild-paff.sh`); confirm with `scripts/verify.sh` (its scrub gate fails a glitchy timeline) |
+| Field-coded (PAFF) H.264 (coded-pic rate ≈ 2× frame rate — the rate counts ALL packets, untimestamped included) | genpts is guilty-until-proven → pair-timestamped/reordered: `scripts/pairfill-paff.sh` (keeps real PTS); no reorder: `scripts/rebuild-paff.sh`; confirm with `scripts/verify.sh` (timeline + scrub gates) |
+| Mux log says `pts has no value` / `Timestamps are unset` / `Non-monotonic DTS` on a copy mux | **HARD STOP — the muxer invented the timeline.** Never ship it, whatever verify says about the essence. remux.sh/dual-track.sh refuse automatically; run `scripts/diagnose.sh` for the repair |
+| Repair looks fine but motion is subtly shuffled | Constant-rate restamp flattened a reorder pyramid (PTS=DTS = decode order). `verify.sh --full` compares framemd5 presentation ORDER; repair with `pairfill-paff.sh`, never `rebuild-paff.sh` |
 | Mux fails `Could not find tag for codec …` | A subtitle/data stream MOV can't carry (subrip, DVB, teletext, SCTE) — map explicitly `-map 0:v:0 -map 0:a`; text subs → sidecar or `mov_text` (verified 8.1.1: `-map 0` copy with SRT fails at header write) |
 | Mux fails `… only supported in MP4` | AV1 / FLAC / Opus / TrueHD: route to MP4 or keep MKV; FLAC → `-c:a alac` bridge |
 | `duration too long for timebase` | `-video_track_timescale` from the field-rate table in `references/timeline-repair.md` |
@@ -122,7 +136,7 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 | Asked to remux a file onto itself | Never — scripts refuse; write the output beside the source under a new name |
 | New machine / CI, or "is my ffmpeg OK?" | `scripts/doctor.sh` — reports required vs degraded capabilities (muxers/bsfs), plus platform / VideoToolbox / optional tools (report-only), before you trust verify.sh |
 | A whole folder of captures | `scripts/batch.sh DIR --out OUTDIR` — auto.sh per file + provenance sidecars + a report; idempotent resume, never deletes sources |
-| "Will QuickTime actually play it?" (macOS) | `scripts/playable-check.sh OUT.mov` — AVFoundation render probe; the playable≠valid half ffmpeg can't prove |
+| "Will QuickTime actually play it?" (macOS) | `scripts/playable-check.sh OUT.mov` — AVFoundation render probe; the playable≠valid half ffmpeg can't prove. **A floor, not a sign-off**: a thumbnail proves one frame decodes, nothing about the timeline |
 
 ## House defaults (baked into the scripts)
 
@@ -162,16 +176,37 @@ Detail and the manual commands live in `references/timeline-repair.md`.
 The non-obvious traps the scripts are built around — deep detail in the
 referenced files.
 
-- **Field-coded (PAFF) H.264 → field-rate rebuild; genpts is
+- **Field-coded (PAFF) H.264 → repair routed by TIMESTAMP PROFILE; genpts is
   guilty-until-proven.** genpts can pass the strict MKV-mux test (timestamps
   present + monotonic) yet leave a timeline that tears on scrub: mux-valid ≠
-  seekable, and that gap is where PAFF corrupts silently. So `probe.sh`/
-  `diagnose.sh` detect PAFF (coded-picture rate ≈ 2× frame rate) and route to
-  `rebuild-paff.sh`; `verify.sh` adds a **scrub gate** (an ffmpeg keyframe seek
-  alone stays clean on the broken file, so it is not enough). Decoded `framemd5`
-  FALSE-FAILs field-coded streams, so the **Annex-B packet hash** is the lossless
-  arbiter there. "Playable ≠ valid" — a real player is the final word.
+  seekable, and that gap is where PAFF corrupts silently. `probe.sh`/
+  `diagnose.sh` detect PAFF (coded-picture rate ≈ 2× frame rate, **counting
+  every packet — untimestamped ones included**, else pair-timestamped captures
+  false-read 1×) and route: pair-timestamped or reordered → `pairfill-paff.sh`
+  (keeps every real PTS); no surviving reorder → `rebuild-paff.sh`. `verify.sh`
+  adds a **scrub gate** (an ffmpeg keyframe seek alone stays clean on the broken
+  file, so it is not enough). Decoded `framemd5` FALSE-FAILs field-coded
+  streams, so the **Annex-B packet hash** is the lossless arbiter there.
+  "Playable ≠ valid" — a real player is the final word.
   → `references/timeline-repair.md`
+- **The pair-timestamped PAFF trap (post-mortem 2026-07-25).** Real broadcast
+  PAFF can carry PES timestamps only on the FIRST field of each pair — the mate
+  has no PTS and no DTS. Straight copy → the MOV muxer INVENTS timing (1-tick
+  durations, decode-order PTS): bits perfect, unwatchable file that still
+  renders a thumbnail. Three teeth now enforce this: (1) mux-log confessions
+  (`pts has no value` / `Timestamps are unset` / `Non-monotonic DTS`) are a
+  HARD STOP on any copy mux — remux.sh/dual-track.sh refuse to bless; (2)
+  verify.sh gate (d) scans the whole output for N/A timestamps, non-strict DTS,
+  and an insane duration histogram; (3) the repair is fully derivable — every
+  mate's PTS is exactly +1 field after its timestamped partner
+  (`pairfill-paff.sh`). The constant-rate rebuild is WRONG for this class when
+  a B-pyramid rides the real PTS: PTS=DTS plays fields in decode order —
+  shuffled motion that only a framemd5 presentation-ORDER compare
+  (`verify.sh --full`) can see, so `rebuild-paff.sh` refuses reordered streams.
+  **Acceptance doctrine:** a FAIL is a defect until every gate is individually
+  explained; replicating errors on the source explains only their class (and
+  needs MATCHING counts); precedent is not diagnosis.
+  → `references/timeline-repair.md`, `references/verification-safety.md`
 - **Not every keyframe is a safe cut (open-GOP seam glitch).** A segment starting
   on a partial-sync I-frame (`stps`, vs a full sync sample `stss`) keeps leading
   B-frames referencing the deleted GOP → one garbage frame at the seam, though

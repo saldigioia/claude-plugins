@@ -20,7 +20,10 @@
 #         falls back to framemd5; field-coded -> REVIEW, never a false FAIL.
 #         scripts/doctor.sh reports whether the VCL path is available.
 #   (c) decode spot-checks of the OUTPUT at middle + tail (10 s windows).
-#   (d) backward-DTS recheck on the output (want 0).
+#   (d) whole-file output TIMELINE integrity (demux only): 0 N/A PTS/DTS, DTS
+#       strictly monotonic, sane sample-duration histogram. Catches a
+#       muxer-invented timeline (half-timestamped PAFF straight-copied) that the
+#       essence checks are blind to — the shipped-broken-file class.
 #   (e) SCRUB GATE: accurate seeks (-ss AFTER -i) to deliberately off-keyframe
 #       targets + keyframe-spacing / single-GOP sanity. Reproduces a GUI scrub
 #       (which a keyframe-snap -ss-before-i seek does not), so a glitchy PAFF
@@ -164,14 +167,45 @@ else
   echo "   middle @${mid}s: $em errors; tail @${tail}s: $et errors (want 0)"
   errs=$((em + et))
 fi
-[ "$errs" -eq 0 ] || { [ "$verdict" = FAIL ] || verdict=REVIEW; note="${note:+$note }Output decode errors in spot windows."; }
+[ "$errs" -eq 0 ] || { [ "$verdict" = FAIL ] || verdict=REVIEW; note="${note:+$note }Output decode errors in spot windows. Claiming these are inherent to the source requires MATCHING counts on a linear decode of the same source window AND clean timeline gates (d)/(e) — the same error class can mask a second, container-level defect (post-mortem 2026-07-25)."; }
 
-echo "-- (d) backward-DTS on output --"
-back=$(ffprobe -v error -select_streams v:0 -read_intervals "%+#3000" \
-  -show_entries packet=dts -of csv=p=0 "$OUT" 2>/dev/null | \
-  awk -F, 'NR>1 && $1!="N/A" && p!="N/A" && $1<p {b++} {p=$1} END{print b+0}')
-echo "   backward-DTS: ${back:-0} (want 0)"
-[ "${back:-0}" -eq 0 ] || { [ "$verdict" = FAIL ] || verdict=REVIEW; note="${note:+$note }Non-monotonic DTS on output."; }
+echo "-- (d) output timeline integrity (whole file, demux only) --"
+# The gate the shipped-broken files would have failed (post-mortem 2026-07-25):
+# a MOV whose muxer was handed timestamp-less packets INVENTS timing — N/A PTS,
+# decode-order PTS, 1-tick sample durations, a stts/ctts no player can follow —
+# while the video essence stays bit-perfect, so (a)/(b) pass. Prove the OUTPUT's
+# own timeline: zero N/A timestamps, strictly monotonic DTS, and a sane
+# sample-duration histogram (CFR broadcast: one or two adjacent values; a spray
+# of near-zero durations is the invented-timeline signature).
+eval "$(ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 "$OUT" 2>/dev/null | \
+  awk -F, 'NF{
+      n++
+      if($1=="N/A"||$1=="") nap++
+      if($2=="N/A"||$2==""){ nad++ } else { d=$2+0; if(hav){ if(d<pd) back++; else if(d==pd) dup++ } pd=d; hav=1 }
+      if($3!="N/A" && $3!=""){ du=$3+0; h[du]++; if(h[du]>hm){hm=h[du]; modal=du} }
+    }
+    END{
+      tiny=0; top=""
+      for(k in h){ if(modal>0 && (k+0)*10<modal) tiny+=h[k] }
+      for(i=1;i<=3;i++){ bk=-1; bc=-1; for(k in h) if(h[k]>bc && !(k in used)){bc=h[k]; bk=k}
+        if(bk<0) break; used[bk]=1; top=top sprintf("%sx%d ", h[bk], bk) }
+      printf "TL_N=%d TL_NAPTS=%d TL_NADTS=%d TL_BACK=%d TL_DUP=%d TL_TINY=%d TL_MODAL=%d TL_TOP=%c%s%c\n",
+        n+0, nap+0, nad+0, back+0, dup+0, tiny+0, modal+0, 39, top, 39
+    }')"
+echo "   packets=$TL_N  N/A-PTS=$TL_NAPTS  N/A-DTS=$TL_NADTS  backward-DTS=$TL_BACK  duplicate-DTS=$TL_DUP"
+echo "   sample-duration histogram (top): ${TL_TOP:-'?'}  near-zero durations: $TL_TINY (want 0)"
+if [ "${TL_NAPTS:-0}" -ne 0 ] || [ "${TL_NADTS:-0}" -ne 0 ]; then
+  verdict=FAIL
+  note="${note:+$note }Output has ${TL_NAPTS}/${TL_NADTS} packets with N/A PTS/DTS — the muxer invented the timeline (hard stop; see timeline-repair.md)."
+fi
+if [ "${TL_BACK:-0}" -ne 0 ] || [ "${TL_DUP:-0}" -ne 0 ]; then
+  verdict=FAIL
+  note="${note:+$note }Output DTS not strictly monotonic (backward=$TL_BACK duplicate=$TL_DUP)."
+fi
+if [ "${TL_TINY:-0}" -gt 2 ]; then   # first/last sample may legitimately stray
+  verdict=FAIL
+  note="${note:+$note }$TL_TINY sample durations <1/10 of modal ($TL_MODAL) — invented-timeline signature."
+fi
 
 echo "-- (e) scrub gate: player-style off-keyframe seeks + keyframe sanity --"
 # WHY: the demux/keyframe-accurate checks above (and an -ss-before-i spot decode)
@@ -214,7 +248,7 @@ EOF
   echo "   off-keyframe accurate seeks: $ntests point(s), $serr decode error(s) (want 0)"
   if [ "${serr:-0}" -gt 0 ]; then
     verdict=FAIL
-    note="${note:+$note }Scrub gate: $serr decode error(s) on off-keyframe seeks — the timeline tears on scrub (silent-corruption signature). Rebuild at the field rate."
+    note="${note:+$note }Scrub gate: $serr decode error(s) on off-keyframe seeks — the timeline tears on scrub (silent-corruption signature). Route via diagnose.sh (pairfill-paff.sh for half-timestamped PAFF, rebuild-paff.sh otherwise). NEVER explain this away by replicating the errors on the source: two independent defects share this symptom, and inherent decode noise MASKS a broken container timeline (post-mortem 2026-07-25). The timeline must be independently proven — gate (d) above, MKV strict-mux, framemd5 presentation order (--full)."
   fi
 fi
 
@@ -251,25 +285,42 @@ fi
 
 if [ "$FULL" -eq 1 ]; then
   if [ "$SRC_IS_H264" -eq 1 ]; then
-    echo "-- (--full) whole-file decoded multiset identity (H.264) --"
+    echo "-- (--full) whole-file decoded multiset + PRESENTATION ORDER (H.264) --"
     # For H.264 the VCL hash in (b) is the bit-exact lossless proof. A decoded
     # compare is corroboration only and must be ORDER/COUNT-tolerant: field-coded
     # rebuilds legitimately present a different frame count (field-vs-frame / edit
     # list), so a positional rawvideo md5 would FALSE-FAIL. Compare the sorted
-    # multiset of frame hashes instead, and never FAIL on it alone.
-    setmd5 () { ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -f framemd5 - 2>/dev/null \
-                  | grep -v '^#' | awk -F', *' '{print $NF}' | sort | md5sum | awk '{print $1}'; }
-    s=$(setmd5 "$SRC"); d=$(setmd5 "$OUT")
-    echo "   source multiset=$s"
-    echo "   output multiset=$d"
+    # multiset of frame hashes, and never FAIL on the multiset alone.
+    # BUT: equal multiset + different SEQUENCE = the same frames presented in a
+    # different ORDER — the decode-order/shuffled-motion defect a constant-rate
+    # restamp inflicts on a reorder pyramid (post-mortem 2026-07-25). Every other
+    # gate is blind to it (bits identical, decode clean, scrub clean). That IS
+    # a FAIL: framemd5 presentation sequence of the output must equal the source.
+    HLD="$(mktemp -d)"
+    hlist () { ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -f framemd5 - 2>/dev/null \
+                 | grep -v '^#' | awk -F', *' '{print $NF}'; }
+    hlist "$SRC" > "$HLD/s"; hlist "$OUT" > "$HLD/o"
+    s=$(sort "$HLD/s" | md5sum | awk '{print $1}'); d=$(sort "$HLD/o" | md5sum | awk '{print $1}')
+    sq=$(md5sum < "$HLD/s" | awk '{print $1}'); dq=$(md5sum < "$HLD/o" | awk '{print $1}')
+    echo "   source multiset=$s sequence=$sq"
+    echo "   output multiset=$d sequence=$dq"
     if [ "$s" = "$d" ]; then
-      echo "   PASS: decoded frame multiset identical (VCL hash already proved lossless)."
-      [ "$verdict" = REVIEW ] && { verdict=PASS; note=""; }
+      if [ "$sq" = "$dq" ]; then
+        echo "   PASS: decoded frames identical AND in the same presentation order."
+        [ "$verdict" = REVIEW ] && { verdict=PASS; note=""; }
+      else
+        echo "   FAIL: same frames, DIFFERENT presentation order — the output plays"
+        echo "   pictures in decode order (shuffled motion). A constant-rate restamp"
+        echo "   of a reordered stream does exactly this; repair with pairfill-paff.sh"
+        echo "   (keep the real PTS), not rebuild-paff.sh."
+        verdict=FAIL
+      fi
     else
       echo "   NOTE: decoded multiset differs — expected for a field-coded / edit-list"
       echo "   rebuild (different presented frame count). The VCL hash in (b) is the"
       echo "   authoritative lossless proof; not downgrading on this alone."
     fi
+    rm -rf "$HLD"
   else
     echo "-- (--full) whole-file decoded-pixel identity (two full decodes) --"
     fmd5 () { ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -c:v rawvideo -f md5 - | sed 's/^MD5=//'; }

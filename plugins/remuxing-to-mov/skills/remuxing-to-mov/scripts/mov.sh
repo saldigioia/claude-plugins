@@ -29,10 +29,12 @@
 #                                                         MOV (keep MKV/MP4 if you need it)
 #   none                                              -> video-only copy
 #
-# Field-coded (PAFF) H.264 is routed to the timeline rebuild via auto.sh. That path
-# decodes audio to PCM, so the bit-exact ORIGINAL is not preserved there; for
-# dual-track on a PAFF source use the manual route (references/timeline-repair.md +
-# references/dual-track-quicktime.md).
+# Field-coded (PAFF) H.264 is routed via auto.sh by timestamp profile:
+# pair-timestamped / reordered streams get the pair-mate PTS fill
+# (pairfill-paff.sh — dual-track built in, original audio preserved bit-exact);
+# only a no-reorder stream gets the elementary rebuild, and THAT path decodes
+# audio to PCM (original not preserved — manual route via
+# references/timeline-repair.md + references/dual-track-quicktime.md if needed).
 #
 # Exit: 0 = verified OK; 10 = REVIEW (written, look closer); 1 = FAIL; 2 = usage.
 set -euo pipefail
@@ -78,10 +80,10 @@ eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
 echo "== mov: $IN -> $OUT =="
 echo "   video=$PR_VCODEC  audio=$PR_ACODEC  paff=$PF_PAFF"
 
-# --- field-coded: hand the timeline rebuild to the tested ladder driver ---
+# --- field-coded: hand the timeline repair to the tested ladder driver ---
 if [ "$PF_PAFF" = yes ]; then
-  echo "   field-coded (PAFF) -> timeline rebuild via auto.sh"
-  echo "   note: that path decodes audio; the bit-exact ORIGINAL is not preserved."
+  echo "   field-coded (PAFF) -> timeline repair via auto.sh (routed by timestamp profile:"
+  echo "   pair-fill keeps real PTS + original audio; the rebuild decodes audio to PCM)"
   set +e; bash "$SELF_DIR/auto.sh" "$IN" "$OUT" $FULL; rc=$?; set -e
   [ "$rc" -eq 0 ] && { apply_metadata "$OUT" || rc=$?; }
   exit "$rc"

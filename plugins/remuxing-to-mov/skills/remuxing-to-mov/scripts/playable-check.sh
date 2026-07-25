@@ -13,6 +13,13 @@
 # frame. NOTE: this proves VIDEO decode/open only; audio playability (AC-3/E-AC-3/
 # DTS) is not covered — listen once if it matters.
 #
+# FLOOR, NOT SIGN-OFF (post-mortem 2026-07-25): a thumbnail proves ONE frame
+# decodes; it says NOTHING about the presentation timeline. A file with a
+# muxer-invented timeline renders a thumbnail and is unwatchable in real
+# playback. Sign-off for a suspect timeline = verify.sh's full gate set
+# (timeline scan, scrub gate, A/V parity) — this check is only the last-mile
+# "QuickTime can open it" floor on top of that.
+#
 # NOTE: the macOS path cannot be exercised on Linux/CI; validate on a real Mac.
 set -euo pipefail
 OUT="${1:?usage: playable-check.sh OUTPUT.mov}"
@@ -29,6 +36,8 @@ qlmanage -t -s 480 -o "$TMP" "$OUT" >/dev/null 2>&1 || true
 if ls "$TMP"/*.png >/dev/null 2>&1; then
   echo "playable-check: OK — AVFoundation rendered a frame; QuickTime can open the video."
   echo "  (audio playability for AC-3/E-AC-3/DTS is NOT proven by a thumbnail — listen if it matters.)"
+  echo "  (FLOOR only: one frame decoding proves nothing about the timeline — a broken"
+  echo "   timeline still thumbnails. Sign-off = verify.sh's gates, then a real scrub.)"
   exit 0
 else
   echo "playable-check: FAIL — AVFoundation produced no frame; QuickTime likely can't decode this"

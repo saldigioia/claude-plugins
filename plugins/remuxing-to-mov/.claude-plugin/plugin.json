@@ -1,8 +1,8 @@
 {
   "name": "remuxing-to-mov",
   "displayName": "Remux to MOV",
-  "version": "1.4.0",
-  "description": "Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. One-command /mov shortcut picks the technique automatically (dual-track only when the audio needs it — E-AC-3 plays natively so it is copied single-track). Optional, opt-in QuickTime metadata embedding (proper mdta keys, no generic chapter menu). Five-rung escalation ladder (pure copy → PCM audio → genpts → elementary-stream timeline rebuild → scoped re-encode) with probe/diagnose/verify scripts, a dual-track PCM-access + bit-exact-original audio default, field-coded (PAFF) H.264 glitch repair, discontinuity (forward-gap) detection with an A/V duration-parity QC gate and an explicit audio resync, and decoded-pixel-identity verification of every output. Every codec/container fact verified empirically against a named ffmpeg version; the source file is never touched.",
+  "version": "1.5.0",
+  "description": "Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. One-command /mov shortcut; escalation ladder (copy → PCM audio → genpts → timeline repair routed by timestamp profile: pair-mate PTS fill or elementary rebuild → scoped re-encode); dual-track PCM-access + bit-exact-original audio only when QuickTime needs it; field-coded (PAFF) repair including the half-timestamped pair class; muxer-confession hard stop; whole-file timeline, presentation-order, scrub, and A/V-parity verification gates; opt-in QuickTime metadata. The source file is never touched; every codec/container fact verified against a named ffmpeg version.",
   "author": {
     "name": "Rare Data Club",
     "email": "sal@raredata.club",

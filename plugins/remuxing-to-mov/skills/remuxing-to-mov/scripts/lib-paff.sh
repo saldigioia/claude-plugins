@@ -10,11 +10,21 @@
 # tt/bb corroborates and is reported, but the rate ratio is the decisive test
 # (some captures/builds report field_order=unknown even when field-coded).
 #
+# COUNT EVERY PACKET, not just timestamped ones (post-mortem 2026-07-25): real
+# broadcast PAFF often carries PES timestamps only on the FIRST field of each
+# pair — the second field of every pair has no PTS and no DTS at all. A rate
+# computed from timestamped packets alone reads ~1x on exactly those captures
+# and reports paff=no: the false negative that routed a broken timeline to the
+# wrong repair rung. So the numerator counts ALL packets in the window; only the
+# time SPAN comes from the timestamped ones. The untimestamped fraction itself
+# is exported (PF_NOPTS_FRAC / PF_HALF_TS) — ~50% missing IS the pair signature.
+#
 # Usage:
 #   . "$(dirname "$0")/lib-paff.sh"
 #   eval "$(pf_detect INPUT)"
 #   # -> PF_CODEC PF_FIELD PF_CODED_RATE PF_NOMINAL_FPS PF_RATIO PF_PAFF
-#   #    PF_FIELD_RATE PF_TIMESCALE   (PF_PAFF is yes|no)
+#   #    PF_FIELD_RATE PF_TIMESCALE PF_NOPTS PF_NOPTS_FRAC PF_HALF_TS
+#   #    (PF_PAFF / PF_HALF_TS are yes|no)
 #
 # Every function is a read-only probe; none touch the source.
 
@@ -25,12 +35,56 @@ pf_eval_fps () {
 
 # coded-picture rate over a bounded packet window (demux only, NO decode).
 # min/max timestamp span is robust to B-frame reordering; dts fills in for N/A pts.
+# EVERY packet counts toward the rate — untimestamped ones included (they are still
+# coded pictures); only the span comes from timestamped packets. Skipping the
+# untimestamped ones halves the measured rate on pair-timestamped PAFF captures
+# and produces the paff=no false negative (post-mortem 2026-07-25).
+# Emits: "RATE TOTAL_PKTS UNTIMESTAMPED_PKTS".
+# Test hook: PF_PKT_FILE=<csv of pts_time,dts_time lines> bypasses ffprobe.
 pf_coded_rate () {
-  ffprobe -v error -select_streams v:0 -read_intervals "%+#240" \
-    -show_entries packet=pts_time,dts_time -of csv=p=0 "$1" 2>/dev/null | \
-  awk -F, '{t=$1; if(t=="N/A"||t==""){t=$2}; if(t=="N/A"||t=="")next;
-            if(!seen){mn=mx=t;seen=1} else {if(t<mn)mn=t; if(t>mx)mx=t}; n++}
-           END{span=mx-mn; if(seen && span>0 && n>1) printf "%.4f",(n-1)/span; else print "0"}'
+  { if [ -n "${PF_PKT_FILE:-}" ]; then cat "$PF_PKT_FILE"; else
+      ffprobe -v error -select_streams v:0 -read_intervals "%+#240" \
+        -show_entries packet=pts_time,dts_time -of csv=p=0 "$1" 2>/dev/null; fi; } | \
+  awk -F, 'NF{t=$1; if(t=="N/A"||t==""){t=$2}; n++;
+            if(t=="N/A"||t==""){miss++; next}
+            if(!seen){mn=mx=t;seen=1} else {if(t<mn)mn=t; if(t>mx)mx=t}}
+           END{span=mx-mn; if(seen && span>0 && n>1) printf "%.4f %d %d",(n-1)/span,n,miss+0;
+               else printf "0 %d %d",n+0,miss+0}'
+}
+
+# reorder profile over a bounded head window (demux only, NO decode): does the
+# stream carry a presentation-reorder pyramid (B-frames / B-fields)? Measured
+# from packets where BOTH pts and dts are present: pts!=dts occurrences, backward
+# pts steps, and the max pts-dts offset in stream ticks. Decides which repair is
+# legitimate: a constant-rate restamp (rebuild-paff.sh) sets PTS=DTS and plays a
+# reordered stream in DECODE order — motion shuffled, a different way of being
+# broken (post-mortem 2026-07-25). Reordered streams need their real PTS kept
+# (pairfill-paff.sh) instead.
+# Test hook: PF_PKT_TICKS_FILE=<csv of pts,dts integer-tick lines> bypasses ffprobe.
+pf_reorder_scan () {
+  { if [ -n "${PF_PKT_TICKS_FILE:-}" ]; then cat "$PF_PKT_TICKS_FILE"; else
+      ffprobe -v error -select_streams v:0 -read_intervals "%+#3000" \
+        -show_entries packet=pts,dts -of csv=p=0 "$1" 2>/dev/null; fi; } | \
+  awk -F, 'NF{
+      p=$1; d=$2; tot++
+      if(p!="N/A" && p!=""){ if(havep && p+0<pp) back++; pp=p+0; havep=1 }
+      if(p=="N/A"||p==""||d=="N/A"||d=="") next
+      both++; off=p-d; if(off!=0) ne++; if(off>mx) mx=off
+    }
+    END{
+      r="no"; if(ne>0 || back>0) r="yes"
+      printf "PF_REORDER=%s\nPF_PTSNEDTS=%d\nPF_BACKPTS=%d\nPF_MAXOFF_TICKS=%d\nPF_TS_BOTH=%d\n", r, ne+0, back+0, mx+0, both+0
+    }'
+}
+
+# mux_confessions LOGFILE — count the muxer's own admissions that it INVENTED
+# timing: "pts has no value", "Timestamps are unset in a packet", non-monotonic
+# DTS nudges. Any nonzero count on a MOV mux is a HARD STOP: the video bits may
+# be perfect while the written timeline is garbage (post-mortem 2026-07-25 —
+# these lines were treated as cosmetic and the shipped files were unwatchable).
+mux_confessions () {
+  [ -f "${1:-}" ] || { echo 0; return; }
+  grep -ciE 'pts has no value|timestamps are unset|non-?monotonic dts' "$1" || true
 }
 
 # map a measured field/coded rate to a clean rebuild-paff FIELD_RATE + TIMESCALE.
@@ -52,17 +106,21 @@ pf_detect () {
   pf_field=$(ffprobe -v error -select_streams v:0 -show_entries stream=field_order -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   pf_af=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   pf_rf=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  pf_cr=$(pf_coded_rate "$IN")
+  set -- $(pf_coded_rate "$IN"); pf_cr="${1:-0}"; pf_tot="${2:-0}"; pf_miss="${3:-0}"
   pf_nf=$(pf_eval_fps "${pf_af:-0}")
   awk "BEGIN{exit !(${pf_nf:-0}>0)}" || pf_nf=$(pf_eval_fps "${pf_rf:-0}")
   pf_ratio=$(awk "BEGIN{if(${pf_nf:-0}>0)printf \"%.3f\",${pf_cr:-0}/$pf_nf; else print 0}")
+  pf_frac=$(awk "BEGIN{if(${pf_tot:-0}>0)printf \"%.3f\",${pf_miss:-0}/$pf_tot; else print \"0.000\"}")
+  # ~half the packets untimestamped = the PAFF pair signature (first field of each
+  # pair timestamped, its mate not) — the class the timestamped-only rate misread.
+  pf_half=no; awk "BEGIN{exit !(${pf_frac:-0}>=0.35 && ${pf_frac:-0}<=0.65)}" && pf_half=yes
   pf_paff=no; pf_fr=unknown; pf_ts=unknown
   if [ "$pf_codec" = h264 ] && awk "BEGIN{exit !(${pf_ratio:-0}>=1.7 && ${pf_ratio:-0}<=2.3)}"; then
     pf_paff=yes
     pf_sg=$(pf_suggest_field_rate "$pf_cr"); pf_fr=${pf_sg%% *}; pf_ts=${pf_sg##* }
   fi
-  printf 'PF_CODEC=%s\nPF_FIELD=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_RATIO=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\n' \
-    "${pf_codec:-na}" "${pf_field:-na}" "${pf_cr:-0}" "${pf_nf:-0}" "${pf_ratio:-0}" "$pf_paff" "$pf_fr" "$pf_ts"
+  printf 'PF_CODEC=%s\nPF_FIELD=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_RATIO=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_NOPTS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\n' \
+    "${pf_codec:-na}" "${pf_field:-na}" "${pf_cr:-0}" "${pf_nf:-0}" "${pf_ratio:-0}" "$pf_paff" "$pf_fr" "$pf_ts" "${pf_miss:-0}" "${pf_frac:-0}" "$pf_half"
 }
 
 # disc_scan — forward-timestamp-gap (discontinuity) scan of the video track.

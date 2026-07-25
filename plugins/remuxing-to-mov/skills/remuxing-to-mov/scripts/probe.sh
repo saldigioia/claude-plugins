@@ -28,21 +28,28 @@ probe_struct () {
   cs=$($q v:0 -show_entries stream=color_space -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   cr=$($q v:0 -show_entries stream=color_range -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   eval "$(pf_detect "$IN")"
+  eval "$(pf_reorder_scan "$IN")"
   case "$acodec" in                              # mirrors remux.sh --audio auto
     mp2|mp1|mp3|dts) aaction=pcm;;
     "")              aaction=none;;
     *)               aaction=copy;;
   esac
-  if   [ "$PF_PAFF" = yes ]; then rung=3; cmd="rebuild-paff.sh IN OUT.mov $PF_FIELD_RATE $PF_TIMESCALE"
+  # PAFF repair routed by timestamp profile (post-mortem 2026-07-25): a pair-
+  # timestamped or reordered stream must KEEP its real PTS (pairfill); the
+  # constant-rate rebuild is only safe when no reorder pyramid survives.
+  if [ "$PF_PAFF" = yes ]; then
+    rung=3
+    if [ "$PF_HALF_TS" = yes ] || [ "$PF_REORDER" = yes ]; then cmd="pairfill-paff.sh IN OUT.mov"
+    else cmd="rebuild-paff.sh IN OUT.mov $PF_FIELD_RATE $PF_TIMESCALE"; fi
   elif [ "$aaction" = pcm ]; then rung=1; cmd="remux.sh IN OUT.mov --audio pcm"
   else                            rung=0; cmd="remux.sh IN OUT.mov"; fi
   if [ "$mode" = "--json" ]; then
-    printf '{"container":"%s","vcodec":"%s","vtag":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"}\n' \
-      "$container" "$vcodec" "$vtag" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf '{"container":"%s","vcodec":"%s","vtag":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"}\n' \
+      "$container" "$vcodec" "$vtag" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
   else
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
-    printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
-      "$container" "$vcodec" "$vtag" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
+      "$container" "$vcodec" "$vtag" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
   fi
 }
 case "$MODE" in --kv|--json) probe_struct "$MODE"; exit 0;; esac
@@ -68,28 +75,37 @@ case "$isavc" in
   *)     echo "n/a (not H.264, or undetectable)" ;;
 esac
 
-echo "-- field structure --"
+echo "-- field structure & timestamp profile --"
 eval "$(pf_detect "$IN")"
+eval "$(pf_reorder_scan "$IN")"
 echo "field_order=$PF_FIELD  (tt/bb = interlaced; progressive/unknown = usually no field concern)"
 echo "coded-picture rate=${PF_CODED_RATE}/s  vs  frame rate=${PF_NOMINAL_FPS}/s  (ratio=${PF_RATIO})"
+echo "untimestamped packets: fraction=${PF_NOPTS_FRAC} (half_ts=$PF_HALF_TS)   reorder pyramid: $PF_REORDER (max PTS-DTS ${PF_MAXOFF_TICKS} ticks)"
 if [ "$PF_PAFF" = yes ]; then
   echo "   >> FIELD-CODED (PAFF) H.264: coded-picture rate ~2x the frame rate."
   echo "      This is the fragile profile and the one that silently corrupts."
   echo "      genpts (Rung 2) is GUILTY-UNTIL-PROVEN here: it can pass the strict"
   echo "      MKV-mux test yet leave a timeline that tears when a player scrubs."
-  echo "      Go straight to the field-rate rebuild (Rung 3):"
-  if [ "$PF_FIELD_RATE" = unknown ]; then
+  if [ "$PF_HALF_TS" = yes ] || [ "$PF_REORDER" = yes ]; then
+    echo "      Timestamp profile says KEEP the real PTS (pair-timestamped and/or"
+    echo "      reordered — a constant-rate rebuild would play fields in decode order):"
+    echo "         scripts/pairfill-paff.sh \"$IN\" OUT.mov"
+  elif [ "$PF_FIELD_RATE" = unknown ]; then
+    echo "      Go to the field-rate rebuild (Rung 3):"
     echo "         scripts/rebuild-paff.sh \"$IN\" OUT.mov <FIELD_RATE> <TIMESCALE>"
     echo "         (measured ~${PF_CODED_RATE}/s didn't map to a standard rate — pick"
     echo "          from the field-rate table in references/timeline-repair.md)"
   else
+    echo "      No reorder survives -> field-rate rebuild (Rung 3):"
     echo "         scripts/rebuild-paff.sh \"$IN\" OUT.mov $PF_FIELD_RATE $PF_TIMESCALE"
   fi
   echo "      Then verify with the scrub gate: scripts/verify.sh \"$IN\" OUT.mov"
 else
-  echo "   NOTE: not field-coded by the rate test (ratio ~1x). If mediainfo says"
-  echo "   'Separated fields' or playback still tears on scrub, treat as PAFF anyway"
-  echo "   and rebuild; see references/timeline-repair.md."
+  echo "   NOTE: not field-coded by the rate test (ratio ~1x; the rate counts ALL"
+  echo "   packets, untimestamped ones included — the old timestamped-only count"
+  echo "   false-read 1x on pair-timestamped PAFF). If mediainfo says 'Separated"
+  echo "   fields' or playback still tears on scrub, treat as PAFF anyway;"
+  echo "   see references/timeline-repair.md."
 fi
 
 echo "-- discontinuities (forward timestamp gaps) --"

@@ -40,8 +40,14 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
 - Audio, by QuickTime **playability**: AAC/ALAC/MP3/PCM and **E-AC-3 (Dolby Digital
   Plus)** are copied as-is (single track); AC-3/DTS/MP2 become a **dual-track** MOV —
   a PCM "access" track that always plays, plus the original copied bit-exact as track 2.
-- Field-coded (PAFF) input is auto-routed to the timeline rebuild (the original
-  audio isn't bit-exact preserved on that path — the script says so).
+- Field-coded (PAFF) input is auto-routed to the right timeline repair by its
+  timestamp profile: pair-timestamped/reordered streams get the pair-mate PTS
+  fill (real PTS kept, original audio preserved bit-exact in the dual-track);
+  only a no-reorder stream gets the elementary rebuild (original audio not
+  bit-exact preserved on that path — the script says so).
+- A copy mux whose log confesses invented timing (`pts has no value` /
+  `Timestamps are unset`) is a hard stop — the script refuses to bless the
+  output and points at `diagnose.sh`. Relay that verbatim; never ship the file.
 
 ## Report back
 

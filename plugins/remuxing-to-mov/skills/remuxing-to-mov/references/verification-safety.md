@@ -51,9 +51,18 @@ ffmpeg -v error -i OUT -map 0:v:0 -c:v copy -bsf:v h264_mp4toannexb,filter_units
 #     Non-H.264: decoded framemd5 of the first ~300 frames (hash column only) +
 #     packet-count parity (ffprobe -count_packets; demux only).
 # (c) output decode spot-checks: 10 s windows at middle and tail (-f null)
-# (d) timeline clean
-ffprobe -v error -select_streams v:0 -read_intervals "%+#3000" -show_entries packet=dts -of csv=p=0 OUT \
-  | awk -F, 'NR>1 && $1!="N/A" && p!="N/A" && $1<p {b++} {p=$1} END{print b+0" backward-DTS (want 0)"}'
+# (d) output timeline integrity — WHOLE file, demux only. Zero N/A PTS/DTS,
+#     strictly monotonic DTS, and a sane sample-duration histogram. This is the
+#     gate the shipped-broken files would have failed: a muxer handed
+#     timestamp-less packets writes N/A-free but INVENTED timing — decode-order
+#     PTS, 1-tick durations — while every essence check passes.
+ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 OUT \
+  | awk -F, 'NF{ if($1=="N/A")nap++
+      if($2=="N/A"){nad++} else {if(h && $2+0<=p) bad++; p=$2+0; h=1}
+      if($3!="N/A") d[$3]++ }
+    END{ printf "N/A pts=%d dts=%d  non-strict DTS=%d  durations:", nap+0,nad+0,bad+0
+         for(k in d) printf " %dx%s", d[k], k; print "" }'
+# want: 0 / 0 / 0, and one or two adjacent duration values on CFR broadcast
 # (e) SCRUB GATE — accurate seek to a deliberately OFF-keyframe point (-ss AFTER
 #     -i), the way a player lands mid-GOP and follows the seek index/edit list.
 #     A keyframe-snap seek (-ss before -i) stays clean on a broken PAFF timeline,
@@ -134,6 +143,48 @@ proxies close it (both in `verify.sh` step (e)):
 
 A real player is still the final arbiter ("playable ≠ valid"), but these catch
 the case unaided — before the source is deleted.
+
+## A FAIL is a defect until every gate is individually explained
+
+The acceptance discipline that failed in the 2026-07-25 incident, now doctrine:
+
+- **The muxer's confession is a hard stop.** `pts has no value`, `Timestamps
+  are unset in a packet`, or `Non-monotonic DTS` in a COPY mux's log means the
+  muxer invented the timeline. The incident log said `pts has no value` ×4,120
+  and was treated as cosmetic; the files shipped broken. `remux.sh` and
+  `dual-track.sh` now capture the mux log and refuse to bless such an output —
+  regardless of what any later check says about the video essence. (On a
+  DELIBERATE restamp — rebuild-paff — unset-timestamp warnings are the
+  mechanism working as designed; there the output-timeline gates are the proof.)
+- **Replicating errors on the source explains only their class, never the
+  verdict.** Two independent defects can share one symptom: the incident's
+  inherent `mmco` seek noise was real AND it masked an invented container
+  timeline that fails the same gates. Explaining *part* of a failure is not
+  explaining the failure. A reclassification to "inherent" requires (a)
+  **matching** error counts on the same windows of the source — 9 vs 5 does not
+  match — and (b) the container timeline independently proven clean.
+- **A scrub-gate FAIL is never cleared by source replication alone.** The
+  timeline must be proven with the gate table below.
+- **Thumbnail render ≠ playable.** `playable-check.sh` proves ONE frame
+  decodes — nothing about the presentation timeline. It is a floor under the
+  gates, never a sign-off over them.
+- **Precedent is not diagnosis.** A prior file "accepted with the same
+  signature" is a hypothesis to re-test, not a convention to apply. The
+  incident's saved precedent was itself a broken file.
+
+### Sign-off gate table for a suspect timeline (ALL must pass, per file)
+
+| Gate | Requirement |
+|------|-------------|
+| VCL-payload identity (verify.sh b) | MATCH — video bits identical |
+| Output timestamps (verify.sh d) | 0 packets with N/A PTS/DTS; DTS strictly monotonic |
+| Sample-duration histogram (verify.sh d) | one/two adjacent values only (e.g. 1501+1502), ±1 count |
+| Presentation order (verify.sh --full) | framemd5 sequence of decoded output == source |
+| MKV strict-mux of the OUTPUT | PASS (even when the source itself fails it) |
+| Scrub gate (verify.sh e) | 0 decode errors, or counts matching the source per entry point |
+| A/V duration parity (verify.sh f) | Δ within 0.25 s, or the same Δ measured in the source |
+| Dual-track audio (verify.sh --audio) | original track md5 == source elementary; PCM access == decoded original |
+| playable-check.sh | OK — necessary, NOT sufficient (thumbnail only) |
 
 ## Optional preservation checks (`--signaling`, `--audio`)
 

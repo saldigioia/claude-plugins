@@ -24,11 +24,12 @@ if [ "$FFMPEG" = yes ]; then
   MAJOR=${VER%%.*}; MINOR=${VER#*.}; MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}
 fi
 MUX_MOV=no; MUX_NULL=no; MUX_SHASH=no; MUX_FMD5=no
-BSF_FU=no; BSF_H264=no; BSF_HEVC=no
+BSF_FU=no; BSF_H264=no; BSF_HEVC=no; BSF_SETTS=no
 if [ "$FFMPEG" = yes ]; then
   MUX_MOV=$(has_mux mov);        MUX_NULL=$(has_mux null)
   MUX_SHASH=$(has_mux streamhash); MUX_FMD5=$(has_mux framemd5)
   BSF_FU=$(has_bsf filter_units); BSF_H264=$(has_bsf h264_mp4toannexb); BSF_HEVC=$(has_bsf hevc_mp4toannexb)
+  BSF_SETTS=$(has_bsf setts)
 fi
 
 # Platform / hardware / optional helpers — REPORT-ONLY (informational; never gates
@@ -51,9 +52,9 @@ status=READY; [ "$required_ok" = yes ] || status=BLOCKED
 { [ "$status" = READY ] && { [ "$vcl_ok" = no ] || [ "$MUX_SHASH" = no ]; }; } && status=DEGRADED
 
 if [ "$KV" -eq 1 ]; then
-  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\n' \
+  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_BSF_SETTS=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\n' \
     "$FFMPEG" "$FFPROBE" "${VER:-na}" "$MUX_MOV" "$MUX_NULL" "$MUX_SHASH" "$MUX_FMD5" \
-    "$BSF_FU" "$BSF_H264" "$BSF_HEVC" "$vcl_ok" "$dv_copy" \
+    "$BSF_FU" "$BSF_H264" "$BSF_HEVC" "$BSF_SETTS" "$vcl_ok" "$dv_copy" \
     "$OS" "$ARCH" "$VTB" "$T_MINFO" "$T_MP4BOX" "$T_MP4DUMP" "$status"
   [ "$required_ok" = yes ] || exit 1
   exit 0
@@ -72,6 +73,7 @@ echo "-- bitstream filters --"
 echo "  filter_units     : $(mark "$BSF_FU")   [recommended: H.264 VCL lossless arbiter]"
 echo "  h264_mp4toannexb : $(mark "$BSF_H264")   [recommended: VCL / rebuild on AVCC sources]"
 echo "  hevc_mp4toannexb : $(mark "$BSF_HEVC")   [optional: HEVC elementary handling]"
+echo "  setts            : $(mark "$BSF_SETTS")   [recommended: pairfill-paff timeline repair; its PREV_OUT* vars need ffmpeg >= 5.x]"
 echo "-- version-gated behavior --"
 if [ "$dv_copy" = yes ]; then
   echo "  Dolby Vision : ffmpeg $VER >= 5.0 -> single-layer DV (P5/P8) survives -c copy with -tag:v hvc1."

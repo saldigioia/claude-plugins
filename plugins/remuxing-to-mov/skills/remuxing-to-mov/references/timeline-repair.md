@@ -29,18 +29,28 @@ ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,field_order
 **coded-picture rate ≈ 2× the container frame rate** — each field picture is its
 own access unit, so ~60 AU/s on 29.97p content (or ~50 on 25p) is the signature.
 `probe.sh` measures this from a bounded packet window (demux only) and is what
-routes PAFF straight to the field-rate rebuild instead of genpts. `field_order`
+routes PAFF to the right timeline repair instead of genpts. `field_order`
 tt/bb corroborates but is not required — some captures report `unknown` while
 still being field-coded, so the rate ratio is the decisive test.
 
+**COUNT EVERY PACKET, timestamped or not** (post-mortem 2026-07-25). Real
+broadcast PAFF often carries PES timestamps only on the FIRST field of each
+pair — the second field of every pair has no PTS and no DTS at all (9,763 of
+19,527 packets on the incident capture). A rate computed from timestamped
+packets alone reads ~1× on exactly those captures and reports `paff=no`: the
+false negative that routed a broken timeline to a straight copy. The numerator
+must count ALL packets; only the time span comes from the timestamped ones. The
+untimestamped **fraction** is itself decisive: **~0.5 = the pair signature**
+(`lib-paff.sh` exports it as `PF_NOPTS_FRAC` / `PF_HALF_TS`).
+
 ```
-# coded-picture rate over the first 240 packets (no decode)
+# coded-picture rate over the first 240 packets (no decode) — n counts ALL packets
 ffprobe -v error -select_streams v:0 -read_intervals "%+#240" \
   -show_entries packet=pts_time,dts_time -of csv=p=0 IN \
-  | awk -F, '{t=$1; if(t=="N/A"||t==""){t=$2}; if(t=="N/A"||t=="")next;
-      if(!s){mn=mx=t;s=1}else{if(t<mn)mn=t;if(t>mx)mx=t}; n++}
-      END{if(s&&mx>mn)printf "%.3f AU/s\n",(n-1)/(mx-mn)}'
-# compare to avg_frame_rate; ratio ~2.0 = PAFF.
+  | awk -F, '{t=$1; if(t=="N/A"||t==""){t=$2}; n++; if(t=="N/A"||t==""){miss++; next}
+      if(!s){mn=mx=t;s=1}else{if(t<mn)mn=t;if(t>mx)mx=t}}
+      END{if(s&&mx>mn)printf "%.3f AU/s  untimestamped %d/%d\n",(n-1)/(mx-mn),miss,n}'
+# compare to avg_frame_rate; ratio ~2.0 = PAFF; untimestamped ~half = pair class.
 ```
 
 ## `-field_order` and `fiel` (verified, ffmpeg 6.1.1)
@@ -55,12 +65,15 @@ ffprobe -v error -select_streams v:0 -read_intervals "%+#240" \
 
 | Symptom | Cause | Catch |
 |---------|-------|-------|
-| Muxes fine but glitches throughout / tears on scrub | Missing/unset PTS the MOV muxer wrote with garbage timing | MKV strict-mux test |
+| Muxes fine but glitches throughout / tears on scrub | Missing/unset PTS the MOV muxer wrote with garbage timing | MKV strict-mux test; **N/A-PTS count + duration histogram on the output** (verify.sh d) |
+| MOV mux log says `pts has no value` / `Timestamps are unset in a packet` / `Non-monotonic DTS` | **The muxer's confession**: it INVENTED timing for packets the source never timestamped. On a copy mux this is a HARD STOP, never cosmetic — the incident files logged `pts has no value` ×4,120 and shipped "verified" | remux.sh/dual-track.sh capture the mux log and refuse to bless the output |
+| ~Half the video packets carry no PTS and no DTS, strictly alternating with timestamped ones | **Pair-timestamped PAFF**: PES timestamps only on the first field of each pair; the mate's true PTS is exactly +1 field | `PF_NOPTS_FRAC`≈0.5 (`PF_HALF_TS=yes`) → `pairfill-paff.sh` |
+| Repaired file plays but motion is subtly shuffled / juddery; every hash gate passes | **Decode-order playback**: a constant-rate restamp (rebuild-paff) set PTS=DTS on a stream with a B-pyramid — presentation order = decode order | framemd5 presentation-SEQUENCE compare (verify.sh --full); prevention: `pf_reorder_scan` makes rebuild-paff refuse reordered streams |
 | Scrub-only glitches, normal playback OK | Non-monotonic DTS (backward jumps) | DTS monotonicity scan |
 | Stutter/sync drift; ffmpeg logs `dts ... X >= X` throughout | **Duplicate (equal) DTS** — field-coded stream on a non-integer timebase (e.g. 1/16000 at 59.94) collapses adjacent fields onto the same DTS | decode-to-null flood + DTS monotonicity scan (`<=`) |
 | MKV mux fails: `Timestamps are unset in a packet` | Missing timestamps | MKV strict-mux test |
 | Flood of `error while decoding` / `concealing errors` | Damaged capture (dropped packets) — **not** fixable by remux | decode-to-null tally |
-| A few `mmco: unref short failure` only | Benign reference bookkeeping; carries through losslessly | ignore |
+| A few `mmco: unref short failure` only | Benign reference bookkeeping; carries through losslessly — but it explains ONLY itself: the same gates that show mmco noise also show timeline defects, and the noise MASKS them | replicate on the source with **matching counts**, then still prove the timeline independently |
 
 ## Diagnostic ladder (run in order; `diagnose.sh` automates this)
 
@@ -98,6 +111,10 @@ ffmpeg -nostdin -fflags +genpts -i IN -map 0:v:0 -map 0:a:0 \
   -movflags +faststart -f mov OUT.mov
 ```
 Harmless on a clean file (only fills what's absent). Play through and scrub.
+**No help on the pair-timestamped class:** genpts derives PTS from DTS, and the
+pair-mates carry NEITHER — they stay unset, the MOV muxer invents their timing,
+and the mux log confesses (`pts has no value`). That confession is a hard stop
+(remux.sh enforces it); the repair is `pairfill-paff.sh`.
 
 **Guilty-until-proven on field-coded (PAFF) H.264.** This is the trap behind the
 corrupted-file post-mortem: genpts produced a file that *passed* the strict
@@ -113,9 +130,58 @@ for PAFF, do **not** ship genpts output on the strength of the mux test:
   the broken file — it snaps to a keyframe — so it does not substitute for the
   scrub test.
 
+**Rung 3-PAIR — pair-mate PTS fill (`pairfill-paff.sh IN OUT.mov`):**
+THE repair for the pair-timestamped class (post-mortem 2026-07-25) — and the
+preferred one whenever real PTS survives on a reordered stream, because it
+**keeps every real PTS** (which carries the reorder pyramid) instead of
+flattening it. The timing is fully derivable: the pairing is strict (verify:
+zero consecutive untimestamped packets across the whole file), so every
+untimestamped field is the pair-mate of the timestamped field before it and its
+true PTS is exactly +1 field duration. Fill each mate, synthesize a clean
+monotonic DTS ramp anchored to the first real PTS, copy the video bits
+untouched. The proven command (90 kHz clock, 59.94 fields/s → 1501/1502-tick
+fields, 15015-tick pyramid pre-roll; the script derives these per stream):
+
+```
+ffmpeg -nostdin -y -drc_scale 0 -i IN.ts \
+  -map 0:v:0 -map 0:a:0 -map 0:a:0 \
+  -c:v copy \
+  -bsf:v 'setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+1501\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS-15015\,PREV_OUTDTS+1501+mod(N\,2))' \
+  -c:a:0 pcm_s24le -c:a:1 copy \
+  -disposition:a:0 default -disposition:a:1 0 \
+  -movflags +faststart+write_colr -f mov OUT.mov
+```
+
+Preconditions (the script checks the whole file and refuses on a miss):
+first video packet carries a real PTS; untimestamped packets never occur
+back-to-back; timebase × field rate yields whole-tick pairs.
+
+**setts lessons — each cost a broken build in the incident:**
+- Unset timestamps reach `setts` expressions as **INT64_MIN, not NaN** — test
+  `lt(PTS,-8e18)`, never `isnan()`. An `isnan()` filter matches nothing,
+  silently does nothing, and writes the broken file again with exit 0.
+- Timestamp expressions must be **domain-relative**: anchor the DTS ramp to the
+  first real PTS (`PTS-preroll`), never to absolute source-clock values —
+  ffmpeg rebases PTS near zero, discards out-of-domain DTS, and the muxer
+  guesses again.
+- Therefore **verify the OUTPUT's timestamps, never the command's exit code**:
+  0 N/A-PTS packets, strictly monotonic DTS, a duration histogram of exactly
+  the two field durations. `pairfill-paff.sh` runs these gates before blessing.
+
 **Rung 3 — full timeline rebuild (`rebuild-paff.sh IN OUT RATE [TS]`):**
 Discard container timestamps and re-derive at the true field rate. Video stays
 bit-identical; the H.264 parser rebuilds proper access units on re-ingest.
+
+**SCOPE LIMIT (post-mortem 2026-07-25): only legitimate when NO reorder pyramid
+survives.** Re-stamping at a constant rate sets PTS = DTS, i.e. presentation
+order = decode order. On a stream with B-fields/B-frames (PTS−DTS offsets of
+{0, 3003, 6006, 9009, 15015} ticks and ~1,499 backward PTS steps per 3,000
+packets on the incident capture) that plays the pictures **shuffled** — a
+different way of being broken, and one that decodes clean, scrubs clean, and
+passes every hash gate. Only a framemd5 presentation-ORDER compare sees it.
+`rebuild-paff.sh` therefore scans the source first and **refuses** when the
+surviving timestamps show reordering (use `pairfill-paff.sh`, which keeps them);
+`--force` overrides only with proof that decode order == display order.
 ```
 # 1) video -> raw Annex-B (TS/PS: no bsf; MKV/MOV: -bsf:v h264_mp4toannexb)
 ffmpeg -nostdin -i IN -map 0:v:0 -c:v copy -f h264 tmp.h264

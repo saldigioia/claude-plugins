@@ -21,6 +21,8 @@ esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-paff.sh"   # mux_confessions
 
 # --- decide audio handling ---
 acodec=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
@@ -41,12 +43,33 @@ VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
 cp=$(ffprobe -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 
-PART="${OUT}.part"
+PART="${OUT}.part"; MUXLOG="$(mktemp)"
 # shellcheck disable=SC2086
-ffmpeg -nostdin -y $GENPTS -i "$IN" -map 0:v:0 $AMAP \
-  -c:v copy $VTAG $AOPT \
-  -movflags "$MOVFLAGS" -f mov \
-  "$PART"
+if ! ffmpeg -nostdin -y -hide_banner -nostats $GENPTS -i "$IN" -map 0:v:0 $AMAP \
+    -c:v copy $VTAG $AOPT \
+    -movflags "$MOVFLAGS" -f mov \
+    "$PART" 2>"$MUXLOG"; then
+  echo ">> mux FAILED:"; sed 's/^/   /' "$MUXLOG" | tail -8
+  exit 1
+fi
+[ -n "${RTM_MUX_LOG_APPEND:-}" ] && [ -f "$RTM_MUX_LOG_APPEND" ] && cat "$RTM_MUX_LOG_APPEND" >> "$MUXLOG"   # test hook
+[ -s "$MUXLOG" ] && sed 's/^/   mux: /' "$MUXLOG" | tail -6
+# HARD STOP (post-mortem 2026-07-25): "pts has no value" / "Timestamps are unset" /
+# non-monotonic DTS in the mux log is the muxer announcing it INVENTED the
+# timeline. The video bits can be perfect while the written timing is garbage —
+# the shipped-broken files rendered thumbnails and passed the essence checks.
+# Never bless such an output, regardless of what any later verify says.
+conf=$(mux_confessions "$MUXLOG")
+if [ "${conf:-0}" -gt 0 ]; then
+  echo ">> HARD STOP: the muxer logged $conf timeline confession(s):"
+  grep -iE 'pts has no value|timestamps are unset|non-?monotonic dts' "$MUXLOG" | sort | uniq -c | sort -rn | head -4 | sed 's/^/   /'
+  echo "   The muxer invented timing for packets the source never timestamped."
+  echo "   NOT blessing the output (kept at $PART; log: $MUXLOG)."
+  echo "   Run scripts/diagnose.sh \"$IN\" — half-timestamped PAFF routes to"
+  echo "   scripts/pairfill-paff.sh; timestamp-free streams to scripts/rebuild-paff.sh."
+  exit 1
+fi
+rm -f "$MUXLOG"
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
 echo "verify with: scripts/verify.sh \"$IN\" \"$OUT\""

@@ -42,6 +42,8 @@ esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-paff.sh"   # mux_confessions
 
 # --- probe source (never guess) ---
 acodec=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
@@ -84,15 +86,28 @@ T2="$(echo "$acodec" | tr a-z A-Z) (original)"
 echo "source: video=$vcodec  audio=$acodec ($afmt)  -> track1=$PCMC  track2=copy  ${DRC:+[DRC disabled]}"
 
 build_from () {  # build_from SRC  -- decode a:0 to PCM (track1, default) + copy a:0 (track2)
-  local SRC="$1"
+  local SRC="$1" MUXLOG conf; MUXLOG="$(mktemp)"
   # shellcheck disable=SC2086
-  ffmpeg -nostdin -y $DRC -i "$SRC" \
-    -map 0:v:0 -map 0:a:0 -map 0:a:0 \
-    -c:v copy $VTAG -c:a:0 $PCMC -c:a:1 copy \
-    -disposition:a:0 default -disposition:a:1 0 \
-    -metadata:s:a:0 title="$T1" -metadata:s:a:0 language=eng \
-    -metadata:s:a:1 title="$T2" -metadata:s:a:1 language=eng \
-    -movflags "$MOVFLAGS" -f mov "$PART"
+  if ! ffmpeg -nostdin -y -hide_banner -nostats $DRC -i "$SRC" \
+      -map 0:v:0 -map 0:a:0 -map 0:a:0 \
+      -c:v copy $VTAG -c:a:0 $PCMC -c:a:1 copy \
+      -disposition:a:0 default -disposition:a:1 0 \
+      -metadata:s:a:0 title="$T1" -metadata:s:a:0 language=eng \
+      -metadata:s:a:1 title="$T2" -metadata:s:a:1 language=eng \
+      -movflags "$MOVFLAGS" -f mov "$PART" 2>"$MUXLOG"; then
+    echo ">> mux FAILED:"; sed 's/^/   /' "$MUXLOG" | tail -8; exit 1
+  fi
+  [ -s "$MUXLOG" ] && sed 's/^/   mux: /' "$MUXLOG" | tail -6
+  # HARD STOP: mux-log timeline confessions mean the muxer invented timing —
+  # never bless that output (post-mortem 2026-07-25)
+  conf=$(mux_confessions "$MUXLOG")
+  if [ "${conf:-0}" -gt 0 ]; then
+    echo ">> HARD STOP: mux log shows $conf timeline confession(s) (pts has no value /"
+    echo "   Timestamps are unset / non-monotonic DTS). NOT blessing the output;"
+    echo "   kept at $PART (log: $MUXLOG). Run scripts/diagnose.sh \"$IN\" first."
+    exit 1
+  fi
+  rm -f "$MUXLOG"
 }
 
 if [ -n "$SS" ] || [ -n "$TO" ]; then

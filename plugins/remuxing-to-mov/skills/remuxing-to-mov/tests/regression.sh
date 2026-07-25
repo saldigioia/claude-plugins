@@ -230,14 +230,37 @@ o=$(bash "$SC/auto.sh" "$S" "$WORK/pc.mov" --playable 2>&1); rc=$?
   && ok "auto --playable completes OK on a playable copy (SKIP on Linux, OK on macOS)" || no "auto --playable mishandled the playability verdict (rc=$rc)"
 
 echo
-echo "== 14. Rung-3 rebuild preserves per-track audio language (review finding #4) =="
+echo "== 14. Rung-3 rebuild: refuses reordered streams; preserves per-track audio language on legit ones =="
+# -bf 0: the rebuild flattens PTS onto DTS, so it is only LEGITIMATE on a stream
+# with no reorder pyramid — a B-frame source must be REFUSED (post-mortem
+# 2026-07-25: the constant-rate restamp played a B-pyramid in decode order).
 ML="$WORK/ml.ts"; MLO="$WORK/ml.mov"
 ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=600 -f lavfi -i sine=900 -t 2 \
-  -map 0:v -map 1:a -map 2:a -c:v libx264 -g 25 -c:a aac -pix_fmt yuv420p \
+  -map 0:v -map 1:a -map 2:a -c:v libx264 -g 25 -bf 0 -c:a aac -pix_fmt yuv420p \
   -metadata:s:a:0 language=fra -metadata:s:a:1 language=spa -f mpegts "$ML"
 bash "$SC/rebuild-paff.sh" "$ML" "$MLO" 30000/1001 30000 >/dev/null 2>&1
-langs=$(ffprobe -v error -select_streams a -show_entries stream_tags=language -of csv=p=0 "$MLO" 2>/dev/null | tr '\n' ',')
-case "$langs" in fra,spa,) ok "rebuild-paff preserves real languages (fra,spa), not eng,eng";; *) no "languages not preserved: $langs";; esac
+langs=$(ffprobe -v error -select_streams a -show_entries stream_tags=language -of default=nw=1:nk=1 "$MLO" 2>/dev/null | grep . | paste -sd, -)
+case "$langs" in fra,spa) ok "rebuild-paff preserves real languages (fra,spa), not eng,eng";; *) no "languages not preserved: $langs";; esac
+# reordered (B-frame) source -> hard refusal, exit 3, routed away from the flattening restamp
+MLB="$WORK/mlb.ts"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v libx264 -g 25 -bf 2 -pix_fmt yuv420p -f mpegts "$MLB"
+o=$(bash "$SC/rebuild-paff.sh" "$MLB" "$WORK/mlb.mov" 30000/1001 30000 2>&1); rc=$?
+{ [ "$rc" -eq 3 ] && case "$o" in *REFUSING*) true;; *) false;; esac; } \
+  && ok "rebuild-paff REFUSES a reordered stream (exit 3)" || no "rebuild-paff did not refuse a B-frame source (rc=$rc)"
+[ -f "$WORK/mlb.mov" ] && no "refusal still wrote an output" || ok "refusal writes nothing"
+# --force bypasses the REFUSAL only — the output timeline gates still decide
+# whether the result is blessed. (On ffmpeg 8 a B-frame elementary rebuild leaves
+# pts unset -> the muxer guesses -> the gate hard-stops: the post-mortem defect
+# class caught red-handed. On an ffmpeg that produces a clean ramp, it blesses.)
+o=$(bash "$SC/rebuild-paff.sh" "$MLB" "$WORK/mlbf.mov" 30000/1001 30000 --force 2>&1); rc=$?
+{ [ "$rc" -ne 3 ] && case "$o" in *REFUSING*) false;; *) true;; esac; } \
+  && ok "--force proceeds past the refusal (human's call)" || no "--force still refused (rc=$rc)"
+if [ "$rc" -eq 0 ]; then
+  [ -f "$WORK/mlbf.mov" ] && ok "forced build passed its timeline gates -> blessed" || no "rc=0 but no output written"
+else
+  [ -f "$WORK/mlbf.mov" ] && no "forced build FAILED its gates yet was blessed" \
+    || ok "forced build that failed its timeline gates was NOT blessed (.part kept)"
+fi
 
 echo
 echo "== 15. Open-GOP seam glitch: gop-probe detects, seam-check catches the flash =="
@@ -386,7 +409,9 @@ bash "$SC/resync.sh" "$WORK/rsrc.ts" "$WORK/rsrc.ts" >/dev/null 2>&1; rc=$?
 
 echo
 echo "== 18. E-AC-3 native + OPT-IN QuickTime metadata (never auto-tagged) =="
-acods18 () { ffprobe -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$1" 2>/dev/null | grep . | paste -sd, -; }
+# default=nw=1:nk=1, not csv: ffprobe 8 appends a trailing comma on csv lines for
+# streams carrying side data (E-AC-3/AC-3), which false-fails exact-match compares
+acods18 () { ffprobe -v error -select_streams a -show_entries stream=codec_name -of default=nw=1:nk=1 "$1" 2>/dev/null | grep . | paste -sd, -; }
 # E-AC-3 (Dolby Digital Plus) is QuickTime-native -> single copied track, NOT dual
 ff -f lavfi -i testsrc2=s=320x240:r=25 -f lavfi -i sine=440 -t 3 -c:v libx264 -pix_fmt yuv420p -c:a eac3 "$WORK/e.ts"
 bash "$SC/mov.sh" "$WORK/e.ts" "$WORK/e.mov" >/dev/null 2>&1 || true
@@ -417,6 +442,86 @@ bash "$SC/metadata.sh" "$WORK/mbase.mov" "$WORK/none.mov" >/dev/null 2>&1; rc=$?
 [ "$rc" -eq 2 ] && ok "metadata.sh: no fields -> exit 2 (embeds nothing on its own)" || no "metadata.sh no-fields guard (rc=$rc)"
 bash "$SC/metadata.sh" "$WORK/mbase.mov" "$WORK/mbase.mov" --title T >/dev/null 2>&1; rc=$?
 [ "$rc" -ne 0 ] && ok "metadata.sh: refuses source == output" || no "metadata.sh same-file guard"
+
+echo
+echo "== 19. Post-mortem 2026-07-25 safeguards: pair-timestamped PAFF detection, reorder scan, muxer-confession hard stop =="
+# SYNTHESIS LIMIT: a real pair-timestamped PAFF capture (PES timestamps only on
+# the first field of each pair) cannot be minted by libx264 — encoders/muxers
+# stamp every packet. As with PAFF/CEA-608/discontinuities elsewhere in this
+# harness, we pin the MECHANISMS via the same injection-hook style.
+
+# (a) coded-picture rate counts ALL packets: 240-packet window, every 2nd packet
+# untimestamped (the pair class). Old timestamped-only math read ~30/s (1x ->
+# paff=no, the false negative that shipped broken files); new math reads ~60/s.
+awk 'BEGIN{for(i=0;i<120;i++){printf "%.6f,%.6f\nN/A,N/A\n", i*0.033367, i*0.033367}}' > "$WORK/pair.csv"
+set -- $(PF_PKT_FILE="$WORK/pair.csv" pf_coded_rate DUMMY); prate="$1"; ptot="$2"; pmiss="$3"
+awk "BEGIN{exit !($prate>58 && $prate<62)}" && ok "pair-class window -> ~60 AU/s (counts untimestamped packets)" \
+  || no "pair-class rate wrong: $prate (old bug read ~30)"
+{ [ "$ptot" = 240 ] && [ "$pmiss" = 120 ]; } && ok "window totals: 240 packets, 120 untimestamped" \
+  || no "window totals wrong: total=$ptot missing=$pmiss"
+frac=$(awk "BEGIN{printf \"%.3f\", $pmiss/$ptot}")
+awk "BEGIN{exit !($frac>=0.35 && $frac<=0.65)}" && ok "untimestamped fraction ~0.5 = the pair signature (half_ts)" \
+  || no "pair fraction wrong: $frac"
+
+# (b) reorder scan: B-pyramid offsets ({0,3003,6006} ticks, backward PTS steps)
+# -> reorder=yes; a flat PTS==DTS stream -> reorder=no
+awk 'BEGIN{d=0; for(i=0;i<50;i++){o=(i%3)*3003; printf "%d,%d\n", d+o, d; d+=3003; if(i%4==2)print "N/A,N/A"}}' > "$WORK/reord.csv"
+eval "$(PF_PKT_TICKS_FILE="$WORK/reord.csv" pf_reorder_scan DUMMY)"
+[ "$PF_REORDER" = yes ] && ok "B-pyramid ticks -> PF_REORDER=yes (pts!=dts=$PF_PTSNEDTS, maxoff=$PF_MAXOFF_TICKS)" \
+  || no "reorder scan missed the pyramid"
+[ "${PF_MAXOFF_TICKS:-0}" -eq 6006 ] && ok "max PTS-DTS offset measured (6006 ticks)" || no "maxoff wrong: $PF_MAXOFF_TICKS"
+awk 'BEGIN{for(i=0;i<50;i++)printf "%d,%d\n", i*3003, i*3003}' > "$WORK/flat.csv"
+eval "$(PF_PKT_TICKS_FILE="$WORK/flat.csv" pf_reorder_scan DUMMY)"
+[ "$PF_REORDER" = no ] && ok "flat PTS==DTS -> PF_REORDER=no (rebuild stays legitimate)" || no "false-positive reorder on flat stream"
+
+# (c) mux_confessions: the muxer's own admissions are counted; clean logs are not
+printf 'frame= 100\n[mov @ 0x1] pts has no value\n[mov @ 0x1] pts has no value\n[mov @ 0x1] Non-monotonic DTS; previous 5, current 3; changing to 6\nTimestamps are unset in a packet\n' > "$WORK/conf.log"
+[ "$(mux_confessions "$WORK/conf.log")" -eq 4 ] && ok "mux_confessions counts all three confession classes" \
+  || no "mux_confessions miscount: $(mux_confessions "$WORK/conf.log")"
+printf 'frame= 100\nvideo:1kB audio:2kB\n' > "$WORK/clean.log"
+[ "$(mux_confessions "$WORK/clean.log")" -eq 0 ] && ok "clean mux log -> 0 confessions" || no "false confession on clean log"
+
+# (d) remux.sh hard-stops on a confessing mux and does NOT bless the output
+# (RTM_MUX_LOG_APPEND injects the confession the sandbox can't provoke for real)
+o=$(RTM_MUX_LOG_APPEND="$WORK/conf.log" bash "$SC/remux.sh" "$S" "$WORK/hs.mov" 2>&1); rc=$?
+{ [ "$rc" -eq 1 ] && case "$o" in *"HARD STOP"*) true;; *) false;; esac; } \
+  && ok "remux.sh: mux-log confession -> HARD STOP, exit 1" || no "remux.sh did not hard-stop (rc=$rc)"
+[ -f "$WORK/hs.mov" ] && no "confessed output was blessed to its final name" || ok "confessed output NOT blessed (left as .part)"
+has "$o" "diagnose.sh" "hard stop routes the user to diagnose.sh"
+
+# (e) pairfill-paff.sh refuses streams outside its signature (exit 3), never guesses
+o=$(bash "$SC/pairfill-paff.sh" "$S" "$WORK/pf.mov" 2>&1); rc=$?
+[ "$rc" -eq 3 ] && ok "pairfill: progressive H.264 without a mappable field rate -> exit 3" \
+  || no "pairfill should refuse an unmappable stream (rc=$rc)"
+M2="$WORK/m2.ts"; ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v mpeg2video -pix_fmt yuv420p -f mpegts "$M2"
+o=$(bash "$SC/pairfill-paff.sh" "$M2" "$WORK/pf2.mov" 2>&1); rc=$?
+{ [ "$rc" -eq 3 ] && case "$o" in *"not H.264"*) true;; *) false;; esac; } \
+  && ok "pairfill: non-H.264 -> exit 3" || no "pairfill mishandled MPEG-2 (rc=$rc)"
+# fully-timestamped input + explicit rate: preconditions pass, setts preserves the
+# real PTS untouched, and the built-in output gates run (plumbing E2E).
+# Capability-gated: the PREV_OUT* setts vars need ffmpeg >= 5.x (CI runs 4.4).
+if ! ffmpeg -nostdin -v error -i "$S" -map 0:v:0 -c:v copy \
+    -bsf:v 'setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+1\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS\,PREV_OUTDTS+1)' \
+    -f null - 2>/dev/null; then
+  echo "  (skip: this ffmpeg's setts lacks the PREV_OUT* expression vars — pairfill E2E needs >= 5.x)"
+  rc=skip
+else
+  o=$(bash "$SC/pairfill-paff.sh" "$S" "$WORK/pf3.mov" --rate 60000/1001 2>&1); rc=$?
+fi
+if [ "$rc" = skip ]; then :; elif [ "$rc" -eq 0 ] && [ -f "$WORK/pf3.mov" ]; then
+  ok "pairfill: fully-timestamped source + explicit --rate builds and passes its own gates"
+  vseq () { ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -frames:v 40 -f framemd5 - 2>/dev/null | grep -v '^#' | awk -F', *' '{print $NF}' | md5sum | awk '{print $1}'; }
+  [ "$(vseq "$S")" = "$(vseq "$WORK/pf3.mov")" ] && ok "pairfill output decodes in the SOURCE presentation order (real PTS kept)" \
+    || no "pairfill changed presentation order on a healthy stream"
+else
+  no "pairfill E2E plumbing failed (rc=$rc): $(printf '%s' "$o" | tail -2)"
+fi
+
+# (f) probe --kv carries the routing profile (auto.sh's eval whitelist picks these up)
+kv=$(bash "$SC/probe.sh" "$S" --kv 2>&1)
+has "$kv" "PF_HALF_TS=" "probe --kv emits PF_HALF_TS"
+has "$kv" "PF_REORDER=" "probe --kv emits PF_REORDER"
+has "$kv" "PF_NOPTS_FRAC=" "probe --kv emits PF_NOPTS_FRAC"
 
 echo
 echo "===================================================================="

@@ -16,18 +16,33 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never th
 
 echo "== diagnosing: $IN =="
 
-# Field-coded (PAFF) check up front — it changes every verdict below: for PAFF,
-# genpts is guilty-until-proven and the reliable fix is the field-rate rebuild.
+# Field-coded (PAFF) + timestamp-profile check up front — it changes every
+# verdict below. Two facts pick the repair (post-mortem 2026-07-25):
+#   * untimestamped fraction ~0.5 = the PAIR class (only the first field of each
+#     pair has PES timestamps) — the detector now counts these packets, so the
+#     rate no longer false-reads 1x on exactly this class;
+#   * a reorder pyramid (pts!=dts / backward PTS) makes the constant-rate rebuild
+#     WRONG (PTS=DTS plays decode order) — the real PTS must be KEPT (pairfill).
 eval "$(pf_detect "$IN")"
+eval "$(pf_reorder_scan "$IN")"
 if [ "$PF_FIELD_RATE" = unknown ]; then
   RB="scripts/rebuild-paff.sh \"$IN\" OUT.mov <FIELD_RATE> <TIMESCALE>  (pick from the field-rate table)"
 else
   RB="scripts/rebuild-paff.sh \"$IN\" OUT.mov $PF_FIELD_RATE $PF_TIMESCALE"
 fi
+PFILL="scripts/pairfill-paff.sh \"$IN\" OUT.mov"
+# preferred repair for a broken timeline on THIS stream
+if [ "$PF_HALF_TS" = yes ] || [ "$PF_REORDER" = yes ]; then REPAIR="$PFILL"; else REPAIR="$RB"; fi
 if [ "$PF_PAFF" = yes ]; then
   echo "** FIELD-CODED (PAFF) H.264: coded-pic rate ${PF_CODED_RATE}/s ~= 2x frame rate ${PF_NOMINAL_FPS}/s."
-  echo "** Bias all verdicts toward the field-rate rebuild; genpts is guilty-until-proven. **"
+  echo "** genpts is guilty-until-proven here. **"
 fi
+if awk "BEGIN{exit !(${PF_NOPTS_FRAC:-0}>0)}"; then
+  echo "** ${PF_NOPTS_FRAC} of video packets carry NO timestamps (half_ts=$PF_HALF_TS)."
+  [ "$PF_HALF_TS" = yes ] && echo "**   ~half untimestamped = the PAIR signature: each one is the mate of the timestamped field before it -> $PFILL"
+fi
+echo "** reorder pyramid: $PF_REORDER (pts!=dts on $PF_PTSNEDTS pkt(s), $PF_BACKPTS backward PTS step(s), max offset $PF_MAXOFF_TICKS ticks)"
+[ "$PF_REORDER" = yes ] && echo "**   real PTS must be KEPT — a constant-rate restamp (rebuild-paff) would play fields in DECODE order (shuffled motion, invisible to default verify)."
 
 # (1) decode-to-null: separates real decode damage from timestamp defects.
 echo "-- (1) decode-to-null integrity --"
@@ -50,13 +65,25 @@ if ffmpeg -nostdin -v error -i "$IN" -map 0:v:0 -map "0:a?" -c copy "$TMP/t.mkv"
 else
   echo "   MKV mux FAILED:"; sed 's/^/     /' "$TMP/mkv.err" | tail -3
   if grep -qiE 'timestamp.*unset|unknown timestamp' "$TMP/mkv.err"; then
-    if [ "$PF_PAFF" = yes ]; then
+    if [ "$PF_PAFF" = yes ] || [ "$PF_HALF_TS" = yes ]; then
       echo ">> VERDICT: MISSING TIMESTAMPS on FIELD-CODED (PAFF) H.264."
-      echo "   Skip genpts (guilty-until-proven on PAFF). Rebuild at the field rate:"
-      echo "   $RB"
+      echo "   Skip genpts (guilty-until-proven on PAFF); a straight copy makes the MOV"
+      echo "   muxer INVENT the timeline (the shipped-broken-file class)."
+      if [ "$PF_HALF_TS" = yes ]; then
+        echo "   Pair signature (~half the packets untimestamped) -> keep every real PTS"
+        echo "   and fill the pair-mates:"
+        echo "   $PFILL"
+        [ "$PF_REORDER" = yes ] && echo "   (reorder pyramid present — rebuild-paff.sh would shuffle motion; it now refuses this class)"
+      elif [ "$PF_REORDER" = yes ]; then
+        echo "   Reorder pyramid present -> keep the surviving PTS: $PFILL"
+        echo "   (constant-rate rebuild would play fields in decode order)"
+      else
+        echo "   No reorder detected -> field-rate rebuild is safe: $RB"
+      fi
     else
       echo ">> VERDICT: MISSING TIMESTAMPS. Try Rung-2 genpts (remux.sh --genpts);"
       echo "   if it still glitches, full rebuild: $RB"
+      [ "$PF_REORDER" = yes ] && echo "   NOTE: reorder pyramid present — if genpts output misbehaves, prefer $PFILL (keeps real PTS) over a flattening rebuild."
     fi
     exit 0
   fi
@@ -82,17 +109,24 @@ echo "   forward gaps: ${DISC_COUNT:-0}  (dropped ~${DISC_MISSING:-0}s; frame=${
 # --- verdict ---
 if [ "${nmono:-0}" -ge 10 ] || [ "${ndup:-0}" -gt 0 ] || [ "${nback:-0}" -gt 0 ]; then
   echo ">> VERDICT: NON-MONOTONIC / DUPLICATE DTS (broken timeline, common on a"
-  echo "   field-coded stream muxed on a non-integer timebase). Full rebuild at the"
-  echo "   field rate: $RB"
+  echo "   field-coded stream muxed on a non-integer timebase). Repair for THIS"
+  echo "   stream's timestamp profile: $REPAIR"
+  [ "$REPAIR" = "$PFILL" ] && echo "   (real PTS survives / reorder present -> keep it; a constant-rate rebuild would flatten the pyramid)"
 elif [ "${mkv_ok:-1}" -eq 1 ]; then
   if [ "$PF_PAFF" = yes ]; then
     echo ">> VERDICT: timing PASSES the mux tests, but this is FIELD-CODED (PAFF)"
     echo "   H.264 — the strict-mux test proves timestamps are present and monotonic,"
     echo "   NOT that the timeline is seekable. That gap is exactly where the silent"
     echo "   corruption lives. Treat plain copy / genpts as provisional:"
-    echo "     reliable:  $RB"
-    echo "     or verify a copy with the scrub gate before trusting it:"
-    echo "                scripts/verify.sh \"$IN\" OUT.mov   (fails on a glitchy scrub)"
+    if [ "$PF_REORDER" = yes ]; then
+      echo "     first:     plain copy (keeps the true timeline) gated by the scrub test:"
+      echo "                scripts/verify.sh \"$IN\" OUT.mov   (fails on a glitchy scrub)"
+      echo "     repair:    $PFILL   (keeps real PTS; rebuild-paff would shuffle motion)"
+    else
+      echo "     reliable:  $RB"
+      echo "     or verify a copy with the scrub gate before trusting it:"
+      echo "                scripts/verify.sh \"$IN\" OUT.mov   (fails on a glitchy scrub)"
+    fi
   elif [ "${DISC_COUNT:-0}" -gt 0 ]; then
     echo ">> VERDICT: DISCONTINUOUS SOURCE — ${DISC_COUNT} forward timestamp gap(s),"
     echo "   first @ ${DISC_FIRST}s (~${DISC_MISSING}s dropped). Video timing is otherwise"
@@ -103,10 +137,10 @@ elif [ "${mkv_ok:-1}" -eq 1 ]; then
     echo "   Then confirm: scripts/verify.sh \"$IN\" OUT.mov  (the duration-parity gate)."
   else
     echo ">> VERDICT: timing looks sound -> plain copy (Rung 0): scripts/remux.sh."
-    echo "   (If MOV still glitches despite this, rebuild anyway: rebuild-paff.sh.)"
+    echo "   (If MOV still glitches despite this, repair by profile: $REPAIR)"
   fi
 else
-  echo ">> VERDICT: timestamps problematic (MKV refused) -> rebuild: $RB"
+  echo ">> VERDICT: timestamps problematic (MKV refused) -> repair: $REPAIR"
 fi
 # A discontinuous source still needs an audio gap-fill even when the video path is
 # a rebuild (PAFF / non-monotonic) — flag it so it isn't missed on those branches.

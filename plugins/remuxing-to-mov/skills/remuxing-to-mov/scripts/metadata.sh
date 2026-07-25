@@ -51,10 +51,11 @@ PART="${OUT}.part"
 # DATA tracks — the chapter/timecode text track QuickTime shows as a generic "menu".
 # CHAP controls chapter metadata; +bitexact suppresses the generic encoder tag;
 # use_metadata_tags writes the proper QuickTime mdta keys.
+# ${arr[@]+...} keeps bash 3.2 (macOS default) happy under set -u with empty arrays
 ffmpeg -nostdin -y -v error -fflags +bitexact -i "$IN" \
-  -map 0 -map -0:d? -map_metadata 0 "${CHAP[@]}" \
-  -c copy "${VTAG[@]}" -movflags use_metadata_tags+faststart \
-  "${MD[@]}" -f mov "$PART"
+  -map 0 -map -0:d? -map_metadata 0 ${CHAP[@]+"${CHAP[@]}"} \
+  -c copy ${VTAG[@]+"${VTAG[@]}"} -movflags use_metadata_tags+faststart \
+  ${MD[@]+"${MD[@]}"} -f mov "$PART"
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT (proper QuickTime metadata; no chapter menu)"
 
