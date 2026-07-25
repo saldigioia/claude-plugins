@@ -260,9 +260,38 @@ verdicts** (ffmpeg 8.1.2; verdicts in `references/qtff-claims.md`):
 - **5h BLOCKED** — no original `.ts` survives on T9 (only the rebuilt `.mov`
   deliverables); cut the <10 s local fixture when the S34E12 source
   re-download lands, and keep it OUTSIDE the repo.
-- Still open (needs a human at a Mac): 3a `fiel` deinterlacing, 3c caption
-  rendering, 4a/3b confirmation listens, C53–C59 playability matrix, plus the
-  QuickTime-scrub halves noted inside individual claim rows.
+
+**2026-07-25 round 3 — the Mac GUI session (user-verified, QuickTime Player,
+macOS Darwin 25.5; fixture kit at `~/Downloads/qtff-gui-checks/`): ALL PASS.**
+
+- **3a CLOSED (C24)** — the field-coded (tt) T9 deliverables play smooth
+  full-screen with no combing and no field-order shimmer despite carrying no
+  `fiel`: AVFoundation deinterlaces from the bitstream. No fiel injector
+  needed; note added to timeline-repair.md.
+- **4a CLOSED (C41)** — discriminating dual-track fixture (PCM 440 Hz enabled
+  / AC-3 880 Hz not-enabled, production flag pattern 3/3/2): only 440 Hz
+  audible. No mixing.
+- **3b CLOSED (C31)** — per-channel tones land on the right speakers; in24
+  playback confirmed (C30 playback half).
+- **Scrub sign-off (C04/C19/C21)** — both rebuilt S35E05 deliverables scrub
+  clean under hard playhead dragging; combined with the incident record
+  (mux-valid files that tore, thumbnails on unwatchable files) these rows are
+  closed.
+- **Playability matrix (C27, C32/C33 halves, C53–C56)** — hev1 fails/hvc1
+  plays; MP2 silent; MP3 plays; E-AC-3 plays natively; AC-3 plays (modern);
+  DTS silent; MPEG-2 4:2:2 refuses / 4:2:0 plays. All as the references
+  claimed. Chapters menu (C37/C38), subtitle display (C34), and track
+  language display (C42) also confirmed.
+- Ledger: 27 of 62 rows remain UNVERIFIED — all either blocked on artifacts
+  that don't exist here (real pair-timestamped source C01, gapped fixtures
+  C09/C10, CC-bearing capture C35, >4 GiB C46, DV/HDR10/Atmos sources
+  C26/C61/C62, legacy-codec and iOS-device checks C57/C58), waived doctrine
+  rows (C47/C49/C50/C51), or low-stakes odds and ends (C07 make_zero, C13
+  mov_text overflow, C14, C16/C17 spec-reading halves, C20, C25, C28, C36,
+  C59/C60 re-pins). Nothing among them gates a shipping decision.
+
+- Still open (needs artifacts, not eyes): 3c caption rendering (needs a
+  CC-bearing capture), 5h real-PAFF fixture (needs the source re-download).
 
 ## Execution order & exit criteria
 

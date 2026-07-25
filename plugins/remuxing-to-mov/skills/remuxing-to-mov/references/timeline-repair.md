@@ -59,7 +59,10 @@ ffprobe -v error -select_streams v:0 -read_intervals "%+#240" \
   that does nothing useful on `-c copy` (tested: ignored, not fatal).
 - ffmpeg writes **no container `fiel` atom** on copy. Field order is preserved
   via the **bitstream** (VUI/SEI) and read back correctly by ffprobe. Don't rely
-  on a `fiel` box being present.
+  on a `fiel` box being present. **And none is needed for playback**: verified
+  2026-07-25 on real field-coded (tt) deliverables — AVFoundation full-screen
+  motion is smooth with no combing and no field-order shimmer, so QuickTime
+  deinterlaces from the bitstream alone (QTFF audit 3a/C24).
 
 ## Timestamp-defect taxonomy (symptom → cause → catch)
 
