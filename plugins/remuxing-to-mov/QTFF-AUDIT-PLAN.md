@@ -331,3 +331,314 @@ Run 0 → 1 → 4a/3b (the two suspected live bugs jump the queue after Phase 1)
 reference updated, regression pinned where a behavior changed. The audit is
 done when `references/qtff-claims.md` has zero unverified rows and the two ⚠
 items are either fixed or disproven with recorded evidence.
+
+
+---
+
+## Round 5 — Gap closure: Tahoe drift, audio-policy classifier, Rung-4 attestation, verification calibration
+
+**Sources feeding this round:** July 2026 external research sweep (Tahoe 26.4
+codec removals, hvc1 family, faststart mechanics, gama/cmov legacy); two
+production transcripts (feed.mkv MPEG-2 4:2:2 session; Super Bowl XLVI PAFF
+session) — both citable as session evidence under the registry's user-verified
+convention.
+
+**Method:** unchanged — falsifiable sentence → spec anchor → probe a REAL
+artifact → classify BUG / DOC-DRIFT / CONFIRMED. Every item its own commit,
+probe evidence in the message, regression pinned where behavior changed. New
+claims append at C63+ (5-0a confirms the true max before any row is written).
+
+### 5-0. Baseline (read-only)
+
+- **5-0a.** Confirm registry max ID (expected C62) and freeze the C63–C71
+  assignments below; correct all cross-references if the max differs. Confirm
+  no open ledger row already covers an item below (C26 explicitly reserved for
+  amendment, not duplication).
+- **5-0b.** Run the suite unmodified; require 122/122 (or current green count).
+  Record `sw_vers`, ffmpeg, Bento4 versions for this round's verification
+  stamps.
+- **5-0c.** Collision check against open items: 2b (sdtp half), 3c (captions),
+  5h (real-PAFF fixture), and the 27 UNVERIFIED rows. Note where a Round-5 item
+  advances one (5-4d advances C05; 5-5e amends C26; 5-1b annotates C57).
+
+### 5-1. macOS decode-set drift (Tahoe 26.4)
+
+- **5-1a.** `references/ingest-compatibility.md`: new subsection "Decode
+  support is a moving target — macOS version drift." Rows: Motion JPEG
+  (certain MOV mux variants dropped in 26.4), Apple Intermediate Codec
+  (`icod`, dropped 26.4; restorable via Apple ProApps legacy codec package —
+  link the support article). Detection grep extended: `mjpeg|icod` beside the
+  existing `cinepak|svq`.
+- **5-1b.** C57 amendment — append the Tahoe 26.4 corroboration as a **note**,
+  status stays UNVERIFIED: forum evidence does not meet the registry's probe
+  bar, and no row flips without probe evidence recorded in the flipping commit.
+- **5-1c.** `scripts/playable-check.sh`: print `sw_vers -productVersion` in the
+  result line so every recorded check self-dates its OS. Output annotation
+  only; no logic change.
+- **5-1d.** SKILL.md Instant answers row: "Old MOV thumbnails vanished /
+  stopped opening after a macOS update → Tahoe 26.4 codec drops → detection
+  grep → Rung 4 for a playable copy, original stays master."
+- **5-1e.** Probe: synthesize an MJPEG-in-MOV fixture (`-c:v mjpeg`);
+  playable-check on this Mac. The forum claim is variant-scoped, so a PASS
+  here is honest data, not a refutation — record whichever way it lands. AIC
+  has no ffmpeg encoder: blocked-on-artifact, recorded like C57's own
+  blockers.
+
+| # | Claim | Stated in | Spec anchor | Probe | Status |
+|---|-------|-----------|-------------|-------|--------|
+| C63 | The set of codecs AVFoundation decodes is a function of macOS version; a playable-check result is valid only for the OS it ran on, and OS upgrades can revoke playability of previously-passing files (Tahoe 26.4: Motion JPEG variants, AIC). | references/ingest-compatibility.md; scripts/playable-check.sh | player behavior — empirical only | MJPEG-MOV fixture: playable-check on Darwin 25.x; re-run after next macOS update; AIC leg blocked on artifact | UNVERIFIED |
+
+### 5-2. Audio-policy classifier: track-set aware (the transcript-1 defect)
+
+**Root cause restated as engineering fact:** mov.sh's MODE classifier reads
+`PR_ACODEC` — track a:0 only. A FLAC-5.1 + MP2-stereo source classifies `pcm`
+off the FLAC; the classifier never sees track 2. remux.sh maps a:0 unless
+`--all-audio`. The drop is a policy blind spot, not a forgotten flag.
+
+**Policy (into SKILL.md house defaults):** distinct channel layouts are
+distinct deliverables — never silently collapsed. Duplicate layouts are
+curated (lossless > lossy-high > lossy-low within a layout). Every drop is
+announced. Curation requires an audit: no silent mapping decisions anywhere.
+
+- **5-2a.** `scripts/probe.sh --kv`: per-track audio manifest —
+  `PR_AUD_COUNT`, and per track `PR_AUD_<n>_CODEC/CHANNELS/LAYOUT/LANG`. Keys
+  must satisfy the existing `^(PR|PF)_[A-Z0-9_]+=` eval whitelist.
+- **5-2b.** `scripts/remux.sh`: `--audio-keep=all|first|layouts|<indices>`
+  (`--all-audio` kept as alias for `all`; `first` = current behavior);
+  pre-flight KEEP/DROP manifest table printed before writing, each line
+  stating the deciding rule, every DROP a WARN. Add `--timescale N`
+  (`-video_track_timescale`).
+- **5-2c.** `scripts/mov.sh`: classifier consumes the full manifest.
+  Per-layout classification (native→copy, MOV-copyable-non-native→dual,
+  non-copyable→access-track), `layouts` as the default keep policy —
+  satisfying both original intents: mp2 feed clones die, stereo+5.1 pairs
+  survive. `MOV_SUMMARY` gains `audio_kept=`/`audio_dropped=` fields.
+  **Design-call at gate:** the `layouts` default.
+- **5-2d.** `scripts/dual-track.sh`: audit for the same a:0 assumption; extend
+  to build access+original pairs per kept track or announce its single-pair
+  scope loudly — whichever the audit supports. pairfill's 5a warning stays
+  as-is (already fixed).
+- **5-2e.** ALAC as **opt-in** access-track codec (`--access-codec alac`) —
+  not a silent change to the PCM house default (dual-track-quicktime.md owns
+  that default and its QC). Blocked on C64/C65.
+- **5-2f.** Fixtures: (i) 5.1+stereo → both survive under `layouts`;
+  (ii) 5.1+stereo+duplicate-mp2 → exactly the clone drops, announced;
+  (iii) `first` reproduces today's behavior bit-for-bit.
+- **5-2g.** SKILL.md Instant answers: replace the bare "keeps a:0 — add
+  --all-audio" row with the policy row + manifest pointer.
+
+| # | Claim | Stated in | Spec anchor | Probe | Status |
+|---|-------|-----------|-------------|-------|--------|
+| C64 | ffmpeg's native ALAC encoder accepts 5.1 input (and which layouts it accepts/rejects is enumerable). | scripts/remux.sh (--access-codec) | player behavior — empirical only (encoder capability) | encode 5.1(side) + 5.1 test tones; record accepted layouts per CI ffmpeg version | UNVERIFIED |
+| C65 | ALAC 5.1 in MOV carries a `chan` layout QuickTime maps to the correct speakers (the C31 bar: per-channel ident tones land on the right speakers). | scripts/remux.sh; references/dual-track-quicktime.md | markdown/sound_media/sound_sample_descriptions.md; audio_channel_layout_atom | `mp4dump` stsd+chan on an ALAC-5.1 build; speaker-ident listen on the target Mac | UNVERIFIED |
+| C66 | In a MOV carrying stereo + 5.1 as separate enabled tracks (not the dual-track access pattern), QuickTime's default-track selection and alternate reachability follow tkhd enabled flags + alternate_group as written by ffmpeg for this case. | scripts/mov.sh (layouts policy) | markdown/track_atoms/track_header_atom.md; alternate groups | `mp4dump` tkhd/alternate_group on a layouts-policy output; GUI check which plays, whether the other is selectable | UNVERIFIED |
+
+### 5-3. Rung-4 attestation + diagnostic obligation
+
+**Corrected premise:** no transform path exists to gate — every writer
+hard-guarantees `-c copy` video; Rung 4 today is hand-rolled ffmpeg from
+delivery-encode.md. Enforcement requires building the sanctioned path.
+
+- **5-3a.** New `scripts/rung4.sh` — the **only** sanctioned re-encode path.
+  Wraps the delivery-encode.md recipes (ProRes, x264, x265 presets as named
+  profiles). Refuses to run without `--attest="<exact string>"` (or
+  `REMUX_ATTEST` env; exact match, no fuzzy accept). Consent string defined
+  once in a shared constant; **wording decided at gate** — provisional:
+  `I understand this re-encodes the video and the output is no longer true
+  source material.` Atomic write, never targets the source, output naming can
+  never collide with a master.
+- **5-3b.** Provenance: rung4.sh stamps the derivative via metadata.sh
+  conventions (`mdta` keys: source filename, date, profile,
+  `reencoded-with-attestation`). A derivative must never masquerade as a
+  master in a later audit.
+- **5-3c.** `scripts/verify.sh`: master-purity WARN — encoder writing-library
+  signatures (x264/x265/Lavc) **scoped to the video stream only** on files
+  presented as copy-lineage (dual-track access audio legitimately carries
+  Lavc tags; scoping prevents a false purity alarm on every default
+  deliverable).
+- **5-3d.** SKILL.md doctrine, two sections. *Diagnostic obligation:* before
+  any failure is reported to the operator, doctor.sh + probe.sh must have run,
+  every rung below the current one executed (not considered), and the report
+  shaped as an evidence block — commands, outputs, rung reached, hypothesis.
+  "It failed, want me to try X?" is a forbidden shape. *Rung-4 protocol:*
+  proposing Rung 4 requires Rungs 1–3 evidence blocks in the same message; the
+  attestation phrase must originate verbatim from the operator — no
+  paraphrase, no "yes" substitutes, never supplied on the operator's behalf.
+  Audio transforms (existing pcm/aac paths, ALAC per 5-2e) explicitly exempt,
+  and the exemption stated so it can't be "clarified" away. Cite the two July
+  2026 transcripts as the canonical evidence-block exemplars.
+- **5-3e.** `skills/mov/SKILL.md`: point its existing "never re-encode to
+  force a pass" line at rung4.sh as the sole route.
+- **5-3f.** Regression: no-attest → nonzero; exact string → proceeds;
+  near-miss (trailing-period delta) → refuses; provenance keys present in
+  output (`mp4dump` the ilst).
+- **5-3g.** Honest limit, recorded in the doctrine: the script gate is a
+  tripwire, not a wall — direct ffmpeg invocation bypasses it. Depth comes
+  from 5-3d's evidence-block bar and 5-3c's after-the-fact purity scan.
+
+### 5-4. Verification calibration: baseline automation, waiver protocol, derived bounds
+
+**Framing:** gate (c)'s note already states the baseline bar; gate (e)'s note
+already names the three-proof set. This section mechanizes stated policy on
+the 5c lazy-escalation template. Nothing here weakens a gate: classification
+and baselining can only downgrade FAIL→REVIEW-with-explanation, never to
+silent OK, and only with gate (d) clean.
+
+- **5-4a.** Gates (c)/(e): automated source-baseline. On nonzero error counts,
+  lazily run the identical stage against the source under identical seek
+  conditions; report `source: N / output: N / delta: D`. Delta 0 with (d)
+  clean → REVIEW with the inherited-noise note; delta > 0 → FAIL as before.
+  (Mechanizes the manual moves in both transcripts: null-muxer lines
+  identical on the untouched MKV; `mmco: unref short failure` at identical
+  timestamps in the 2012 capture.)
+- **5-4b.** Gate (e) message classification: count decoder-class lines and
+  muxer-stage `[null @ …]` lines separately. Muxer-stage lines score toward
+  FAIL only if the source baseline does **not** reproduce them or (d) is
+  dirty — the post-mortem masking warning stays load-bearing.
+- **5-4c.** Waiver sidecar. When a gate fails but its named independent proofs
+  all pass, the session may propose `OUTPUT.mov.waiver.json`: failed gate,
+  exact failure signature (class + count), proof results with hashes,
+  coverage limits stated plainly (e.g. "frame order proven on 5 windows / 954
+  frames, not full duration"), tool versions, date, operator attestation
+  string (distinct from Rung-4's; **wording at gate** — provisional:
+  `I accept this waiver; the recorded evidence proves this gate failure
+  benign for this file.`). verify.sh consults the sidecar: signature matches
+  exactly → exit **0** with a loud `WAIVED(<gate>)` line and a
+  machine-readable summary field (house exit codes 0/10/1/2 untouched); any
+  new signature or changed count → hard FAIL, waiver void. Scope: one file,
+  one signature — never a class.
+- **5-4d.** `scripts/pairfill-paff.sh`/`lib-paff.sh`: revise the C05 gate —
+  bound derived from measured pyramid depth
+  (`max(PTS−DTS) ≤ measured_depth × pair + slack`), floored at the current
+  `preroll+pair` so simple streams get no looser. The XLVI refusal
+  (36036 > 30030 on a legitimate 4-frame hierarchical-B pyramid, structurally
+  unsatisfiable by any flag) is the motivating probe. C05's status row gains
+  the revision note. **Slack margin at gate.**
+- **5-4e.** `scripts/probe.sh`: ms-timebase advisory — detect 1/1000-quantized
+  sources and alternating tick durations; print: recommend
+  `--timescale <conventional base>`, state the ±0.5 ms alternation is
+  source-baked and imperceptible, repeat diagnose.sh's prohibition on
+  constant-rate restamps for reorder-pyramid streams.
+- **5-4f.** Retroactive waivers: audit item — pre-protocol evidence-delivered
+  files (Super Bowl XLVI at minimum) get sidecars so their permanent-FAIL
+  status stops depending on human memory.
+- **5-4g.** Fixtures: ms-timebase MKV (asserts 5-4a/b classification + 5-4e
+  advisory); waiver round-trip (create → re-verify WAIVED/exit 0 → mutate
+  signature → FAIL); synthesized frame-coded hierarchical-B via x264
+  `b-pyramid` (accepts under derived bound; still refuses a genuinely
+  wrong-cadence ramp — the C05 regression stays pinned). Field-coded pyramid
+  remains blocked on 5h's real capture; note the linkage.
+
+| # | Claim | Stated in | Spec anchor | Probe | Status |
+|---|-------|-----------|-------------|-------|--------|
+| C67 | Hierarchical-B streams legitimately carry max(PTS−DTS) = reorder_depth × frame_duration; a fixed one-frame lead bound structurally rejects valid ≥2-level pyramids. | scripts/pairfill-paff.sh; scripts/lib-paff.sh | markdown/sample_atoms/composition_offset_atom.md | measure offset cycle on the XLVI deliverable (read-only, T7) + synthesized b-pyramid fixture; assert derived bound admits both | UNVERIFIED (session evidence: XLVI transcript 2026-07) |
+| C68 | MKV's 1/1000 timebase survives MKV→MOV as a coarse video timescale (e.g. 1/16000) with alternating sample durations; the alternation is source rounding (±0.5 ms), not judder, and `-video_track_timescale` is a conventionality fix that must not be escalated to a restamp on reorder streams. | references/timeline-repair.md (beside C02); scripts/probe.sh; scripts/remux.sh | markdown/media_atoms/media_header_atom.md; time-to-sample_atom | ms-timebase MKV fixture → remux with/without --timescale; stts histograms both sides; framemd5 identity | UNVERIFIED (session evidence: feed.mkv transcript 2026-07) |
+| C69 | Null-muxer duplicate-DTS complaints in the scrub harness on ms-quantized sources are harness artifacts when gate (d) is clean and the identical lines reproduce on the untouched source — the timeline is then provable by the (d) + strict-mux + --full triple. | scripts/verify.sh (e); references/verification-safety.md | player behavior — empirical only (harness behavior) | ms-timebase fixture: identical line sets source vs output; (d) clean; --full framemd5 match | UNVERIFIED (session evidence: feed.mkv transcript — 152/152 lines muxer-stage, all three proofs passed) |
+| C70 | Decoder complaints (e.g. `mmco: unref short failure`) present in the source at identical timestamps under identical accurate-seek conditions are capture-inherited, not remux-induced; only the source/output delta indicts the pipeline. | scripts/verify.sh (c)/(e); scripts/diagnose.sh | player behavior — empirical only | baseline-subtraction run on the XLVI pair (read-only): delta 0 | UNVERIFIED (session evidence: XLVI transcript) |
+
+### 5-5. Small closures
+
+- **5-5a.** faststart cost: container-internals.md note + house-defaults line
+  + batch.sh header — moov still written last, then a full-file rewrite pass
+  shifts everything; ~2× write I/O per file; on multi-GB masters over
+  external SSDs this dominates batch throughput; consider whether the access
+  copy, not the master, is where faststart belongs.
+- **5-5b.** gama: color-hdr-subs.md subsection "Pre-2010 exports: the QT
+  gamma era" (gama vs missing nclc, why old masters render dark/washed;
+  modern colr supersedes); probe.sh WARN on gama presence (mp4dump grep when
+  available). Note 3d's write-side half (never written alongside colr) stays
+  separate — this is the ingest side.
+- **5-5c.** cmov: two-line container-internals note — zlib-compressed moov in
+  early-QT files; symptom is confusing/truncated mp4dump; ffmpeg reads
+  transparently, so a stream-copy remux is the normalization.
+- **5-5d.** avconvert: doctor.sh optional-tools report line when on PATH;
+  delivery-encode.md cross-check note — AVFoundation ground truth for Rung-4
+  comparisons; caveats: one video + one audio track survive, extension picks
+  output type, no protected content.
+- **5-5e.** C26 amendment (Dolby Vision): enumerate the sample-entry family
+  (dvh1/dvhe/hvc2/hev2/hvc3/hev3) and the dvh1-plays/hev1-family-fails split
+  as the claim's testable halves; still blocked on artifacts. probe.sh: report
+  stsd sample entry (`hevc (dvh1)`) via mp4dump, ffprobe `codec_tag_string`
+  fallback, degrading silently when neither adds signal. ingest-compatibility
+  DV row.
+
+| # | Claim | Stated in | Spec anchor | Probe | Status |
+|---|-------|-----------|-------------|-------|--------|
+| C71 | A legacy `gama` atom (absent nclc/colr) changes QuickTime's rendering of the same essence versus an nclc-tagged copy; ingest should surface it. | references/color-hdr-subs.md; scripts/probe.sh | markdown/video_media/video_sample_description_extensions.md (+ color_parameter_atom conflict note) | inject gama via mp4edit on a fixture; A/B in QuickTime Player | UNVERIFIED |
+
+### 5-6. Close-out
+
+Suite green including every new pin; ledger consistency pass (no orphan
+cross-references, all Round-5 claims stamped or blocked-with-reason); README
+changelog + plugin.json bump; findings-log entry in the house format;
+carry-forwards named (C64/C65 listen session, C63 next-macOS re-run,
+retroactive waivers, 5h linkage).
+
+**Round-5 gate items (operator decisions):** ① Rung-4 attestation wording;
+② waiver attestation wording; ③ `layouts` as mov.sh default; ④ pairfill slack
+margin; ⑤ probe.sh additions ship as one combined diff (5-2a + 5-4e +
+5-5b/e) — approve the diff as a unit.
+
+**Execution order:** 5-0 → 5-4a/b (calibration first — it changes what every
+later probe's FAIL means) → 5-2 → 5-4c–g → 5-3 → 5-1 → 5-5 → 5-6.
+
+---
+
+## Round 5 — /loop execution prompt (verbatim)
+
+```
+You are executing Round 5 of QTFF-AUDIT-PLAN.md for the remuxing-to-mov plugin.
+Repo: /Users/salvatore/downloads/claude-plugins/plugins/remuxing-to-mov
+Read QTFF-AUDIT-PLAN.md (Round 5 addendum) and references/qtff-claims.md FIRST,
+fully, before touching anything. The addendum is the work order; this prompt is
+the discipline.
+
+INVARIANTS — violating any of these ends the session:
+- Sources and masters are immutable. Never modify, move, or delete any media
+  file. T7/T9 media is read-only. Never commit media to the repo.
+- Video is always -c copy in every writer except the new rung4.sh, which never
+  runs without the exact attestation string.
+- No claim row flips status without probe evidence recorded in the flipping
+  commit. Forum/secondhand evidence annotates; it never flips.
+- Existing claim IDs and text are never renumbered or reworded except where the
+  addendum names an amendment (C05 gate note, C26, C57).
+- No new required dependencies. Every new check degrades to SKIP/report-only
+  when tooling is absent, per playable-check.sh convention.
+- probe.sh --kv output must satisfy the eval whitelist ^(PR|PF)_[A-Z0-9_]+=.
+- Exit-code vocabulary stays 0/10/1/2. Waivered pass = exit 0 + loud WAIVED
+  line + machine-readable summary field.
+- All scripts run under macOS /bin/bash 3.2. shellcheck clean or annotated.
+  Atomic writes (.part -> mv) everywhere. -nostdin on every ffmpeg call.
+- Gate downgrades only ever go FAIL -> REVIEW-with-explanation, with gate (d)
+  clean and the source baseline reproducing the lines. Never silent OK.
+- tests/regression.sh must be green before the first edit and after every
+  phase. A red suite halts the loop.
+
+LOOP SHAPE — one addendum item per iteration, in the addendum's execution
+order (5-0 -> 5-4a/b -> 5-2 -> 5-4c-g -> 5-3 -> 5-1 -> 5-5 -> 5-6):
+1. Restate the item's claim or behavior as a falsifiable sentence.
+2. Read every file the item touches IN FULL before editing.
+3. Probe a REAL artifact (mp4dump/ffprobe on script-built output; synthesized
+   fixtures via regression recipes) — never reason from the command that made it.
+4. Implement the minimal diff. Pin behavior changes in regression.
+5. Classify: BUG / DOC-DRIFT / CONFIRMED / blocked-on-artifact, and record in
+   qtff-claims.md and the findings log in the house format.
+6. Commit: one item, probe evidence in the message.
+7. Report an evidence block (commands, outputs, classification) — never a
+   symptom description — then STOP at any gate item.
+
+GATES — halt and wait for the operator at: 1) Rung-4 attestation wording,
+2) waiver attestation wording, 3) layouts-default for mov.sh, 4) pairfill slack
+margin, 5) the combined probe.sh diff. Present the diff and the probe evidence;
+do not proceed on silence.
+
+RUNG-4 DOCTRINE (applies to you, now, in this session): a failure report
+without doctor.sh + probe.sh output and every lower rung executed is an
+incomplete task. Proposing any re-encode requires Rungs 1-3 evidence blocks in
+the same message and the operator's verbatim attestation string. You never
+supply that string. The two July 2026 transcripts cited in SKILL.md are the
+required shape of your reports.
+
+DONE = 5-6 close-out complete: suite green with all new pins, ledger
+consistent, findings-log entry written, carry-forwards named, version bumped.
+```
