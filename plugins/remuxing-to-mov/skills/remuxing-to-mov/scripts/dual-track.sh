@@ -46,11 +46,35 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-paff.sh"   # mux_confessions
 
 # --- probe source (never guess) ---
+# SCOPE (QTFF audit 5-2d): this tool builds ONE access+original pair from a:0,
+# by design — the two-pass cut alignment, verify.sh --audio's fixed
+# a:0-PCM/a:1-original shape, and the C41-verified disposition pattern all
+# assume the single-pair layout. A multi-track source loses its other tracks
+# HERE, so say it loudly (mov.sh's layouts policy is the multi-layout route;
+# it keeps every distinct layout as an access track, without originals).
+NAUD=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
+if [ "${NAUD:-0}" -gt 1 ]; then
+  echo "** WARNING: source has $NAUD audio tracks; dual-track.sh builds the a:0"
+  echo "**          access+original pair ONLY. The other tracks are NOT in this"
+  echo "**          output. For multi-layout keeps use scripts/mov.sh (layouts"
+  echo "**          policy; PCM access per layout, no originals), or run the"
+  echo "**          manual mux with extra -map 0:a:N entries."
+fi
 acodec=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
 afmt=$(  ffprobe -v error -select_streams a:0 -show_entries stream=sample_fmt   -of default=nw=1:nk=1 "$IN" | head -1)
 vcodec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
 cp=$(    ffprobe -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" | head -1)
 [ -n "$acodec" ] || { echo "no audio stream found in $IN" >&2; exit 2; }
+# the preserved-original contract needs a MOV-copyable codec; FLAC/Opus/Vorbis/
+# TrueHD are hard-rejected by the MOV muxer — refuse early with the route,
+# instead of dying mid-mux with raw ffmpeg errors (QTFF audit 5-2d)
+case "$acodec" in flac|opus|vorbis|truehd|mlp)
+  echo "a:0 is $acodec — not MOV-copyable, so the 'original preserved as track 2'" >&2
+  echo "contract is impossible in a .mov. Use scripts/remux.sh --audio pcm (access" >&2
+  echo "track only; keep the source container for provenance), or scripts/mov.sh" >&2
+  echo "which routes this automatically." >&2
+  exit 2;;
+esac
 
 # --- choose PCM depth (override or auto from decoder native fmt) ---
 case "$PCMOPT" in
