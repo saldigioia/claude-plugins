@@ -209,6 +209,37 @@ The acceptance discipline that failed in the 2026-07-25 incident, now doctrine:
 | Dual-track audio (verify.sh --audio) | original track md5 == source elementary; PCM access == decoded original |
 | playable-check.sh | OK — necessary, NOT sufficient (thumbnail only) |
 
+### Recorded waivers (`OUTPUT.waiver.json`) — evidence instead of memory
+
+When a **count-signature gate** ((d)/(e)) FAILs but its named independent
+proofs all pass, the verdict can be *recorded* instead of re-litigated from
+human memory every run (QTFF audit 5-4c). `scripts/waiver.sh SOURCE OUTPUT
+--attest "…" --coverage "…" --proof "…"` writes `OUTPUT.waiver.json` beside the
+file: the failed gate, the **exact failure signature** (class + count, taken
+from a live verify.sh run — never hand-typed), the proof results with hashes,
+the coverage limits stated plainly (e.g. "frame order proven on 5 windows /
+954 frames, not full duration"), tool versions, date, and the operator's
+**verbatim** attestation string (defined once in `lib-attest.sh`; a near-miss
+is refused, never corrected).
+
+`verify.sh` consults the sidecar on FAIL. An **exact** match — same gate set,
+same counts, same file size and video streamhash, verbatim attestation — exits
+**0** with a loud `WAIVED(<gate>)` line plus a machine-readable
+`VERIFY_SUMMARY` field (house exit codes 0/10/1/2 untouched). Any drift — a
+new signature, a changed count, a changed file — **voids the waiver** and the
+FAIL stands: changed evidence is new evidence, and a waiver never transfers.
+
+Hard boundaries:
+
+- **One file, one signature — never a class.** A waiver blesses one recorded
+  failure on one artifact; it is not precedent for the next file with the same
+  symptom (see "Precedent is not diagnosis" above).
+- **Essence/identity failures are never waivable.** A (b)/`--full`/`--audio`
+  FAIL *is* the lossless proof failing — "independent proofs pass" cannot hold,
+  and verify.sh refuses the sidecar outright.
+- A waiver can only turn FAIL into a loud, evidence-carrying pass — never into
+  a silent OK, and never without the operator's exact attestation.
+
 ## Optional preservation checks (`--signaling`, `--audio`)
 
 Losslessness and a clean timeline don't prove the *non-pixel* signaling survived.

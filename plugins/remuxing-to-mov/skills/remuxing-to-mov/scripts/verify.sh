@@ -41,6 +41,13 @@
 #   --audio     : dual-track fidelity — the preserved original track must be
 #                 bit-exact vs source (else FAIL) and the PCM access track must
 #                 equal the decoded original, aligned (else REVIEW).
+#
+# Waiver sidecar (QTFF audit 5-4c): a FAIL from the count-signature gates
+# (d)/(e) whose named independent proofs all pass can be covered by an
+# operator-attested OUTPUT.waiver.json (written by scripts/waiver.sh). On an
+# EXACT signature + file match this exits 0 with a loud WAIVED(<gate>) line and
+# a machine-readable VERIFY_SUMMARY field; ANY drift voids the waiver (FAIL
+# stands). Essence/identity failures ((b)/--full/--audio) are never waivable.
 set -euo pipefail
 SRC="${1:?usage: verify.sh SOURCE OUTPUT [--full] [--signaling] [--audio]}"; OUT="${2:?need OUTPUT}"; shift 2
 FULL=0; SIG=0; AUD=0
@@ -54,6 +61,7 @@ esac; done
 for f in "$SRC" "$OUT"; do [ -f "$f" ] || { echo "no such file: $f" >&2; exit 2; }; done
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-paff.sh"
+. "$SELF_DIR/lib-attest.sh"
 eval "$(pf_detect "$SRC")"            # PF_CODEC / PF_PAFF describe the SOURCE
 SRC_IS_H264=0; [ "$PF_CODEC" = h264 ] && SRC_IS_H264=1
 # The H.264 VCL lossless arbiter needs filter_units + h264_mp4toannexb. On an
@@ -69,6 +77,12 @@ N=300            # frames in the decoded head sample (~10-12 s of video)
 WIN=10           # seconds per output decode spot-check window
 verdict=PASS     # PASS | REVIEW | FAIL — only ever downgraded
 note=""
+# QTFF audit 5-4c (waiver sidecar): a FAIL from the COUNT-signature gates (d)/(e)
+# can be covered by an operator-attested OUTPUT.waiver.json whose recorded
+# signature matches this run EXACTLY — one file, one signature, never a class.
+# Essence/identity failures ((b), --full, --audio) are never waivable: there the
+# failing gate IS the lossless proof, so "independent proofs pass" cannot hold.
+d_failed=0; e_failed=0; other_failed=0
 
 echo "== verify: $OUT vs $SRC =="
 
@@ -104,7 +118,7 @@ if [ "$bitproven" -eq 0 ]; then
       echo "   VCL MISMATCH — slice data differs; output is NOT a lossless copy."
       echo "     src=$sv"
       echo "     out=$ov"
-      verdict=FAIL
+      verdict=FAIL; other_failed=1
     fi
   elif [ "$SRC_IS_H264" -eq 1 ] && [ "$PF_PAFF" = yes ]; then
     # Degraded env (no filter_units) + field-coded: VCL is unavailable and decoded
@@ -123,7 +137,7 @@ if [ "$bitproven" -eq 0 ]; then
       echo "   head sample: MATCH ($N decoded frames identical)"
     else
       echo "   head sample: FAIL — decoded frames differ; output is NOT a lossless copy."
-      verdict=FAIL
+      verdict=FAIL; other_failed=1
     fi
     # TS sources list the stream under its program AND top-level -> dedupe to one line
     pkts () { ffprobe -v error -select_streams v:0 -count_packets \
@@ -209,11 +223,11 @@ echo "   packets=$TL_N  N/A-PTS=$TL_NAPTS  N/A-DTS=$TL_NADTS  backward-DTS=$TL_B
 echo "   sample-duration histogram (top): ${TL_TOP:-'?'}  near-zero durations: $TL_TINY (want 0)"
 DCLEAN=1   # (d) verdict feeds the (c)/(e) baseline classification (QTFF audit 5-4a/b)
 if [ "${TL_NAPTS:-0}" -ne 0 ] || [ "${TL_NADTS:-0}" -ne 0 ]; then
-  verdict=FAIL; DCLEAN=0
+  verdict=FAIL; DCLEAN=0; d_failed=1
   note="${note:+$note }Output has ${TL_NAPTS}/${TL_NADTS} packets with N/A PTS/DTS — the muxer invented the timeline (hard stop; see timeline-repair.md)."
 fi
 if [ "${TL_BACK:-0}" -ne 0 ] || [ "${TL_DUP:-0}" -ne 0 ]; then
-  verdict=FAIL; DCLEAN=0
+  verdict=FAIL; DCLEAN=0; d_failed=1
   note="${note:+$note }Output DTS not strictly monotonic (backward=$TL_BACK duplicate=$TL_DUP)."
 fi
 if [ "${TL_TINY:-0}" -gt 2 ]; then   # first/last sample may legitimately stray
@@ -231,7 +245,7 @@ if [ "${TL_TINY:-0}" -gt 2 ]; then   # first/last sample may legitimately stray
   elif [ "${TL_TINY:-0}" -le $((src_tiny + 2)) ]; then
     echo "   near-zero durations: output=$TL_TINY vs source=$src_tiny — matching profile (inherent VFR), not invented."
   else
-    verdict=FAIL; DCLEAN=0
+    verdict=FAIL; DCLEAN=0; d_failed=1
     note="${note:+$note }$TL_TINY sample durations <1/10 of modal ($TL_MODAL) vs only $src_tiny in the source — invented-timeline signature."
   fi
 fi
@@ -328,7 +342,7 @@ EOF
       echo "   scrub classification: all lines reproduce on the source and (d) is clean — inherited/harness noise (REVIEW)."
       note="${note:+$note }Scrub-gate lines reproduce on the untouched source under identical accurate seeks (decoder source: $b_dec / output: $o_dec; muxer-stage source: $b_mux / output: $o_mux; deterministic -threads 1 counts) with a clean (d) timeline — capture-inherited decode noise / harness-stage artifacts, not a torn timeline. The timeline is independently proven by (d); complete the proof set (MKV strict-mux + --full presentation order) for archival sign-off."
     else
-      verdict=FAIL
+      verdict=FAIL; e_failed=1
       note="${note:+$note }Scrub gate: $o_tot deterministic decode error(s) on off-keyframe seeks (decoder delta $d_dec, muxer-stage delta $d_mux vs source; (d) clean=${DCLEAN:-0}) — the timeline tears on scrub (silent-corruption signature). Route via diagnose.sh (pairfill-paff.sh for half-timestamped PAFF, rebuild-paff.sh otherwise). NEVER explain this away by replicating the errors on the source alone: two independent defects share this symptom, and inherent decode noise MASKS a broken container timeline (post-mortem 2026-07-25). The timeline must be independently proven — gate (d) above, MKV strict-mux, framemd5 presentation order (--full)."
     fi
   fi
@@ -395,7 +409,7 @@ if [ "$FULL" -eq 1 ]; then
         echo "   pictures in decode order (shuffled motion). A constant-rate restamp"
         echo "   of a reordered stream does exactly this; repair with pairfill-paff.sh"
         echo "   (keep the real PTS), not rebuild-paff.sh."
-        verdict=FAIL
+        verdict=FAIL; other_failed=1
       fi
     else
       echo "   NOTE: decoded multiset differs — expected for a field-coded / edit-list"
@@ -414,7 +428,7 @@ if [ "$FULL" -eq 1 ]; then
       [ "$verdict" = REVIEW ] && { verdict=PASS; note=""; }   # definitive check overrides sampled doubt
     else
       echo "   FAIL: decoded frames differ — output is NOT a lossless copy."
-      verdict=FAIL
+      verdict=FAIL; other_failed=1
     fi
   fi
 fi
@@ -465,7 +479,7 @@ if [ "$AUD" -eq 1 ]; then
     s1=$(ffmpeg -nostdin -v error -i "$SRC" -map 0:a:0 -c copy -f streamhash -hash md5 - 2>/dev/null || true)
     o1=$(ffmpeg -nostdin -v error -i "$OUT" -map 0:a:1 -c copy -f streamhash -hash md5 - 2>/dev/null || true)
     if [ -n "$s1" ] && [ "$s1" = "$o1" ]; then echo "   original track (a:1): bit-exact vs source — preserved."
-    else echo "   original track (a:1): NOT bit-exact vs source — provenance track corrupted."; verdict=FAIL; fi
+    else echo "   original track (a:1): NOT bit-exact vs source — provenance track corrupted."; verdict=FAIL; other_failed=1; fi
     # shellcheck disable=SC2086
     d0=$(ffmpeg -nostdin -v error -i "$OUT" -map 0:a:0 -c:a "$a0c" -f "$raw" - 2>/dev/null | md5sum | awk '{print $1}')
     # shellcheck disable=SC2086
@@ -480,5 +494,50 @@ case "$verdict" in
     if [ "$bitproven" -eq 1 ] || [ "$FULL" -eq 1 ]; then echo ">> OK (lossless proven; timeline scrub-clean)"
     else echo ">> OK (sampled checks; scrub-clean; for archival sign-off run again with --full)"; fi ;;
   REVIEW) echo ">> REVIEW: $note" ;;
-  FAIL)   echo ">> FAIL (see above)"; exit 1 ;;
+  FAIL)
+    # QTFF audit 5-4c: emit the exact failure signature (class + count) when the
+    # FAIL comes only from the count-signature gates (d)/(e), then consult an
+    # operator-attested waiver sidecar. An EXACT match — same gate set, same
+    # counts, same file bytes-identity, verbatim attestation — exits 0 with a
+    # loud WAIVED line; any drift voids the waiver and the FAIL stands.
+    WVR="$OUT.waiver.json"
+    wgate=""; wsig=""
+    if [ "$other_failed" -eq 0 ]; then
+      if   [ "$d_failed" -eq 1 ] && [ "$e_failed" -eq 1 ]; then wgate="d+e"
+      elif [ "$d_failed" -eq 1 ]; then wgate="d"
+      elif [ "$e_failed" -eq 1 ]; then wgate="e"; fi
+    fi
+    if [ -n "$wgate" ]; then
+      [ "$d_failed" -eq 1 ] && wsig="d:napts=${TL_NAPTS:-0},nadts=${TL_NADTS:-0},back=${TL_BACK:-0},dup=${TL_DUP:-0},tiny=${TL_TINY:-0}"
+      [ "$e_failed" -eq 1 ] && wsig="${wsig:+$wsig;}e:dec_src=${b_dec:-0},dec_out=${o_dec:-0},mux_src=${b_mux:-0},mux_out=${o_mux:-0}"
+      osize=$(wc -c < "$OUT" | tr -d ' ')
+      case "$op" in *MD5=*) vh="${op##*MD5=}";; *) vh=none;; esac
+      echo "VERIFY_SIGNATURE gate=$wgate sig='$wsig' size=$osize vhash=$vh"
+      if [ -f "$WVR" ]; then
+        wv () { awk -F'"' -v k="$1" '$2==k{print $4; exit}' "$WVR"; }
+        rgate=$(wv gate); rsig=$(wv signature); ratt=$(wv attestation); rvh=$(wv video_streamhash)
+        rsize=$(sed -n 's/^[[:space:]]*"file_size":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$WVR" | head -1)
+        if [ "$rgate" = "$wgate" ] && [ "$rsig" = "$wsig" ] && [ "$rsize" = "$osize" ] && \
+           [ "$rvh" = "$vh" ] && [ "$ratt" = "$RTM_WAIVER_ATTEST" ]; then
+          echo ">> WAIVED($wgate): this exact gate failure is covered by the operator-attested"
+          echo "   waiver sidecar $WVR"
+          echo "   Scope: THIS file, THIS signature only — any new signature or changed count"
+          echo "   voids it. The recorded proofs and coverage limits live in the sidecar."
+          echo "VERIFY_SUMMARY verdict=WAIVED gate=$wgate sig='$wsig' sidecar='$WVR'"
+          exit 0
+        fi
+        att_ok=NO; [ "$ratt" = "$RTM_WAIVER_ATTEST" ] && att_ok=yes
+        echo ">> waiver sidecar present but VOID — it does not match this run:"
+        echo "   recorded: gate=${rgate:-?} sig=${rsig:-?} size=${rsize:-?} vhash=${rvh:-?} attestation-ok=$att_ok"
+        echo "   this run: gate=$wgate sig=$wsig size=$osize vhash=$vh"
+        echo "   A changed signature or file is NEW evidence — a waiver never transfers; re-investigate."
+      else
+        echo "   (if independent proofs show this exact failure benign for this file,"
+        echo "    scripts/waiver.sh can record an operator-attested waiver sidecar)"
+      fi
+    elif [ -f "$WVR" ]; then
+      echo ">> waiver sidecar present but this FAIL is NOT waiver-eligible: an essence/identity"
+      echo "   gate failed ((b)/--full/--audio) — a waiver never covers a lossless-proof failure."
+    fi
+    echo ">> FAIL (see above)"; exit 1 ;;
 esac
