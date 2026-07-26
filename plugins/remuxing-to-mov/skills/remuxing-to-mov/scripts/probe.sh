@@ -99,9 +99,10 @@ probe_struct () {
   ms_tb_scan
   mp4_atom_scan "$container" "$vtag"
   case "$acodec" in                              # mirrors remux.sh --audio auto
-    mp2|mp1|mp3|dts) aaction=pcm;;
-    "")              aaction=none;;
-    *)               aaction=copy;;
+    mp2|mp1|mp3|dts|dca)         aaction=pcm;;   # QuickTime-unplayable
+    flac|opus|vorbis|truehd|mlp) aaction=pcm;;   # not MOV-copyable (5-2b alignment)
+    "")                          aaction=none;;
+    *)                           aaction=copy;;
   esac
   # PAFF repair routed by timestamp profile (post-mortem 2026-07-25): a pair-
   # timestamped or reordered stream must KEEP its real PTS (pairfill); the
