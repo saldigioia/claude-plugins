@@ -602,6 +602,114 @@ o=$(bash "$SC/dual-track.sh" "$WORK/ml.ts" "$WORK/dtwarn.mov" 2>&1) || true
 has "$o" "WARNING: source has 2 audio tracks" "dual-track announces its single-pair scope on multi-track sources"
 
 echo
+echo "== 22. QTFF audit 5-4g: ms-timebase advisory, waiver round-trip, derived b-pyramid bound =="
+# (a) ms-timebase MKV (C68/5-4e): the advisory fires, a default remux inherits
+# a coarse timescale, --timescale sets the conventional base with the video
+# bit-identical and the source-baked alternation preserved (not smoothed).
+# SYNTHESIS LIMIT (C69): the null-muxer duplicate-DTS scrub lines are NOT
+# mintable from a short x264 fixture (probed 2026-07-26: zero lines) — the
+# real-pair line-set identity (XLVIII, 152/152 normalized) lives in the
+# registry row; here we pin the mintable mechanics.
+MSK="$WORK/ms.mkv"
+ff -f lavfi -i testsrc2=s=320x240:r=24000/1001 -t 4 -c:v libx264 -g 24 -bf 2 -pix_fmt yuv420p "$MSK"
+kv=$(bash "$SC/probe.sh" "$MSK" --kv 2>&1)
+has "$kv" "PR_MS_TB=yes" "probe --kv flags the 1/1000 timebase (5-4e advisory)"
+has "$kv" "PR_TS_HINT=24000" "advisory computes the conventional timescale hint"
+o=$(bash "$SC/probe.sh" "$MSK" 2>&1)
+has "$o" "ms-quantized source" "human probe prints the ms-timebase advisory section"
+has "$o" "never a restamp" "advisory repeats the restamp prohibition"
+bash "$SC/remux.sh" "$MSK" "$WORK/ms_d.mov" >/dev/null 2>&1
+bash "$SC/remux.sh" "$MSK" "$WORK/ms_t.mov" --timescale 24000 >/dev/null 2>&1
+tbase () { ffprobe -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$1" 2>/dev/null | head -1; }
+case "$(tbase "$WORK/ms_d.mov")" in
+  1/1000|1/24000) no "default remux did not inherit a coarse timescale: $(tbase "$WORK/ms_d.mov")";;
+  1/*) ok "default remux inherits a coarse timescale ($(tbase "$WORK/ms_d.mov")) from the ms source (C68)";;
+  *)   no "unreadable output timescale";;
+esac
+[ "$(tbase "$WORK/ms_t.mov")" = 1/24000 ] && ok "--timescale 24000 sets the conventional base" || no "--timescale not applied: $(tbase "$WORK/ms_t.mov")"
+shash22 () { ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1; }
+{ [ -n "$(shash22 "$MSK")" ] && [ "$(shash22 "$MSK")" = "$(shash22 "$WORK/ms_t.mov")" ]; } \
+  && ok "video bit-identical through --timescale (a timescale change, never a restamp)" || no "--timescale altered the video stream"
+ndur () { ffprobe -v error -select_streams v:0 -show_entries packet=duration -of csv=p=0 "$1" 2>/dev/null | grep -v -e N/A -e '^$' | sort -u | grep -c . || true; }
+{ [ "$(ndur "$WORK/ms_t.mov")" -ge 2 ] && [ "$(ndur "$WORK/ms_t.mov")" -le 3 ]; } \
+  && ok "ms alternation survives the conventional base (source-baked, not smoothed)" \
+  || no "alternation shape unexpected: $(ndur "$WORK/ms_t.mov") distinct durations"
+
+# (b) waiver round-trip (5-4c): FAIL -> record -> WAIVED/exit 0 -> mutate ->
+# VOID/FAIL. Artifact: stts entry-1 delta hex-patched 1->0 on a copy of the
+# ts8 rebuild — all 180 packets collapse onto DTS 0 (dup=179) while the
+# essence stays untouched (VCL MATCH), so the FAIL comes only from the
+# count-signature gate (d): waiver-eligible by construction.
+. "$SC/lib-attest.sh"
+BDUP="$WORK/brk_dup.mov"
+cp "$BK" "$BDUP"
+soff=$(grep -oba stts "$BDUP" 2>/dev/null | head -1 | cut -d: -f1)
+sfound=""
+if [ -n "$soff" ]; then
+  # grep flavors differ by a byte in -ob accounting on binary — anchor on the fourcc
+  for cand in "$soff" $((soff + 1)); do
+    [ "$(dd if="$BDUP" bs=1 skip="$cand" count=4 2>/dev/null)" = stts ] && { sfound=$cand; break; }
+  done
+fi
+if [ -n "$sfound" ]; then
+  printf '\000\000\000\000' | dd of="$BDUP" bs=1 seek=$((sfound + 16)) conv=notrunc 2>/dev/null
+  out=$(bash "$SC/verify.sh" "$S" "$BDUP" 2>&1); rc=$?
+  { [ "$rc" -eq 1 ] && case "$out" in *"VERIFY_SIGNATURE gate=d"*) true;; *) false;; esac; } \
+    && ok "patched dup-DTS artifact FAILs with a gate-(d) count signature" || no "no waiver-eligible signature (rc=$rc)"
+  bash "$SC/waiver.sh" "$S" "$BDUP" --attest "${RTM_WAIVER_ATTEST%.}" --coverage c --proof p >/dev/null 2>&1; rc=$?
+  { [ "$rc" -eq 2 ] && [ ! -f "$BDUP.waiver.json" ]; } && ok "near-miss attestation refused, nothing written" || no "near-miss accepted (rc=$rc)"
+  bash "$SC/waiver.sh" "$S" "$BDUP" --attest "$RTM_WAIVER_ATTEST" \
+    --coverage "dup-DTS count on all 180 packets; VCL essence proven identical" \
+    --proof "gate (b) VCL MATCH" >/dev/null 2>&1; rc=$?
+  { [ "$rc" -eq 0 ] && [ -f "$BDUP.waiver.json" ]; } && ok "waiver recorded from the live signature" || no "waiver.sh failed (rc=$rc)"
+  out=$(bash "$SC/verify.sh" "$S" "$BDUP" 2>&1); rc=$?
+  { [ "$rc" -eq 0 ] && case "$out" in *"WAIVED(d)"*) true;; *) false;; esac; } \
+    && ok "exact-match sidecar -> WAIVED(d), exit 0" || no "waived verify wrong (rc=$rc)"
+  has "$out" "VERIFY_SUMMARY verdict=WAIVED" "waived pass emits the machine-readable summary"
+  sed -i.bak 's/dup=179/dup=178/' "$BDUP.waiver.json"
+  out=$(bash "$SC/verify.sh" "$S" "$BDUP" 2>&1); rc=$?
+  { [ "$rc" -eq 1 ] && case "$out" in *VOID*) true;; *) false;; esac; } \
+    && ok "mutated signature -> waiver VOID, FAIL stands" || no "void path wrong (rc=$rc)"
+  cp "$BDUP.waiver.json" "$RE.waiver.json"
+  out=$(bash "$SC/verify.sh" "$S" "$RE" 2>&1); rc=$?
+  { [ "$rc" -eq 1 ] && case "$out" in *"NOT waiver-eligible"*) true;; *) false;; esac; } \
+    && ok "essence FAIL is never waivable (sidecar present but refused with notice)" || no "essence-FAIL waiver handling wrong (rc=$rc)"
+  rm -f "$RE.waiver.json"
+else
+  echo "  (skip: could not locate the stts atom for the waiver artifact)"
+fi
+
+# (c) derived b-pyramid bound (5-4d/C67): a deep frame-coded hierarchical-B
+# stream (bf=8, forced b-pyramid) must BUILD under the derived bound in the
+# exact region where the old fixed preroll+pair limit refused legitimate
+# streams — and still decode in the source presentation order. The
+# wrong-cadence refusal stays pinned in test 19. A FIELD-coded pyramid fixture
+# remains blocked on 5h's real capture (libx264 cannot mint PAFF).
+BPYR="$WORK/bpyr.ts"
+ff -f lavfi -i testsrc2=s=320x240:r=30000/1001 -t 6 -c:v libx264 -g 60 -bf 8 \
+   -x264opts b-pyramid=normal:b-adapt=0 -pix_fmt yuv420p -mpegts_flags +resend_headers "$BPYR"
+if ffmpeg -nostdin -v error -i "$BPYR" -map 0:v:0 -c:v copy \
+    -bsf:v 'setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+1\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS\,PREV_OUTDTS+1)' \
+    -f null - 2>/dev/null; then
+  o=$(bash "$SC/pairfill-paff.sh" "$BPYR" "$WORK/bpyr.mov" --rate 30000/1001 2>&1); rc=$?
+  { [ "$rc" -eq 0 ] && [ -f "$WORK/bpyr.mov" ]; } && ok "deep b-pyramid builds under the derived bound (5-4d)" || no "b-pyramid refused (rc=$rc)"
+  pre=$(printf '%s\n' "$o" | sed -n 's/.*DTS pre-roll=\([0-9]*\) ticks.*/\1/p' | head -1)
+  bpair=$(printf '%s\n' "$o" | sed -n 's/.*pair=\([0-9]*\) ticks.*/\1/p' | head -1)
+  mo=$(printf '%s\n' "$o" | sed -n 's/.*max PTS-DTS=\([0-9]*\) (derived limit.*/\1/p' | head -1)
+  if [ -n "$pre" ] && [ -n "$bpair" ] && [ -n "$mo" ] && [ "$mo" -gt $((pre + bpair)) ]; then
+    ok "pyramid lead $mo exceeds the OLD fixed limit $((pre + bpair)) — the derived bound is doing real work (C67)"
+  else
+    no "pyramid too shallow to exercise the revised bound (maxoff=${mo:-?} preroll=${pre:-?} pair=${bpair:-?})"
+  fi
+  vseq22 () { ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -f framemd5 - 2>/dev/null | grep -v '^#' | awk -F', *' '{print $NF}' | md5sum | awk '{print $1}'; }
+  [ "$(vseq22 "$BPYR")" = "$(vseq22 "$WORK/bpyr.mov")" ] \
+    && ok "b-pyramid output decodes in the source presentation order (real PTS kept)" \
+    || no "presentation order changed on the b-pyramid build"
+else
+  echo "  (skip: this ffmpeg's setts lacks the PREV_OUT* expression vars — b-pyramid E2E needs >= 5.x)"
+fi
+
+echo
 echo "===================================================================="
 echo "  PASSED: $pass    FAILED: $fail"
 echo "===================================================================="
