@@ -145,29 +145,42 @@ case "$dur" in ''|N/A) dur=0;; esac
 # emitted under heavy host load is not. So `confirm` re-decodes a nonzero result
 # (up to twice more) and keeps the MINIMUM — this drops load-induced false
 # positives without ever masking a reproducible error (which stays nonzero).
-decode_win () {  # $1 optional start time; empty -> whole file
-  if [ -n "${1:-}" ]; then
-    ffmpeg -nostdin -v error -ss "$1" -t "$WIN" -i "$OUT" -map 0:v:0 -map '0:a?' -f null - 2>&1 | grep -c . || true
+decode_win () {  # $1 file; $2 optional start time; empty -> whole file
+  if [ -n "${2:-}" ]; then
+    ffmpeg -nostdin -v error -ss "$2" -t "$WIN" -i "$1" -map 0:v:0 -map '0:a?' -f null - 2>&1 | grep -c . || true
   else
-    ffmpeg -nostdin -v error -i "$OUT" -map 0:v:0 -map '0:a?' -f null - 2>&1 | grep -c . || true
+    ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -map '0:a?' -f null - 2>&1 | grep -c . || true
   fi
 }
 confirm () {  # re-confirm a nonzero count; keep the min, bail early on a clean pass
-  local n m i; n=$(decode_win "${1:-}"); i=0
-  while [ "$n" -ne 0 ] && [ "$i" -lt 4 ]; do m=$(decode_win "${1:-}"); [ "$m" -lt "$n" ] && n=$m; i=$((i+1)); done
+  local f n m i; f="$1"; n=$(decode_win "$f" "${2:-}"); i=0
+  while [ "$n" -ne 0 ] && [ "$i" -lt 4 ]; do m=$(decode_win "$f" "${2:-}"); [ "$m" -lt "$n" ] && n=$m; i=$((i+1)); done
   printf '%s' "$n"
 }
+c_short=1; mid=""; tailp=""
 if awk "BEGIN{exit !($dur < 4*$WIN)}"; then
-  errs=$(confirm)
+  errs=$(confirm "$OUT")
   echo "   short file — full output decode: $errs errors (want 0)"
 else
+  c_short=0
   mid=$(awk "BEGIN{printf \"%.2f\", $dur/2}")
-  tail=$(awk "BEGIN{printf \"%.2f\", $dur-$WIN-2}")
-  em=$(confirm "$mid"); et=$(confirm "$tail")
-  echo "   middle @${mid}s: $em errors; tail @${tail}s: $et errors (want 0)"
+  tailp=$(awk "BEGIN{printf \"%.2f\", $dur-$WIN-2}")
+  em=$(confirm "$OUT" "$mid"); et=$(confirm "$OUT" "$tailp")
+  echo "   middle @${mid}s: $em errors; tail @${tailp}s: $et errors (want 0)"
   errs=$((em + et))
 fi
-[ "$errs" -eq 0 ] || { [ "$verdict" = FAIL ] || verdict=REVIEW; note="${note:+$note }Output decode errors in spot windows. Claiming these are inherent to the source requires MATCHING counts on a linear decode of the same source window AND clean timeline gates (d)/(e) — the same error class can mask a second, container-level defect (post-mortem 2026-07-25)."; }
+# QTFF audit 5-4a: on a nonzero count, run the IDENTICAL stage against the
+# SOURCE (same windows, same maps, same confirm-min). The DELTA — not the raw
+# count — is what can indict the remux. Classification is deferred until after
+# gate (d): an inherited-noise verdict requires the output timeline
+# independently proven clean, or the noise can mask a container-level defect.
+c_src=-1; c_delta=0
+if [ "${errs:-0}" -gt 0 ]; then
+  if [ "$c_short" -eq 1 ]; then c_src=$(confirm "$SRC")
+  else c_src=$(( $(confirm "$SRC" "$mid") + $(confirm "$SRC" "$tailp") )); fi
+  c_delta=$((errs - c_src))
+  echo "   source-baseline (identical windows): source: $c_src / output: $errs / delta: $c_delta"
+fi
 
 echo "-- (d) output timeline integrity (whole file, demux only) --"
 # The gate the shipped-broken files would have failed (post-mortem 2026-07-25):
@@ -194,12 +207,13 @@ eval "$(ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts,durati
     }')"
 echo "   packets=$TL_N  N/A-PTS=$TL_NAPTS  N/A-DTS=$TL_NADTS  backward-DTS=$TL_BACK  duplicate-DTS=$TL_DUP"
 echo "   sample-duration histogram (top): ${TL_TOP:-'?'}  near-zero durations: $TL_TINY (want 0)"
+DCLEAN=1   # (d) verdict feeds the (c)/(e) baseline classification (QTFF audit 5-4a/b)
 if [ "${TL_NAPTS:-0}" -ne 0 ] || [ "${TL_NADTS:-0}" -ne 0 ]; then
-  verdict=FAIL
+  verdict=FAIL; DCLEAN=0
   note="${note:+$note }Output has ${TL_NAPTS}/${TL_NADTS} packets with N/A PTS/DTS — the muxer invented the timeline (hard stop; see timeline-repair.md)."
 fi
 if [ "${TL_BACK:-0}" -ne 0 ] || [ "${TL_DUP:-0}" -ne 0 ]; then
-  verdict=FAIL
+  verdict=FAIL; DCLEAN=0
   note="${note:+$note }Output DTS not strictly monotonic (backward=$TL_BACK duplicate=$TL_DUP)."
 fi
 if [ "${TL_TINY:-0}" -gt 2 ]; then   # first/last sample may legitimately stray
@@ -211,14 +225,29 @@ if [ "${TL_TINY:-0}" -gt 2 ]; then   # first/last sample may legitimately stray
     awk -F, 'NF && $1!="N/A"{ du=$1+0; h[du]++; n++; if(h[du]>hm){hm=h[du]; modal=du} }
       END{ t=0; if(n>0 && modal>0) for(k in h){ if((k+0)*10<modal) t+=h[k] }; if(n==0){print "na"} else print t+0 }')
   if [ "$src_tiny" = na ]; then
-    [ "$verdict" = FAIL ] || verdict=REVIEW
+    [ "$verdict" = FAIL ] || verdict=REVIEW; DCLEAN=0
     note="${note:+$note }$TL_TINY near-zero sample durations in the output and the source's duration profile is unreadable — cannot prove inherent; inspect before shipping."
     echo "   >> $TL_TINY near-zero durations; source profile unreadable — REVIEW."
   elif [ "${TL_TINY:-0}" -le $((src_tiny + 2)) ]; then
     echo "   near-zero durations: output=$TL_TINY vs source=$src_tiny — matching profile (inherent VFR), not invented."
   else
-    verdict=FAIL
+    verdict=FAIL; DCLEAN=0
     note="${note:+$note }$TL_TINY sample durations <1/10 of modal ($TL_MODAL) vs only $src_tiny in the source — invented-timeline signature."
+  fi
+fi
+
+# QTFF audit 5-4a: classify gate (c)'s nonzero count now that (d) is known.
+# Reproduced counts (delta <= 0) + a clean (d) timeline = capture-inherited
+# noise -> REVIEW carrying the evidence (never a silent OK). Anything else
+# keeps the full post-mortem warning: inherent noise can MASK a second,
+# container-level defect, so the delta alone never clears a file.
+if [ "${errs:-0}" -gt 0 ]; then
+  [ "$verdict" = FAIL ] || verdict=REVIEW
+  if [ "$c_src" -ge 0 ] && [ "$c_delta" -le 0 ] && [ "$DCLEAN" -eq 1 ]; then
+    echo "   spot-check classification: source reproduces the counts and (d) is clean — inherited noise (REVIEW)."
+    note="${note:+$note }Spot-window decode errors reproduce on the source under identical windows (source: $c_src / output: $errs / delta: $c_delta) with a clean (d) timeline — capture-inherited noise, not remux damage. Settle for archival sign-off with --full + MKV strict-mux."
+  else
+    note="${note:+$note }Output decode errors in spot windows (source: $c_src / output: $errs / delta: $c_delta; (d) clean=$DCLEAN). Claiming these are inherent to the source requires MATCHING counts on a linear decode of the same source window AND clean timeline gates (d)/(e) — the same error class can mask a second, container-level defect (post-mortem 2026-07-25)."
   fi
 fi
 
