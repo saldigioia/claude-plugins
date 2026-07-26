@@ -86,18 +86,27 @@ AB=$((B - A))
 echo "   timebase=1/$TBDEN  field rate=$RATE  pair=${PAIR} ticks (fields ${A}/${B})"
 
 # --- whole-file precondition scan (demux only): first-PTS, strict alternation,
-#     and the measured reorder depth (max PTS-DTS) for the DTS pre-roll ---
+#     the measured reorder depth (max PTS-DTS) for the DTS pre-roll, and the
+#     PTS excursion vs a pair-cadence ramp (QTFF audit 5-4d / C67): each
+#     timestamped packet advances one pair, so PTS minus (first_PTS + i*PAIR)
+#     measures how far the reorder pyramid pushes presentation ahead of the
+#     cadence — the exact amount the output's PTS-DTS offsets will exceed the
+#     pre-roll by (the filled DTS ramp is uniform; the kept real PTS are not) ---
 eval "$(ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts -of csv=p=0 "$IN" 2>/dev/null | \
-  awk -F, 'NF{
+  awk -F, -v pair="$PAIR" 'NF{
       n++; p=$1; d=$2
       unset=(p=="N/A"||p=="")
       if(n==1) first_ok=(unset?0:1)
       if(unset){ miss++; run++; if(run>mxrun) mxrun=run } else run=0
+      if(!unset){ if(ti==0) fp=p+0; exc=(p+0)-(fp+ti*pair); if(exc>emax)emax=exc; if(exc<emin)emin=exc; ti++ }
       if(!unset && d!="N/A" && d!=""){ both++; off=p-d; if(off>mxoff) mxoff=off }
     }
-    END{ printf "PP_N=%d PP_FIRST_OK=%d PP_MISS=%d PP_MAXRUN=%d PP_BOTH=%d PP_MAXOFF=%d\n",
-         n+0, first_ok+0, miss+0, mxrun+0, both+0, mxoff+0 }')"
+    END{ printf "PP_N=%d PP_FIRST_OK=%d PP_MISS=%d PP_MAXRUN=%d PP_BOTH=%d PP_MAXOFF=%d PP_EXC=%d PP_EXC_MIN=%d\n",
+         n+0, first_ok+0, miss+0, mxrun+0, both+0, mxoff+0, emax+0, emin+0 }')"
 echo "   packets=$PP_N  untimestamped=$PP_MISS  max consecutive untimestamped=$PP_MAXRUN  max PTS-DTS=$PP_MAXOFF ticks"
+# bash 3.2 can't parse $(cmd "...\"...\"...") inside a double-quoted string — precompute
+EXC_PAIRS=$(awk "BEGIN{printf \"%.2f\", ${PP_EXC:-0}/$PAIR}")
+echo "   PTS excursion vs pair-cadence ramp: +${PP_EXC}/${PP_EXC_MIN} ticks ($EXC_PAIRS pairs of pyramid depth)"
 [ "${PP_N:-0}" -gt 0 ] || { echo "no video packets read" >&2; exit 3; }
 [ "${PP_FIRST_OK:-0}" -eq 1 ] || { echo ">> PRECONDITION FAIL: first video packet has no PTS — nothing to anchor the fill to. Use rebuild-paff.sh (no real timing survives to preserve)." >&2; exit 3; }
 [ "${PP_MAXRUN:-9}" -le 1 ] || { echo ">> PRECONDITION FAIL: $PP_MAXRUN consecutive untimestamped packets — not strict pair alternation; the +1-field fill would be wrong. Diagnose by hand (references/timeline-repair.md)." >&2; exit 3; }
@@ -111,7 +120,21 @@ if [ -z "$PREROLL" ]; then
   fi
 fi
 [ "$PREROLL" -ge "$PAIR" ] || PREROLL=$PAIR
-echo "   DTS pre-roll=$PREROLL ticks"
+# --- derived PTS-DTS bound (QTFF audit 5-4d, gate 4 approved 2026-07-26): the
+# output's max(PTS-DTS) is structurally PREROLL + the source's positive pair-ramp
+# excursion (a legitimate hierarchical-B pyramid's presentation lead), so the
+# old fixed PREROLL+PAIR limit refused valid >=2-level pyramids (C67; XLVI:
+# 36036 > 30030 with no flag that could satisfy it). Revised bound:
+#   max(PTS-DTS) <= PREROLL + min(measured excursion, 16 pairs) + 1 pair
+# floored at PREROLL+PAIR — a zero-excursion (simple) stream keeps EXACTLY the
+# old limit, and the 16-pair clamp keeps a pathological measurement from ever
+# opening the gate to a runaway ramp (the C05 wrong-cadence class stays refused
+# by this clamp AND the unchanged 2-pair span-skew gate).
+EXCC=${PP_EXC:-0}
+[ "$EXCC" -ge 0 ] || EXCC=0
+[ "$EXCC" -le $((16 * PAIR)) ] || EXCC=$((16 * PAIR))
+MAXOFF_LIMIT=$((PREROLL + EXCC + PAIR))
+echo "   DTS pre-roll=$PREROLL ticks; derived max(PTS-DTS) bound=$MAXOFF_LIMIT (preroll + excursion $EXCC + 1 pair)"
 
 # --- audio: preserve the original where QuickTime needs help (dual-track) ---
 # a:0 only. A source with MORE audio tracks (SAP/secondary/commentary) loses
@@ -170,11 +193,16 @@ fi
 
 # --- gate the OUTPUT's timeline before blessing it (never trust the exit code) ---
 # Beyond N/A + monotonicity + duration histogram, two BOUNDEDNESS gates (QTFF
-# audit 1b, 2026-07-25): a DTS ramp at the wrong cadence (e.g. field-rate ramp
-# on a frame-per-packet stream) passes all the point checks yet writes linearly
-# GROWING ctts offsets and a decode span half the presentation span — an
-# internally inconsistent file (mdhd != sum stts) that still "plays". So:
-#   * max(PTS-DTS) over the whole output must stay <= PREROLL + one pair;
+# audit 1b, 2026-07-25; bound revised 5-4d, 2026-07-26): a DTS ramp at the
+# wrong cadence (e.g. field-rate ramp on a frame-per-packet stream) passes all
+# the point checks yet writes linearly GROWING ctts offsets and a decode span
+# half the presentation span — an internally inconsistent file (mdhd != sum
+# stts) that still "plays". So:
+#   * max(PTS-DTS) over the whole output must stay <= the DERIVED bound
+#     (PREROLL + measured pyramid excursion clamped at 16 pairs + 1 pair;
+#     floor PREROLL+PAIR) — fixed at one pair it refused legitimate deep
+#     hierarchical-B pyramids (C67/XLVI), while the clamp + skew gate below
+#     still refuse the wrong-cadence class;
 #   * the decode span (last DTS - first DTS) must equal the presentation span
 #     (max PTS - min PTS) within 2 pairs.
 echo "-- output timeline gates (want: 0 N/A, strictly monotonic DTS, only ${A}/${B}-tick durations, bounded PTS-DTS) --"
@@ -192,14 +220,14 @@ eval "$(ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts,durati
         n+0, nap+0, nad+0, back+0, dup+0, od+0, mxo+0, skew+0
     }')"
 echo "   packets=$PG_N  N/A-PTS=$PG_NAPTS  N/A-DTS=$PG_NADTS  backward-DTS=$PG_BACK  duplicate-DTS=$PG_DUP  off-histogram durations=$PG_OFFHIST"
-echo "   max PTS-DTS=$PG_MAXOFF (limit $((PREROLL + PAIR)))  presentation-vs-decode span skew=$PG_SKEW ticks (limit $((2 * PAIR)))"
+echo "   max PTS-DTS=$PG_MAXOFF (derived limit $MAXOFF_LIMIT)  presentation-vs-decode span skew=$PG_SKEW ticks (limit $((2 * PAIR)))"
 gates_ok=1
 [ "${PG_NAPTS:-1}" -eq 0 ] || gates_ok=0
 [ "${PG_NADTS:-1}" -eq 0 ] || gates_ok=0
 [ "${PG_BACK:-1}"  -eq 0 ] || gates_ok=0
 [ "${PG_DUP:-1}"   -eq 0 ] || gates_ok=0
 [ "${PG_OFFHIST:-9}" -le 2 ] || gates_ok=0   # first/last sample may legitimately stray
-[ "${PG_MAXOFF:-999999999}" -le $((PREROLL + PAIR)) ] || gates_ok=0
+[ "${PG_MAXOFF:-999999999}" -le "$MAXOFF_LIMIT" ] || gates_ok=0
 [ "${PG_SKEW:-999999999}" -le $((2 * PAIR)) ] || gates_ok=0
 if [ "$gates_ok" -ne 1 ]; then
   echo ">> TIMELINE GATES FAILED — the written timeline is not the derived one."
