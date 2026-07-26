@@ -566,6 +566,42 @@ hasnt "$out" ">> FAIL" "reproduced noise no longer hard-FAILs (calibrated, not w
 [ "$rc" -eq 0 ] && ok "calibrated REVIEW exits 0 (house exit codes intact)" || no "calibrated REVIEW exit $rc"
 
 echo
+echo "== 21. QTFF audit 5-2: track-set audio policy (layouts default; drops announced; first == historical) =="
+LK5="$WORK/lay51.mkv"; LKD="$WORK/laydup.mkv"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=440 -f lavfi -i sine=880 -t 2 \
+   -map 0:v -map 1:a -map 2:a -c:v libx264 -g 25 -pix_fmt yuv420p \
+   -c:a:0 flac -ac:a:0 6 -c:a:1 aac -ac:a:1 2 "$LK5"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=440 -f lavfi -i sine=660 -f lavfi -i sine=880 -t 2 \
+   -map 0:v -map 1:a -map 2:a -map 3:a -c:v libx264 -g 25 -pix_fmt yuv420p \
+   -c:a:0 flac -ac:a:0 6 -c:a:1 aac -ac:a:1 2 -c:a:2 mp2 -ac:a:2 2 "$LKD"
+# (i) 5.1 + stereo -> BOTH survive under the default layouts policy (the
+# transcript-1 blind spot: the old a:0 classifier silently dropped track 2)
+o=$(bash "$SC/mov.sh" "$LK5" "$WORK/lay51.mov" 2>&1) || true
+case "$(acods "$WORK/lay51.mov")" in pcm_*,aac) ok "layouts: 5.1+stereo -> both layouts survive (pcm access + aac copy)";; *) no "layouts lost a layout: $(acods "$WORK/lay51.mov")";; esac
+chs=$(ffprobe -v error -select_streams a -show_entries stream=channels -of csv=p=0 "$WORK/lay51.mov" 2>/dev/null | paste -sd, -)
+[ "$chs" = "6,2" ] && ok "layouts: channel counts preserved (6,2)" || no "channel counts wrong: $chs"
+has "$o" "audio_kept=0:flac:5.1" "MOV_SUMMARY carries audio_kept"
+has "$o" "NOT preserved in this file" "multi shape announces non-native originals are not preserved"
+# (ii) duplicate stereo -> exactly the mp2 clone drops, announced with the rule
+o=$(bash "$SC/remux.sh" "$LKD" "$WORK/laydup.mov" --audio-keep layouts 2>&1) || true
+has "$o" "DROP a:2 mp2" "duplicate layout: the mp2 clone drops"
+has "$o" "loses to a:1 aac" "the drop states the deciding rule"
+has "$o" "KEEP a:1 aac" "the better stereo (aac) survives"
+[ "$(acods "$WORK/laydup.mov")" = "pcm_s16le,aac" ] && ok "dup fixture output shape pcm+aac" || no "dup output shape: $(acods "$WORK/laydup.mov")"
+# (iii) --audio-keep first == the default invocation, byte-for-byte
+bash "$SC/remux.sh" "$MP2" "$WORK/f_def.mov" >/dev/null 2>&1
+bash "$SC/remux.sh" "$MP2" "$WORK/f_first.mov" --audio-keep first >/dev/null 2>&1
+if cmp -s "$WORK/f_def.mov" "$WORK/f_first.mov"; then ok "default == --audio-keep first byte-for-byte"
+else no "default and --audio-keep first outputs differ"; fi
+[ "$(acods "$WORK/f_def.mov")" = pcm_s16le ] && ok "first: historical single-track shape (mp2 -> pcm)" || no "first shape wrong: $(acods "$WORK/f_def.mov")"
+# 5-2d: dual-track single-pair scope — early refusal on not-MOV-copyable a:0,
+# loud warning on multi-track sources (a:0 pair still builds)
+bash "$SC/dual-track.sh" "$LK5" "$WORK/dtguard.mov" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && ok "dual-track refuses not-MOV-copyable a:0 early (exit 2)" || no "flac guard rc=$rc (want 2)"
+o=$(bash "$SC/dual-track.sh" "$WORK/ml.ts" "$WORK/dtwarn.mov" 2>&1) || true
+has "$o" "WARNING: source has 2 audio tracks" "dual-track announces its single-pair scope on multi-track sources"
+
+echo
 echo "===================================================================="
 echo "  PASSED: $pass    FAILED: $fail"
 echo "===================================================================="
