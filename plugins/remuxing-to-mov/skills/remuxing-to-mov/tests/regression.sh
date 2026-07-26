@@ -147,6 +147,11 @@ MP2="$WORK/mp2.ts"; ff -f lavfi -i testsrc2=s=320x240:r=25 -f lavfi -i sine=1000
 kv2=$(bash "$SC/probe.sh" "$MP2" --kv 2>&1)
 has "$kv2" "PR_AUDIO_ACTION=pcm" "MP2 audio -> PCM action"
 has "$kv2" "PR_REC_RUNG=1" "MP2 audio -> recommended Rung 1"
+# QTFF audit 5-2a: per-track audio manifest (the classifier's full track set)
+has "$kv2" "PR_AUD_COUNT=1" "kv manifest counts the audio tracks"
+has "$kv2" "PR_AUD_0_CODEC=mp2" "kv manifest carries per-track codec"
+has "$kv" "PR_AUD_COUNT=0" "no-audio source -> PR_AUD_COUNT=0"
+has "$kv" "PR_MS_TB=no" "TS source -> no ms-timebase flag (5-4e key present)"
 js=$(bash "$SC/probe.sh" "$S" --json 2>&1)
 case "$js" in '{'*'"rec_rung":0'*'}') ok "json emits a flat object with rec_rung";; *) no "json malformed: $js";; esac
 

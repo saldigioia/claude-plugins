@@ -4,13 +4,80 @@
 #   (default)  human-readable report
 #   --kv       machine-readable KEY=VAL (PR_* + PF_* + a recommended FIRST rung)
 #   --json     same facts as a flat JSON object
-# Prints: container, video/audio codecs + tags, field structure, Annex-B vs AVCC,
-# color tags, a timestamp sanity flag, and ffmpeg-version-dependent warnings.
+# Prints: container, video/audio codecs + tags, per-track audio manifest, field
+# structure, Annex-B vs AVCC, color tags, a timestamp sanity flag, ms-timebase
+# advisory, and ffmpeg-version-dependent warnings.
 set -euo pipefail
 IN="${1:?usage: probe.sh INPUT [--kv|--json]}"; MODE="${2:-human}"
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-paff.sh"   # shared PAFF detection (coded-picture-rate test)
+
+# --- per-track audio manifest (QTFF audit 5-2a) ---------------------------------
+# The audio classifier must see the WHOLE track set, not a:0 — the incident
+# blind spot: FLAC-5.1 + MP2-stereo classified 'pcm' off track 1 and silently
+# dropped track 2. Emitted as PR_AUD_COUNT + PR_AUD_<n>_{CODEC,CHANNELS,LAYOUT,
+# LANG}; layouts are single-quoted (parens) — keys satisfy ^(PR|PF)_[A-Z0-9_]+=.
+aud_manifest_kv () {
+  ffprobe -v error -select_streams a \
+      -show_entries stream=index,codec_name,channels,channel_layout:stream_tags=language \
+      -of compact=p=0:nk=0 "$IN" 2>/dev/null | \
+  awk -F'|' 'NF{
+      c="unknown"; ch=0; lay=""; lang="und"; idx=""
+      for(i=1;i<=NF;i++){ eq=index($i,"="); k=substr($i,1,eq-1); v=substr($i,eq+1)
+        if(k=="index")idx=v; else if(k=="codec_name")c=v; else if(k=="channels")ch=v
+        else if(k=="channel_layout")lay=v; else if(k=="tag:language")lang=v }
+      # TS lists each stream under its program AND top-level -> dedupe by index
+      # (same quirk verify.sh dedupes for packet counts)
+      if(idx!=""){ if(idx in seen) next; seen[idx]=1 }
+      if(lay=="") lay="unknown"
+      printf "PR_AUD_%d_CODEC=%s\nPR_AUD_%d_CHANNELS=%s\nPR_AUD_%d_LAYOUT=%c%s%c\nPR_AUD_%d_LANG=%s\n", \
+        n, c, n, ch, n, 39, lay, 39, n, lang
+      n++
+    } END{ printf "PR_AUD_COUNT=%d\n", n+0 }'
+}
+
+# --- ms-timebase advisory scan (QTFF audit 5-4e, C68) ---------------------------
+# MKV's 1/1000 timebase survives remux as a coarse video timescale with
+# alternating tick durations — source-baked ±0.5 ms rounding, not judder. Sets
+# MS_TB=yes/no, TS_HINT (conventional -video_track_timescale), MS_ALT (top two
+# duration ticks, evidence for the report).
+ms_tb_scan () {
+  MS_TB=no; TS_HINT=""; MS_ALT=""
+  local tb fr num den
+  tb=$(ffprobe -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  [ "$tb" = 1/1000 ] || return 0
+  MS_TB=yes
+  MS_ALT=$(ffprobe -v error -select_streams v:0 -read_intervals '%+#120' -show_entries packet=duration -of csv=p=0 "$IN" 2>/dev/null | \
+    grep -v -e N/A -e '^$' | sort | uniq -c | sort -rn | head -2 | awk '{printf "%s%sx%sms", sep, $1, $2; sep=" "}')
+  fr=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  num=${fr%%/*}; den=${fr##*/}
+  case "$den" in
+    1001) TS_HINT=$num;;                                   # 30000/1001 -> 30000
+    1)    case "$num" in ''|*[!0-9]*) TS_HINT=90000;; *) TS_HINT=$((num * 1000));; esac;;
+    *)    TS_HINT=90000;;                                  # odd rate -> MPEG clock
+  esac
+}
+
+# --- mp4 atom scan: gama + stsd sample entry (QTFF audit 5-5b/5-5e) -------------
+# One mp4dump pass shared by both checks. Degrades silently: non-MP4-family
+# containers are skipped; without mp4dump the stsd entry falls back to ffprobe's
+# codec_tag_string and gama reads 'unknown' (report-only either way).
+mp4_atom_scan () {  # $1 = container name, $2 = ffprobe codec_tag_string fallback
+  GAMA=unknown; STSD_ENTRY=""; STSD_DV=""
+  case "$1" in *mov*|*mp4*|*m4a*) ;; *) GAMA=no; return 0;; esac
+  if ! command -v mp4dump >/dev/null 2>&1; then STSD_ENTRY="${2:-}"; return 0; fi
+  local dump
+  dump=$(mp4dump "$IN" 2>/dev/null || true)
+  [ -n "$dump" ] || { STSD_ENTRY="${2:-}"; return 0; }
+  # pure-bash case matches: a piped `grep -q` SIGPIPEs the printf under
+  # pipefail on a match (the herestring lesson from verify.sh) — never pipe
+  # into an early-exit reader here
+  case "$dump" in *'[gama]'*) GAMA=yes;; *) GAMA=no;; esac
+  case "$dump" in *'[dvcC]'*|*'[dvvC]'*) STSD_DV=yes;; esac
+  STSD_ENTRY=$(printf '%s\n' "$dump" | awk '/\[stsd\]/{f=1;next} f&&/\[/{gsub(/[^A-Za-z0-9-]/,"",$1); print $1; exit}' || true)
+  [ -n "$STSD_ENTRY" ] || STSD_ENTRY="${2:-}"
+}
 
 # Structured output for auto.sh / batch.sh. The recommended rung is a FIRST guess
 # from codec/PAFF/audio only; timestamp-driven escalation (Rung 2/3 on non-PAFF)
@@ -29,6 +96,8 @@ probe_struct () {
   cr=$($q v:0 -show_entries stream=color_range -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   eval "$(pf_detect "$IN")"
   eval "$(pf_reorder_scan "$IN")"
+  ms_tb_scan
+  mp4_atom_scan "$container" "$vtag"
   case "$acodec" in                              # mirrors remux.sh --audio auto
     mp2|mp1|mp3|dts) aaction=pcm;;
     "")              aaction=none;;
@@ -50,21 +119,39 @@ probe_struct () {
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
     printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
       "$container" "$vcodec" "$vtag" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    aud_manifest_kv                                                       # 5-2a
+    printf 'PR_MS_TB=%s\nPR_TS_HINT=%s\n' "$MS_TB" "${TS_HINT:-none}"    # 5-4e
+    printf 'PR_GAMA=%s\nPR_STSD_ENTRY=%s\nPR_STSD_DV=%s\n' \
+      "$GAMA" "${STSD_ENTRY:-unknown}" "${STSD_DV:-no}"                  # 5-5b/e
   fi
 }
 case "$MODE" in --kv|--json) probe_struct "$MODE"; exit 0;; esac
 
 echo "== source: $IN =="
-echo "container : $(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN")"
+container=$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN")
+echo "container : $container"
 
 echo "-- video --"
 ffprobe -v error -select_streams v:0 -show_entries \
   stream=codec_name,codec_tag_string,profile,width,height,field_order,pix_fmt,color_primaries,color_transfer,color_space,color_range,is_avc,nal_length_size \
   -of default=nw=1 "$IN" || true
+# stsd sample entry + Dolby Vision config visibility (QTFF audit 5-5e): the DV
+# playability split rides the sample-entry fourcc (dvh1 plays where the hev1
+# family fails); ffprobe's codec_tag_string alone can miss the dvcC/dvvC box.
+vtag_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+mp4_atom_scan "$container" "$vtag_h"
+if [ -n "${STSD_ENTRY:-}" ] && [ "$STSD_ENTRY" != "[0][0][0][0]" ]; then
+  echo "stsd sample entry: $STSD_ENTRY${STSD_DV:+ (+Dolby Vision dvcC/dvvC config box)}"
+fi
+if [ "${GAMA:-unknown}" = yes ]; then
+  echo "   WARN legacy 'gama' atom present (pre-2010 QuickTime gamma era): modern"
+  echo "        players may render this dark/washed vs an nclc-tagged copy. A -c copy"
+  echo "        remux normalizes it; see color-hdr-subs.md (Pre-2010 exports)."
+fi
 
 echo "-- audio --"
 ffprobe -v error -select_streams a -show_entries \
-  stream=index,codec_name,codec_tag_string,channels,sample_rate:stream_tags=language \
+  stream=index,codec_name,codec_tag_string,channels,sample_rate,channel_layout:stream_tags=language \
   -of default=nw=1 "$IN" || true
 
 echo "-- bitstream format --"
@@ -116,6 +203,19 @@ if [ "${DISC_COUNT:-0}" -gt 0 ]; then
   echo "      these in raw PCM audio and desyncs it. Use scripts/resync.sh, then verify."
 else
   echo "   none (video DTS gap-free on the timing axis; safe to plain-copy)."
+fi
+
+# ms-timebase advisory (QTFF audit 5-4e, C68): conventionality, not repair.
+ms_tb_scan
+if [ "$MS_TB" = yes ]; then
+  echo "-- timescale (ms-quantized source) --"
+  echo "   >> video timebase is 1/1000 (Matroska ms quantization). A remux inherits a"
+  echo "      coarse MOV timescale with ALTERNATING tick durations (${MS_ALT:-e.g. 33/34 ms})"
+  echo "      — source-baked rounding (±0.5 ms), imperceptible; NOT judder introduced"
+  echo "      by the remux (C68). Conventionality fix, purely cosmetic:"
+  echo "         scripts/remux.sh \"$IN\" OUT.mov --timescale ${TS_HINT:-90000}"
+  echo "      (a track-timescale change, never a restamp — a constant-rate restamp on"
+  echo "      a reorder-pyramid stream shuffles motion; diagnose.sh's prohibition.)"
 fi
 
 echo "-- ffmpeg version & behavior deltas --"
