@@ -129,7 +129,7 @@ fraction + reorder scan). Detail and the manual commands live in
 | `duration too long for timebase` | `-video_track_timescale` from the field-rate table in `references/timeline-repair.md` |
 | Trim/cut requested | Copy cuts are keyframe-bound (`references/cutting-concat.md`); check the cut point is a **closed**-GOP keyframe first (`scripts/gop-probe.sh IN CUT_TIME`); frame-exact = smart-cut, the one edit that re-encodes |
 | Garbled/"random" frame at a cut or concat **seam** | Open-GOP (partial-sync) boundary: the segment started on an open-GOP I-frame whose leading B-frames referenced the deleted GOP. `scripts/gop-probe.sh` before cutting, `scripts/seam-check.sh JOINED SEAM` after; restart on a closed-GOP keyframe |
-| Source has several audio tracks | `remux.sh` keeps `a:0` only — add `--all-audio`; first mapped track = the QuickTime default |
+| Source has several audio tracks | **Policy, not a flag** (QTFF audit 5-2): distinct channel layouts are distinct deliverables — `mov.sh` defaults to `--audio-keep layouts` (stereo+5.1 both survive; duplicate layouts curated lossless > lossy-high > lossy-low, so mp2 feed clones die). Every KEEP/DROP prints in a pre-flight manifest with the deciding rule; every drop is a WARN. `--audio-keep first` = the historical a:0-only behavior, now announced; `all` / explicit indices available. `remux.sh` alone still defaults to `first`; the first mapped track = the QuickTime default |
 | Missing/wrong audio language tag | `-metadata:s:a:0 language=eng` (PS/`.mpg` sources carry none) |
 | Chapters in the source | Survive `-c copy` into MOV — ffmpeg adds a QT chapter text track (verified 8.1.1) |
 | Embed metadata into a .mov | `scripts/metadata.sh IN OUT --title … --description …` — proper QuickTime (`mdta`) keys, `-c copy`, drops the generic chapter "menu" + the encoder tag. **Opt-in only, never automatic**; also `mov.sh … --title …` |
@@ -142,8 +142,18 @@ fraction + reorder scan). Detail and the manual commands live in
 
 - Video: **always `-c copy`**. HEVC tagged **`hvc1`** (default `hev1` won't play
   in QuickTime). `-movflags +faststart`.
-- Audio: copy AC-3 / E-AC-3 / AAC / ALAC / PCM; decode MP2/MP1/DTS to
+- Audio: copy AC-3 / E-AC-3 / AAC / ALAC / PCM; decode MP2/MP1/MP3/DTS
+  (QuickTime-unplayable) and FLAC/Opus/Vorbis/TrueHD (not MOV-copyable) to
   `pcm_s16le`.
+- **Audio track policy** (QTFF audit 5-2): distinct channel layouts are
+  distinct deliverables — never silently collapsed. Duplicate layouts are
+  curated (lossless > lossy-high > lossy-low within a layout; earlier track
+  wins ties). Every drop is announced with its deciding rule in the pre-flight
+  KEEP/DROP manifest; curation decisions are auditable — **no silent mapping
+  decisions anywhere**. `mov.sh` defaults to `layouts`; `remux.sh` defaults to
+  `first` (historical); the multi-track shape carries PCM access tracks and
+  states plainly that non-native originals are not preserved in that file
+  (single-layout original preservation = `dual-track.sh`).
 - **Default deliverable is a dual-track MOV**: PCM "access" track first/default
   (always plays in QuickTime) + the original audio copied bit-exact as track 2.
   Non-destructive; never overwrite the source. Lossy sources → `pcm_s24le` with
