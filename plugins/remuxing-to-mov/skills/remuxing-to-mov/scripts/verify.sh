@@ -278,21 +278,59 @@ else
       if(NR<2) exit; step=(NR-1)/n; if(step<1)step=1;
       for(i=1; c<n; i+=step){ idx=int(i); if(idx<1)idx=1; if(idx+1>NR) break;
         kfb=a[idx]; nxt=a[idx+1]; if(nxt>kfb){c++; printf "%.3f %.3f\n", kfb, (nxt-kfb)/2} }}')
+  # fast input-seek to the preceding keyframe, then ACCURATE output-seek to the
+  # non-keyframe midpoint (-ss after -i): a player landing mid-GOP via the index.
+  scrub_lines () {  # $1 file, $2 fast-seek keyframe, $3 accurate-seek offset, $4 threads ("" = default)
+    ffmpeg -nostdin -v error ${4:+-threads "$4"} -ss "$2" -i "$1" -ss "$3" -t 4 -map 0:v:0 -f null - 2>&1 || true
+  }
+  count_all () { printf '%s\n' "$1" | grep -c . || true; }
+  count_mux () { printf '%s\n' "$1" | grep -c '^\[null @' || true; }
   serr=0; ntests=0
   while read -r kfb delta; do
     [ -n "$kfb" ] || continue
     ntests=$((ntests+1))
-    # fast input-seek to the preceding keyframe, then ACCURATE output-seek to the
-    # non-keyframe midpoint (-ss after -i): a player landing mid-GOP via the index.
-    e=$(ffmpeg -nostdin -v error -ss "$kfb" -i "$OUT" -ss "$delta" -t 4 -map 0:v:0 -f null - 2>&1 | grep -c . || true)
-    serr=$((serr + e))
+    serr=$((serr + $(count_all "$(scrub_lines "$OUT" "$kfb" "$delta" "")") ))
   done <<EOF
 $samples
 EOF
   echo "   off-keyframe accurate seeks: $ntests point(s), $serr decode error(s) (want 0)"
   if [ "${serr:-0}" -gt 0 ]; then
-    verdict=FAIL
-    note="${note:+$note }Scrub gate: $serr decode error(s) on off-keyframe seeks — the timeline tears on scrub (silent-corruption signature). Route via diagnose.sh (pairfill-paff.sh for half-timestamped PAFF, rebuild-paff.sh otherwise). NEVER explain this away by replicating the errors on the source: two independent defects share this symptom, and inherent decode noise MASKS a broken container timeline (post-mortem 2026-07-25). The timeline must be independently proven — gate (d) above, MKV strict-mux, framemd5 presentation order (--full)."
+    # QTFF audit 5-4b: before scoring, (1) recount BOTH sides deterministically —
+    # threaded decode jitters corruption-noise line counts (probe 2026-07-26:
+    # 19 vs 17 on the SAME file), so the comparison is honest only at
+    # -threads 1 (a zero recount = the fast-pass lines were load strays, the
+    # same doctrine as gate (c)'s confirm-min); (2) classify lines — decoder-
+    # class vs muxer-stage ('[null @' = the harness's own null muxer objecting
+    # to what it is fed, e.g. duplicate DTS on ms-quantized sources — a
+    # harness-artifact class, not a torn picture); (3) baseline-subtract the
+    # IDENTICAL seeks run on the untouched source. Fully reproduced lines with
+    # a clean (d) timeline -> REVIEW carrying the evidence. Any excess over
+    # the source, or a dirty (d), keeps the FAIL: inherent noise can MASK a
+    # broken container timeline (post-mortem 2026-07-25).
+    o_tot=0; o_mux=0; b_tot=0; b_mux=0
+    while read -r kfb delta; do
+      [ -n "$kfb" ] || continue
+      ol=$(scrub_lines "$OUT" "$kfb" "$delta" 1); bl=$(scrub_lines "$SRC" "$kfb" "$delta" 1)
+      o_tot=$((o_tot + $(count_all "$ol") )); o_mux=$((o_mux + $(count_mux "$ol") ))
+      b_tot=$((b_tot + $(count_all "$bl") )); b_mux=$((b_mux + $(count_mux "$bl") ))
+    done <<EOF
+$samples
+EOF
+    o_dec=$((o_tot - o_mux)); b_dec=$((b_tot - b_mux))
+    d_dec=$((o_dec - b_dec)); d_mux=$((o_mux - b_mux))
+    echo "   deterministic recount (-threads 1), identical seeks on both files:"
+    echo "     decoder-class:     source: $b_dec / output: $o_dec / delta: $d_dec"
+    echo "     muxer-stage(null): source: $b_mux / output: $o_mux / delta: $d_mux"
+    if [ "$o_tot" -eq 0 ]; then
+      echo "   scrub classification: deterministic recount clean — fast-pass lines were load strays."
+    elif [ "${DCLEAN:-0}" -eq 1 ] && [ "$d_dec" -le 0 ] && [ "$d_mux" -le 0 ]; then
+      [ "$verdict" = FAIL ] || verdict=REVIEW
+      echo "   scrub classification: all lines reproduce on the source and (d) is clean — inherited/harness noise (REVIEW)."
+      note="${note:+$note }Scrub-gate lines reproduce on the untouched source under identical accurate seeks (decoder source: $b_dec / output: $o_dec; muxer-stage source: $b_mux / output: $o_mux; deterministic -threads 1 counts) with a clean (d) timeline — capture-inherited decode noise / harness-stage artifacts, not a torn timeline. The timeline is independently proven by (d); complete the proof set (MKV strict-mux + --full presentation order) for archival sign-off."
+    else
+      verdict=FAIL
+      note="${note:+$note }Scrub gate: $o_tot deterministic decode error(s) on off-keyframe seeks (decoder delta $d_dec, muxer-stage delta $d_mux vs source; (d) clean=${DCLEAN:-0}) — the timeline tears on scrub (silent-corruption signature). Route via diagnose.sh (pairfill-paff.sh for half-timestamped PAFF, rebuild-paff.sh otherwise). NEVER explain this away by replicating the errors on the source alone: two independent defects share this symptom, and inherent decode noise MASKS a broken container timeline (post-mortem 2026-07-25). The timeline must be independently proven — gate (d) above, MKV strict-mux, framemd5 presentation order (--full)."
+    fi
   fi
 fi
 

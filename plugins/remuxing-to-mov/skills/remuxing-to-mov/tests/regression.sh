@@ -535,6 +535,32 @@ has "$kv" "PF_REORDER=" "probe --kv emits PF_REORDER"
 has "$kv" "PF_NOPTS_FRAC=" "probe --kv emits PF_NOPTS_FRAC"
 
 echo
+echo "== 20. QTFF audit 5-4a/b: source-baseline calibration on gates (c)/(e) =="
+# Corrupt payload bytes in the back half of a faststart MOV (inside mdat; moov
+# is up front) and verify it against ITSELF: the "source" then reproduces the
+# decoder noise exactly (delta 0) while (d) stays clean — the calibrated gates
+# must classify capture-inherited (REVIEW with evidence), never FAIL and never
+# silent OK (mechanizes the XLVI/feed.mkv manual baseline moves; C69/C70
+# mechanics). A clean copy must still say OK (test 1) and a dirty (d) must
+# still FAIL (test 6) — calibration, not weakening.
+CRPT="$WORK/crpt.mov"
+cp "$CP" "$CRPT"
+csz=$(wc -c < "$CRPT" | tr -d ' ')
+for cfrac in 55 70 85; do
+  printf '\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377\377' | \
+    dd of="$CRPT" bs=1 seek=$((csz * cfrac / 100)) conv=notrunc 2>/dev/null
+done
+out=$(bash "$SC/verify.sh" "$CRPT" "$CRPT" 2>&1); rc=$?
+has "$out" "source-baseline (identical windows): source:" "gate (c) runs the source baseline on nonzero counts"
+has "$out" "delta: 0" "identical bits -> delta 0"
+has "$out" "spot-check classification: source reproduces the counts" "gate (c) classifies inherited noise after (d)"
+has "$out" "deterministic recount (-threads 1)" "gate (e) recounts deterministically before scoring"
+has "$out" "muxer-stage(null)" "gate (e) splits decoder-class from muxer-stage lines"
+has "$out" ">> REVIEW" "reproduced noise + clean (d) -> REVIEW with evidence"
+hasnt "$out" ">> FAIL" "reproduced noise no longer hard-FAILs (calibrated, not weakened)"
+[ "$rc" -eq 0 ] && ok "calibrated REVIEW exits 0 (house exit codes intact)" || no "calibrated REVIEW exit $rc"
+
+echo
 echo "===================================================================="
 echo "  PASSED: $pass    FAILED: $fail"
 echo "===================================================================="

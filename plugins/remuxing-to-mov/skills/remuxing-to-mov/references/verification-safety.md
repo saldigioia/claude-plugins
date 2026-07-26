@@ -172,6 +172,20 @@ The acceptance discipline that failed in the 2026-07-25 incident, now doctrine:
   explaining the failure. A reclassification to "inherent" requires (a)
   **matching** error counts on the same windows of the source — 9 vs 5 does not
   match — and (b) the container timeline independently proven clean.
+  *Automated* (QTFF audit 5-4a/b): on a nonzero count, gates (c)/(e) rerun the
+  identical stage against the source and print `source: N / output: N /
+  delta: D`. Gate (e) first recounts both sides at `-threads 1` — threaded
+  decode jitters corruption-noise line counts (19 vs 17 measured on the same
+  file), so only deterministic counts are compared, and a zero recount means
+  the fast-pass lines were load strays (gate (c)'s confirm-min doctrine) — and
+  splits **decoder-class** lines from **muxer-stage** `[null @ …]` lines (the
+  scrub harness's own null muxer objecting to its feed, e.g. duplicate-DTS
+  complaints on ms-quantized sources — a harness artifact, not a torn
+  picture; C69). Delta ≤ 0 with (d) clean downgrades to REVIEW **carrying the
+  evidence** — never a silent OK; archival sign-off still requires the proof
+  set (MKV strict-mux + `--full` presentation order). Any excess over the
+  source, or a dirty (d), keeps the FAIL (C70: only the delta indicts the
+  pipeline).
 - **A scrub-gate FAIL is never cleared by source replication alone.** The
   timeline must be proven with the gate table below.
 - **Thumbnail render ≠ playable.** `playable-check.sh` proves ONE frame
@@ -190,7 +204,7 @@ The acceptance discipline that failed in the 2026-07-25 incident, now doctrine:
 | Sample-duration histogram (verify.sh d) | one/two adjacent values only (e.g. 1501+1502), ±1 count |
 | Presentation order (verify.sh --full) | framemd5 sequence of decoded output == source |
 | MKV strict-mux of the OUTPUT | PASS (even when the source itself fails it) |
-| Scrub gate (verify.sh e) | 0 decode errors, or counts matching the source per entry point |
+| Scrub gate (verify.sh e) | 0 decode errors, or deterministic (`-threads 1`) per-class counts matching the source under identical seeks, with (d) clean |
 | A/V duration parity (verify.sh f) | Δ within 0.25 s, or the same Δ measured in the source |
 | Dual-track audio (verify.sh --audio) | original track md5 == source elementary; PCM access == decoded original |
 | playable-check.sh | OK — necessary, NOT sufficient (thumbnail only) |
