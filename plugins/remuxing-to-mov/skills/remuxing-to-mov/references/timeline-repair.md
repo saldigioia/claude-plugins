@@ -13,6 +13,7 @@ and `rebuild-paff.sh` are the executable forms of this file.
 - Repair ladder (genpts → elementary rebuild)
 - Field-rate / timescale table
 - The QuickTime "duration too long for timebase" error
+- MKV millisecond timebase → coarse MOV timescale (benign alternation)
 
 ## Identify the field structure
 
@@ -235,6 +236,42 @@ Common on MKV (millisecond timebase) sources. Set `-video_track_timescale` to a
 clean value (table above). If it persists after fixing the video track, the
 overflow is on another track — usually a `mov_text` subtitle inheriting the 1 ms
 timebase; sidecar the subtitle instead (see `color-hdr-subs.md`).
+
+## MKV millisecond timebase → coarse MOV timescale (benign alternation, not judder)
+
+Matroska quantizes timestamps to **1/1000 s**. A `-c copy` MKV→MOV keeps those
+ms-rounded timestamps, so the MOV muxer picks a **coarse video timescale**
+(probed 2026-07-26, ffmpeg 8.1.2: `1/16000` for a 23.976p MKV) and the `stts`
+shows **alternating durations** — 672/656 ticks = the source's own 42/41 ms
+rounding, ±0.5 ms around the true 41.7 ms frame. The alternation is
+**source-baked**: it is already in the MKV's timestamps, it is imperceptible,
+and it is NOT judder introduced by the remux (C68; fixture pin lands with the
+audit's 5-4g item).
+
+Two possible responses, and only one is ever legitimate:
+
+- **Conventionality fix (cosmetic, optional):** `remux.sh --timescale <base>`
+  sets `-video_track_timescale` to the conventional base — `probe.sh`'s
+  ms-timebase advisory detects the 1/1000 source and computes the hint
+  (`PR_MS_TB` / `PR_TS_HINT`, e.g. 24000). Probed 2026-07-26: video packets
+  bit-identical through it (streamhash match), and the same 42/41 ms durations
+  simply re-expressed as 1008/984 ticks — the timescale becomes conventional,
+  the source-baked alternation remains, because it lives in the timestamps,
+  not the base.
+- **NEVER a constant-rate restamp.** "Smoothing" the alternation means
+  restamping every packet, and on a reorder-pyramid stream that sets
+  presentation order = decode order — shuffled motion (Rung 3's scope limit
+  above). `diagnose.sh`'s prohibition applies unchanged: cosmetic ms-rounding
+  is never worth a broken presentation order.
+
+Do not confuse this with the **duplicate-DTS collapse** in the taxonomy above
+(a field-coded stream on a non-integer timebase collapsing adjacent fields onto
+the *same* DTS): the benign class keeps DTS strictly monotonic with two
+adjacent duration values; the defect class shows equal DTS and floods
+`dts X >= X`. Likewise, scrub-harness null-muxer complaints on ms-quantized
+sources that reproduce identically on the untouched source are harness
+artifacts, not a torn timeline (C69) — `verify.sh` gate (e) classifies them,
+and the timeline is then proven by the (d) + strict-mux + `--full` triple.
 
 ## Discontinuous source — the gap-collapse audio desync
 
