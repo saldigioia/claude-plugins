@@ -34,7 +34,20 @@ Detect: `ffprobe -v error -select_streams v:0 -show_entries stream=is_avc,nal_le
 | DV/DVCPRO | Yes | Legacy; QuickTime yes, iOS no |
 | Dolby Vision HEVC | Yes (ffmpeg ≥5.0, single-layer) | ffmpeg ≥5.0 preserves single-layer DV (P5/P8) on `-c copy` with `-tag:v hvc1`; **dual-layer P7 (FEL)** needs conversion to P8.1 or keep MKV. See `color-hdr-subs.md`. |
 | AV1 | **No (ffmpeg)** | ffmpeg's mov muxer hard-rejects (`av1 only supported in MP4 and AVIF`; no `-strict` escape — verified on 8.1.1). ffmpeg policy, not a container limit — see "What ffmpeg's MOV muxer refuses" below. Remux to **MP4** (tag `av01`) or keep MKV; never re-encode the video to force MOV. |
-| Legacy QT codecs (Cinepak `cvid`, Sorenson `svq3`, …) | Yes (container) | Deprecated since macOS Catalina — AVFoundation won't decode QuickTime 7-era codecs, so the file is valid but unplayable. Rung 4: transcode to ProRes/H.264 for a playable copy; keep the original as master. Detect: `ffprobe -v error -show_entries stream=codec_name -of csv=p=0 IN \| grep -E 'cinepak\|svq'` |
+| Legacy QT codecs (Cinepak `cvid`, Sorenson `svq3`, …) | Yes (container) | Deprecated since macOS Catalina — AVFoundation won't decode QuickTime 7-era codecs, so the file is valid but unplayable. Rung 4: transcode to ProRes/H.264 for a playable copy; keep the original as master. Detect: `ffprobe -v error -show_entries stream=codec_name -of csv=p=0 IN \| grep -E 'cinepak\|svq\|mjpeg\|icod'` (mjpeg/icod: version-drift risks, see below) |
+
+### Decode support is a moving target — macOS version drift
+
+A playable-check verdict is a property of the **OS it ran on**, not of the file
+(C63) — `playable-check.sh` stamps its result line with `sw_vers` for exactly
+this reason. macOS updates can revoke playability of previously-passing files;
+the lossless original stays master and playable copies are re-derivable
+(Rung 4 via `scripts/rung4.sh`). Known drift:
+
+| Codec | Drift | Evidence |
+|-------|-------|----------|
+| Motion JPEG (`jpeg` in MOV) | Certain MOV variants dropped in Tahoe 26.4 (July 2026 sweep, forum-corroborated) | Probed 2026-07-26 on macOS 26.5.2 (post-drop): ffmpeg's **4:2:0** mjpeg-in-MOV still renders via AVFoundation (playable-check OK); the **4:2:2** variant renders **no frame — and hangs qlmanage** (no thumbnail after 2+ min), so on dropped variants playable-check may STALL rather than fail fast. Variant-scoped, exactly as reported. QuickTime-Player GUI confirmation pending. |
+| Apple Intermediate Codec (`icod`) | Dropped in Tahoe 26.4 | Restorable by installing Apple's Pro Video Formats (ProApps legacy codecs) package: <https://support.apple.com/en-us/106396>. No ffmpeg encoder exists, so a synthesized probe is blocked-on-artifact (recorded in C63). |
 
 ## Audio codec → MOV (the forced-decode matrix)
 

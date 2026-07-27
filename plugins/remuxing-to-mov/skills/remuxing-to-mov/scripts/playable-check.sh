@@ -30,17 +30,23 @@ if [ "$(uname -s)" != Darwin ]; then
   exit 3
 fi
 command -v qlmanage >/dev/null 2>&1 || { echo "playable-check: SKIP — qlmanage not found."; exit 3; }
+# QTFF audit 5-1c (C63): the verdict is a property of the OS it ran on — decode
+# support drifts across macOS versions (Tahoe 26.4 dropped MJPEG variants/AIC),
+# so every recorded check self-dates its OS. Annotation only; no logic change.
+OSV=$(sw_vers -productVersion 2>/dev/null || echo '?')
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 qlmanage -t -s 480 -o "$TMP" "$OUT" >/dev/null 2>&1 || true
 if ls "$TMP"/*.png >/dev/null 2>&1; then
-  echo "playable-check: OK — AVFoundation rendered a frame; QuickTime can open the video."
+  echo "playable-check: OK on macOS $OSV — AVFoundation rendered a frame; QuickTime can open the video."
   echo "  (audio playability for AC-3/E-AC-3/DTS is NOT proven by a thumbnail — listen if it matters.)"
   echo "  (FLOOR only: one frame decoding proves nothing about the timeline — a broken"
   echo "   timeline still thumbnails. Sign-off = verify.sh's gates, then a real scrub.)"
   exit 0
 else
-  echo "playable-check: FAIL — AVFoundation produced no frame; QuickTime likely can't decode this"
-  echo "  (e.g. 4:2:2 MPEG-2 or an untagged codec). A playable deliverable needs Rung 4 — see references/delivery-encode.md."
+  echo "playable-check: FAIL on macOS $OSV — AVFoundation produced no frame; QuickTime likely can't decode this"
+  echo "  (e.g. 4:2:2 MPEG-2, an untagged codec, or a macOS-version codec drop — see"
+  echo "  ingest-compatibility.md 'Decode support is a moving target'). A playable"
+  echo "  deliverable needs Rung 4 (scripts/rung4.sh) — recipes in references/delivery-encode.md."
   exit 1
 fi
