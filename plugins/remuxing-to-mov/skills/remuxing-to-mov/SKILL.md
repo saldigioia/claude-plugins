@@ -178,7 +178,10 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 ## House defaults (baked into the scripts)
 
 - Video: **always `-c copy`**. HEVC tagged **`hvc1`** (default `hev1` won't play
-  in QuickTime). `-movflags +faststart`.
+  in QuickTime). `-movflags +faststart` — knowing its cost: moov is still
+  written last, then a second full-file pass relocates it (~2× write I/O per
+  output; dominates multi-GB batches on external SSDs). The access copy is
+  what needs faststart; a shelved archival master does not.
 - Audio: copy AC-3 / E-AC-3 / AAC / ALAC / PCM; decode MP2/MP1/MP3/DTS
   (QuickTime-unplayable) and FLAC/Opus/Vorbis/TrueHD (not MOV-copyable) to
   `pcm_s16le`.

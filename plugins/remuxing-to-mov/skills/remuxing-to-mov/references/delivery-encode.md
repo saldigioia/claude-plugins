@@ -47,6 +47,15 @@ ProRes profiles: `0`=Proxy, `1`=LT, `2`=422, `3`=422 HQ, `4`=4444, `5`=4444 XQ
 verified empirically on ffmpeg 8.1.1 (2026-06-10): profiles 0–5 produce exactly
 these stsd tags.*
 
+## Cross-check: avconvert (AVFoundation ground truth)
+
+On macOS, `/usr/bin/avconvert` (`--preset` list via `--help`) transcodes with
+AVFoundation itself — the same stack QuickTime plays with — so it is the ground
+truth to compare a Rung-4 ffmpeg encode against when playability is disputed.
+Caveats: only **one video + one audio track survive**, the output **extension
+picks the container type**, and it refuses protected content. `doctor.sh`
+reports its presence.
+
 ## Footprint minimization
 
 - Decode the **single** offending stream, not the file (e.g. MP2→PCM is audio-only).

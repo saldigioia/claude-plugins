@@ -40,6 +40,7 @@ OS=$(uname -s 2>/dev/null || echo unknown); ARCH=$(uname -m 2>/dev/null || echo 
 HWA=""; [ "$FFMPEG" = yes ] && HWA=$(ffmpeg -hide_banner -hwaccels 2>/dev/null || true)
 VTB=no; grep -qiw videotoolbox <<<"$HWA" && VTB=yes
 T_MINFO=$(have_bin mediainfo); T_MP4BOX=$(have_bin MP4Box); T_MP4DUMP=$(have_bin mp4dump)
+T_AVCONV=$(have_bin avconvert)   # macOS: AVFoundation's own transcoder (QTFF audit 5-5d)
 
 # REQUIRED to do anything useful; RECOMMENDED degrades a specific check if absent.
 required_ok=yes
@@ -94,6 +95,7 @@ fi
 echo "  mediainfo        : $([ "$T_MINFO" = yes ] && echo present || echo absent)   [optional: field-structure detail]"
 echo "  MP4Box (GPAC)    : $([ "$T_MP4BOX" = yes ] && echo present || echo absent)   [optional: container validate/inspect]"
 echo "  mp4dump (Bento4) : $([ "$T_MP4DUMP" = yes ] && echo present || echo absent)   [optional: atom dump]"
+[ "$T_AVCONV" = yes ] && echo "  avconvert        : present   [optional: AVFoundation ground truth for Rung-4 comparisons — one video + one audio track survive, extension picks output type, no protected content]"
 echo
 case "$status" in
   READY)    echo ">> READY — all required and recommended capabilities present." ;;

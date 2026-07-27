@@ -62,6 +62,16 @@ copy ffmpeg writes `colr` by default but does **not** write `fiel`.
 - ≥1 `mdat` with payload
 - streaming: `moov` before `mdat` (`-movflags +faststart`)
 
+**faststart's cost (QTFF audit 5-5a):** ffmpeg still writes `moov` LAST, then a
+second pass relocates it to the front — the muxer's own log says so
+(`Starting second pass: moving the moov atom to the beginning of the file`,
+probed 2026-07-26 on 8.1.2) — and moving `moov` shifts every `mdat` byte, so
+the pass rewrites the whole file: **~2× write I/O per output**. Irrelevant on a
+small file; on multi-GB masters over external SSDs it dominates batch
+throughput. Faststart buys progressive/network start — which the **access
+copy** needs, not the archival master sitting on a shelf; consider scoping it
+accordingly on large batches.
+
 ## Validation checks
 
 ```
@@ -98,6 +108,9 @@ mp4dump -a file.mov | grep -E 'ftyp|moov|mdat|avcC|hvcC|colr'
 - **Truncated `moov`:** without a complete sample table the file cannot be
   decoded; there is no in-place fix. Recovery means a donor file with identical
   encode parameters (untrusted) or salvaging the raw elementary stream.
+- **Compressed `moov` (`cmov`):** early-QuickTime files may carry a
+  zlib-compressed movie atom — the symptom is a confusing/truncated `mp4dump`.
+  ffmpeg reads it transparently, so a stream-copy remux IS the normalization.
 
 ## QuickTime metadata (mdta) vs the legacy ©-atoms
 

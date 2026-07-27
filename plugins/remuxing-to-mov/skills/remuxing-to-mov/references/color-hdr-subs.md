@@ -18,7 +18,25 @@ or mangled in the handoff. Facts below verified on ffmpeg 6.1.1 (2026-06-03).
 ffmpeg -nostdin -i IN -map 0:v:0 -map 0:a:0 -c copy -movflags +faststart -f mov OUT.mov
 ```
 
-## HDR
+## Pre-2010 exports: the QT gamma era (`gama`)
+
+Before `nclc`/`colr` tagging was universal, QuickTime exports carried a legacy
+`gama` atom (a single fixed-point gamma value) inside the video sample entry —
+and players applied it. An old master carrying `gama` with **no** `nclc` can
+render **dark or washed** in a modern pipeline compared to an nclc-tagged copy,
+because the gamma hint and the assumed transfer disagree; modern `colr`
+signaling supersedes the mechanism entirely. Ingest side (QTFF audit 5-5b,
+C71):
+
+- `probe.sh` WARNs on `gama` presence (mp4dump scan, silent degrade without
+  Bento4) — probed 2026-07-26 on a real injected artifact (`mp4edit --insert`,
+  `[gama]` beside `pasp` in the `avc1` entry): `PR_GAMA=yes` + the WARN fire.
+- A `-c copy` remux **normalizes it away**: ffmpeg does not carry `gama` into
+  the new sample entry (probed: 0 `gama` atoms in the remux of the injected
+  fixture). If the source's rendering *depended* on the gamma hint, that
+  rendering difference is exactly what the C71 A/B (QuickTime, injected vs
+  clean) still has to measure — the write side ("never written alongside
+  `colr`") is the separate 3d half.
 
 - **HDR10:** primaries/transfer (BT.2020/PQ) carry in the bitstream and survive
   copy. Mastering-display (`mdcv`) and content-light (`clli`) metadata are kept

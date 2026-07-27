@@ -16,6 +16,12 @@
 # --signaling drift check) — not mov.sh, the deliverable builder. For the
 # dual-track PCM-access deliverable per file, run mov.sh on each instead;
 # `-- --audio pcm` here only changes the codec, not the track layout.
+#
+# THROUGHPUT (QTFF audit 5-5a): every output is written with +faststart, which
+# costs a second full-file pass (~2x write I/O per file — moov is written last,
+# then relocated). On multi-GB masters over external SSDs that second pass
+# dominates batch wall time; faststart is an access-copy need, not a
+# shelved-master need (see container-internals.md, "faststart's cost").
 # Exit: 0 if nothing FAILed, 1 otherwise.
 set -eu
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
