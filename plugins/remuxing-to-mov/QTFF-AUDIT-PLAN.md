@@ -324,6 +324,87 @@ catches the same class from the output side); playable-check only after OK
 all writers; parity/scrub measuring media durations and post-edit pts
 (edit-list-aware). Suite 122/122.
 
+**2026-07-26 round 5 — gap closure COMPLETE: Tahoe drift, audio-policy
+classifier, Rung-4 attestation, verification calibration** (ffmpeg 8.1.2,
+macOS 26.5.2/Darwin 25.5, bash 3.2.57, shellcheck 0.11.0; suite 122 → **176/176**;
+ledger 62 → 71 rows; commits `af9f4e5`..`7120e0c` + release):
+
+- **Gate decisions (operator, 2026-07-26):** ① Rung-4 attestation string;
+  ② waiver attestation string; ③ `layouts` as mov.sh's default audio-keep
+  policy; ④ pairfill slack = 1 pair with the 16-pair excursion clamp;
+  ⑤ the combined probe.sh diff (5-2a manifest + 5-4e advisory + 5-5b gama +
+  5-5e stsd) as a unit. All five approved and shipped.
+- **5-2 DONE (audio policy)** — per-track manifest (`PR_AUD_*`),
+  `--audio-keep=all|first|layouts|<indices>` + `--timescale` in remux.sh,
+  mov.sh classifier consumes the full track set with `layouts` default
+  (stereo+5.1 both survive; duplicate layouts curated lossless > lossy-high >
+  lossy-low; every drop announced with its rule), dual-track.sh single-pair
+  scope announced + not-copyable-a:0 refusal, policy fixtures pinned, SKILL
+  policy rows. C64 CONFIRMED+REFINED (ffmpeg ALAC never rejects — silent
+  NEAREST-layout negotiation: 5.1(side)→5.1(back), 7.1→6.1/7ch drop; any
+  `--access-codec alac` must pin layouts); C66 structure half probed (tkhd
+  enabled/group 1-1-0 over groups 0/1/1 — proper alternate-group semantics).
+- **5-4 DONE (calibration)** — (a/b) source-baseline + line classification on
+  gates (c)/(e) with deterministic `-threads 1` recounts; (c) waiver sidecar
+  (`waiver.sh` + verify.sh consult: exact gate+counts+size+vhash+verbatim
+  attestation → exit 0 with loud `WAIVED(<gate>)` + `VERIFY_SUMMARY`; any
+  drift voids; essence gates never eligible); (d) pairfill C05 bound DERIVED —
+  `PREROLL + min(pair-ramp excursion, 16 pairs) + 1 pair`, floored at the old
+  limit (XLVI re-measured live: excursion +9009 = 3.00 pairs, deliverable
+  36036 admitted at 39039; wrong-cadence still refused); (e) ms-timebase
+  doctrine in timeline-repair.md with measured numbers (1/16000 inherited,
+  alternation source-baked); (f) retroactive-waiver need DISSOLVED — both
+  pre-protocol pairs (XLVI; the feed.mkv pair identified as Super Bowl
+  XLVIII 2014) now REVIEW-with-evidence exit 0 under the calibrated gates,
+  XLVIII reproducing the transcript's 152 muxer-stage lines mechanically at
+  delta 0; (g) fixtures: waiver round-trip pinned, b-pyramid fixture
+  (maxoff 54054 > old limit 36036, admitted at 57057, order preserved),
+  ms-advisory pins. C67/C68/C69/C70 all CONFIRMED; C46 CONFIRMED earlier in
+  the round on the first real >4 GiB deliverable (co64 ×3 traks).
+- **5-3 DONE (attestation)** — rung4.sh is the only sanctioned re-encode path
+  (verbatim attestation via lib-attest.sh, never echoed, near-miss refused;
+  mdta provenance round-trip-verified; never overwrites); verify.sh
+  master-purity check (video-scoped x264/x265/Lavc signatures; recognizes
+  stamped derivatives; WARN on introduced signatures; dual-track audio can
+  never trip it — pinned); SKILL.md doctrine (diagnostic obligation +
+  evidence-block shape with the two July 2026 transcripts as exemplars;
+  Rung-4 protocol with the audio exemption stated; honest tripwire limit);
+  mov/SKILL.md sole-route line.
+- **5-1 DONE (Tahoe drift)** — drift subsection + `mjpeg|icod` detection grep;
+  C57 annotated (forum evidence annotates, never flips); playable-check
+  self-dates its OS. **First-party 5-1e finding:** on 26.5.2 (post-drop),
+  MJPEG-in-MOV **yuvj420p renders, yuvj422p renders NO frame and HANGS
+  qlmanage ≥2 min** — the variant-scoped drop reproduced on the AVFoundation
+  stack; playable-check can STALL rather than fail fast on dropped variants.
+  C63 row recorded UNVERIFIED with the data point.
+- **5-5 DONE (small closures)** — faststart second-pass cost documented ×3
+  (muxer log line captured); gama "QT gamma era" subsection + C71 row with
+  the detection half probed (mp4edit-injected `gama` beside `pasp`;
+  `PR_GAMA=yes` + WARN; `-c copy` drops it — normalization verified); cmov
+  note; avconvert doctor line + delivery-encode cross-check. **5-5e executed
+  against C61, not C26** — the addendum's "C26" is a digit transposition
+  (C26 = HDR10-SEI, untouched); recorded verbatim in the C61 row.
+- **Plan defects found at execution:** the 5-5e C26/C61 transposition (above);
+  no others. Session bugs caught by probe before commit: bash-3.2
+  `$(awk "…\"…")`-in-quotes parse bug in the pairfill excursion echo (the
+  round-1 5f class, precomputed); rung4 `.part` extension hiding the mux
+  format; a `2>&1 >>` redirection-order slip in the C69 line-set capture.
+- **Ledger census at close:** 71 rows — 36 CONFIRMED, 2 REFUTED,
+  2 REFINED, 1 BUG-found-and-fixed, 30 UNVERIFIED (all blocked-with-reason:
+  artifacts, GUI/listen sessions, or next-OS re-runs; nothing gating a
+  shipping decision).
+- **Carry-forwards (named):** C64/C65 ALAC `chan`+speaker-ident LISTEN session
+  (still blocks the 5-2e `--access-codec alac` flag); C66 GUI half (is the
+  alternate selectable?); C63 — re-run the MJPEG pair after the next macOS
+  update, QuickTime-Player GUI check of the 422 file, AIC artifact leg, and
+  consider a playable-check timeout guard against the qlmanage stall; C71 A/B
+  rendering half (GUI); C61 DV sample-entry probes (needs real DV artifacts);
+  XLVI + XLVIII archival sign-off (`--full` + MKV strict-mux — both currently
+  REVIEW-with-evidence); 5h real-PAFF fixture (blocked on the S34E12
+  re-download; the 5-4g b-pyramid fixture covers the frame-coded half only);
+  3c captions (needs a CC-bearing capture); C25 range note (MKV `range=tv`
+  cannot ride QTFF nclc — `--signaling` REVIEWs by design, pre-existing).
+
 ## Execution order & exit criteria
 
 Run 0 → 1 → 4a/3b (the two suspected live bugs jump the queue after Phase 1)

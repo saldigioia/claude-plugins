@@ -52,6 +52,12 @@ re-encodes video or touches the source; exit codes `0` = verified, `10` = REVIEW
   in-order, so all are checked.
 - **Safety rails** — atomic output (`.part` → `mv`), refusal to overwrite the
   source in place, intermediates never auto-deleted, `-nostdin` everywhere.
+- **Attested re-encodes + recorded waivers** — `rung4.sh` is the only
+  sanctioned re-encode path: it refuses without the operator's verbatim
+  attestation and stamps QuickTime `mdta` provenance so a derivative can never
+  masquerade as a master (`verify.sh` scans for exactly that). A gate failure
+  whose independent proofs all pass can be recorded in an operator-attested
+  `*.waiver.json` sidecar — one file, one exact signature; any drift voids it.
 
 ## Layout
 
@@ -61,7 +67,7 @@ skills/remuxing-to-mov/
   scripts/                 doctor, probe, diagnose, mov + auto (one-shot drivers),
                            remux, pairfill-paff, rebuild-paff, resync, dual-track,
                            metadata, verify, batch, gop-probe, seam-check,
-                           playable-check
+                           playable-check, rung4 (attested re-encode), waiver
   references/              codec/container tables, timeline repair, color/HDR,
                            cutting/concat, dual-track QC, container internals
   examples/                worked driver scripts from a real broadcast job
