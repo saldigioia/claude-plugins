@@ -710,6 +710,43 @@ else
 fi
 
 echo
+echo "== 23. QTFF audit 5-3: rung4 attestation gate + provenance; master-purity scoping =="
+# rung4.sh is the ONLY sanctioned re-encode path: no attestation -> refused;
+# near-miss -> refused; exact string -> encodes with mdta provenance; existing
+# outputs never overwritten. verify.sh's master-purity check recognizes the
+# stamped derivative, WARNs on an introduced signature, and its video-only
+# scoping means dual-track access audio (Lavc) can never trip it.
+R4="$WORK/r4.mp4"
+REMUX_ATTEST="" bash "$SC/rung4.sh" "$S" "$R4" --profile h264 >/dev/null 2>&1; rc=$?
+{ [ "$rc" -eq 2 ] && [ ! -f "$R4" ]; } && ok "rung4 with no attestation -> refused (exit 2), nothing written" || no "no-attest not refused (rc=$rc)"
+bash "$SC/rung4.sh" "$S" "$R4" --profile h264 --attest "${RTM_RUNG4_ATTEST%.}" >/dev/null 2>&1; rc=$?
+{ [ "$rc" -eq 2 ] && [ ! -f "$R4" ]; } && ok "near-miss attestation (trailing period dropped) -> refused" || no "near-miss accepted (rc=$rc)"
+o=$(bash "$SC/rung4.sh" "$S" "$R4" --profile h264 --attest "$RTM_RUNG4_ATTEST" 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && [ -f "$R4" ]; } && ok "exact attestation -> encodes (exit 0)" || no "exact string refused (rc=$rc)"
+has "$o" "RE-ENCODE" "rung4 announces the derivative status loudly"
+tags=$(ffprobe -v error -show_entries format_tags -of default=noprint_wrappers=1 "$R4" 2>/dev/null)
+for pk in "rung4.source=src.ts" "rung4.profile=h264" "rung4.reencoded-with-attestation=yes"; do
+  case "$tags" in *"com.apple.quicktime.$pk"*) ok "provenance key $pk present";; *) no "provenance key $pk missing";; esac
+done
+if command -v mp4dump >/dev/null 2>&1; then
+  mp4dump "$R4" 2>/dev/null | grep -q mdta && ok "mp4dump: mdta handler present (proper QuickTime keys)" \
+    || no "mdta handler missing from the ilst"
+else
+  echo "  (skip: mp4dump unavailable for the ilst check — ffprobe round-trip covered above)"
+fi
+bash "$SC/rung4.sh" "$S" "$R4" --profile h264 --attest "$RTM_RUNG4_ATTEST" >/dev/null 2>&1; rc=$?
+[ "$rc" -eq 2 ] && ok "existing output never overwritten (master-collision rule)" || no "overwrote an existing output (rc=$rc)"
+o=$(bash "$SC/verify.sh" "$S" "$R4" 2>&1) || true
+has "$o" "DECLARES itself a rung4 derivative" "purity check recognizes the stamped derivative"
+M2P="$WORK/m2pure.ts"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v mpeg2video -pix_fmt yuv420p -f mpegts "$M2P"
+ff -i "$M2P" -c:v libx264 -preset ultrafast -pix_fmt yuv420p "$WORK/m2re.mov"
+o=$(bash "$SC/verify.sh" "$M2P" "$WORK/m2re.mov" 2>&1) || true
+has "$o" "MASTER-PURITY WARN" "introduced x264 signature -> purity WARN"
+o=$(bash "$SC/verify.sh" "$AUD_X" "$WORK/m_x.mov" 2>&1) || true
+hasnt "$o" "MASTER-PURITY WARN" "dual-track access audio (Lavc) never trips the video-scoped check"
+
+echo
 echo "===================================================================="
 echo "  PASSED: $pass    FAILED: $fail"
 echo "===================================================================="
