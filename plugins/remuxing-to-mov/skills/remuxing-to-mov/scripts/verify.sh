@@ -379,6 +379,40 @@ else
   fi
 fi
 
+echo "-- master-purity (video-stream writing-library signatures) --"
+# QTFF audit 5-3c: a file presented as copy-lineage whose VIDEO stream carries
+# an encoder writing-library signature (x264/x265/Lavc) has a re-encode in its
+# history. Scoped to the video stream ONLY — dual-track access audio
+# legitimately carries Lavc tags, and a whole-file scan would false-alarm on
+# every default deliverable. Informational WARN: it never changes the verdict
+# (the essence gates above decide losslessness); it changes what the file may
+# be CATALOGUED as. rung4.sh derivatives also carry mdta provenance keys.
+vsig () {  # $1 file -> comma list of video writing-library signatures ("" = none)
+  local f="$1" tag sei
+  tag=$(ffprobe -v error -select_streams v:0 -show_entries stream_tags=encoder -of default=nw=1:nk=1 "$f" 2>/dev/null | head -1)
+  case "$tag" in *x264*|*x265*|*Lavc*) : ;; *) tag="";; esac
+  sei=$(ffmpeg -nostdin -v error -i "$f" -map 0:v:0 -frames:v 60 -c copy -f mpegts - 2>/dev/null | \
+        LC_ALL=C grep -aoE 'x264|x265|Lavc' | sort -u | paste -sd, - || true)
+  printf '%s' "${tag:+$tag }${sei}"
+}
+osig=$(vsig "$OUT"); ssig=$(vsig "$SRC")
+r4tag=$(ffprobe -v error -show_entries format_tags=com.apple.quicktime.rung4.reencoded-with-attestation -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+if [ -z "$osig" ]; then
+  echo "   no writing-library signature in the output video — master-purity consistent."
+elif [ -n "$r4tag" ]; then
+  echo "   output video carries '$osig' and DECLARES itself a rung4 derivative (mdta"
+  echo "   provenance present) — a derivative, correctly marked. Not a master."
+elif [ -n "$ssig" ]; then
+  echo "   ** PURITY NOTE: output video carries '$osig' — also present in the source"
+  echo "      ('$ssig'), so it is inherited lineage, not remux damage. If this source is"
+  echo "      catalogued as a broadcast master, that catalog entry deserves a second look."
+else
+  echo "   ** MASTER-PURITY WARN: output video carries writing-library signature"
+  echo "      '$osig' that the source does NOT — a re-encode happened somewhere in this"
+  echo "      pipeline. Do not catalog this file as a master; the only sanctioned"
+  echo "      re-encode path is scripts/rung4.sh, which stamps mdta provenance."
+fi
+
 if [ "$FULL" -eq 1 ]; then
   if [ "$SRC_IS_H264" -eq 1 ]; then
     echo "-- (--full) whole-file decoded multiset + PRESENTATION ORDER (H.264) --"
