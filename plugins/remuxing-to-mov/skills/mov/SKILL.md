@@ -54,4 +54,7 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
 Use the exit code: `0` = DONE (verified lossless), `10` = REVIEW (written, wants a
 closer look), `1` = FAIL (nothing trustworthy produced). On REVIEW/FAIL, relay the
 script's stated reason. **Never** re-encode to force a pass — a scoped re-encode
-(Rung 4) is a human decision; point to `references/delivery-encode.md` instead.
+(Rung 4) is a human decision, and its **sole sanctioned route** is
+`skills/remuxing-to-mov/scripts/rung4.sh`, which refuses to run without the
+operator's verbatim attestation. Never hand-roll a re-encode around it; the
+attestation phrase must come from the operator, never from you.

@@ -74,10 +74,13 @@ Rung 3  Rebuild timeline from the elementary stream
         re-stamps at a constant rate (PTS=DTS), which plays a reordered stream
         in DECODE order (shuffled motion), so it now REFUSES those (use 3-PAIR).
         probe.sh/diagnose.sh route between 3-PAIR and 3 by timestamp profile.
-Rung 4  Re-encode (last resort)
+Rung 4  Re-encode (last resort)   scripts/rung4.sh IN --profile h264|hevc|prores
         only: QuickTime PLAYBACK of 4:2:2 MPEG-2 or Dolby Vision, or a
-        frame-exact cut at a non-keyframe. Minimize footprint. See
-        references/delivery-encode.md and references/cutting-concat.md.
+        frame-exact cut at a non-keyframe. Minimize footprint. rung4.sh is the
+        ONLY sanctioned route: it refuses without the operator's verbatim
+        attestation and stamps mdta provenance so the derivative can never
+        masquerade as a master. Recipes: references/delivery-encode.md;
+        smart-cut: references/cutting-concat.md.
 ```
 
 If `remux.sh` (Rung 0/1) plays back clean, you are done. If the file glitches or
@@ -110,6 +113,39 @@ timeline is *seekable*, and that gap is where PAFF corrupts silently. diagnose
 picks between 3-PAIR and 3 from the measured timestamp profile (untimestamped
 fraction + reorder scan). Detail and the manual commands live in
 `references/timeline-repair.md`.
+
+## Failure reporting & the Rung-4 protocol (doctrine — applies to the session running this skill)
+
+**Diagnostic obligation.** Before ANY failure is reported to the operator:
+`scripts/doctor.sh` and `scripts/probe.sh` have been run; every rung *below*
+the current one has been **executed, not considered**; and the report is shaped
+as an **evidence block** — the commands run, their actual output, the rung
+reached, and a falsifiable hypothesis. "It failed — want me to try X?" is a
+**forbidden shape**: it outsources the diagnosis the ladder exists to perform.
+The two July 2026 production transcripts (the Super Bowl XLVI PAFF session and
+the feed.mkv MPEG-2 4:2:2 session) are the canonical exemplars of the required
+report shape — measured counts, source baselines, and per-gate classification,
+never a bare symptom.
+
+**Rung-4 protocol.** Proposing a re-encode requires the Rungs 1–3 evidence
+blocks **in the same message** — a re-encode proposal without the lower rungs
+executed is an incomplete task, not a judgment call. The attestation phrase
+must originate **verbatim from the operator**: no paraphrase, no "yes"/"go
+ahead" substitutes, and it is never supplied on the operator's behalf —
+`scripts/rung4.sh` (the only sanctioned path) enforces the exact match and
+refuses near-misses. **Explicit exemption, stated here so it cannot be
+"clarified" away:** audio-only transforms are NOT Rung 4 — the existing
+PCM/AAC access-track paths (and ALAC if 5-2e ever ships it) decode audio as
+part of the lossless-video ladder and require no attestation; the attestation
+covers the *video* essence, which every other writer hard-guarantees `-c copy`.
+
+**Honest limit (recorded, not hidden):** the rung4.sh gate is a tripwire, not
+a wall — a hand-rolled ffmpeg invocation bypasses it. The depth of the defense
+is the evidence-block bar above (a session that must present Rungs 1–3
+evidence cannot casually propose a re-encode) plus `verify.sh`'s
+after-the-fact master-purity scan, which flags video writing-library
+signatures (x264/x265/Lavc) on any file presented as copy-lineage and
+recognizes properly-stamped rung4 derivatives by their mdta provenance.
 
 ## Instant answers (recurring symptom → rule)
 

@@ -9,6 +9,12 @@ into MOV, re-check `ingest-compatibility.md` and `timeline-repair.md` first.
 Always keep the lossless original (MKV or copy-MOV) as the master and produce
 these as separate derivatives.
 
+**Sanctioned route:** these recipes are wrapped verbatim by `scripts/rung4.sh`
+(profiles `h264`/`hevc`/`prores`), which requires the operator's exact
+attestation and stamps mdta provenance so the derivative can never masquerade
+as a master. Hand-rolling the commands below bypasses that tripwire and leaves
+the derivative unmarked — don't.
+
 ## H.264 delivery (MP4)
 
 ```
