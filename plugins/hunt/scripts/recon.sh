@@ -25,6 +25,10 @@
 #
 # Writes into the output directory:
 #   RECON.md            the dossier — classification, live hosts, branch routing
+#   recon.json          the same findings as machine-readable data (schema 1),
+#                       for handoff to another tool (e.g. wayback-archive's
+#                       bootstrap.py --from-recon). RECON.md is prose; this parses.
+#   commerce.txt        storefront fingerprint — platform, evidence, myshopify alias
 #   dns.txt             per-subdomain A/CNAME
 #   frontdoor.txt       apex + www headers and body head
 #   crtsh.txt           certificate-transparency host family
@@ -83,6 +87,24 @@ DEFAULT_PATHS=(
 die() { printf 'recon: %s\n' "$*" >&2; exit 1; }
 say() { printf '\033[1m%s\033[0m\n' "$*"; }
 note() { printf '  %s\n' "$*"; }
+
+# Count matching lines, always as EXACTLY ONE integer.
+#
+# `grep -c` prints its count and then exits 1 when the count is zero, so the
+# obvious `$(grep -c … || echo 0)` emits "0\n0" on no-match — which corrupts
+# every consumer, and produces literally invalid JSON in recon.json.
+gcount() {
+  local pat="$1" file="$2" n
+  [[ -f "$file" ]] || { printf '0'; return; }
+  n="$(grep -cE "$pat" "$file" 2>/dev/null)"
+  printf '%s' "${n:-0}"
+}
+gcounti() {
+  local pat="$1" file="$2" n
+  [[ -f "$file" ]] || { printf '0'; return; }
+  n="$(grep -ciE "$pat" "$file" 2>/dev/null)"
+  printf '%s' "${n:-0}"
+}
 
 usage() { sed -n '3,45p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
@@ -291,7 +313,7 @@ reverse_ip() {
   done <<< "$rows"
   # A big neighbour count means a shared registrar/CDN IP — unrelated tenants,
   # don't chase them. A small count means a dedicated box: the real footprint.
-  n="$(grep -cE '^[a-z0-9.-]+\.[a-z]{2,}$' "$OUTDIR/reverseip.txt" 2>/dev/null || echo 0)"
+  n="$(gcount '^[a-z0-9.-]+\.[a-z]{2,}$' "$OUTDIR/reverseip.txt")"
   printf '\n# %s neighbour names total — many = shared/parking IP (ignore); few = dedicated origin (chase)\n' \
     "$n" >> "$OUTDIR/reverseip.txt"
 }
@@ -343,6 +365,103 @@ except Exception: pass' 2>/dev/null)"
     curl -sS -A "$UA" --connect-timeout 15 --max-time 120 \
       "https://index.commoncrawl.org/$idx-index?url=*.$D&output=json&limit=500" 2>&1 | head -500
   } > "$OUTDIR/commoncrawl.txt"
+}
+
+# ── commerce fingerprint ─────────────────────────────────────────────────────
+# A dead STOREFRONT is the one Branch-C shape with a purpose-built pipeline
+# (the `wayback-archive` plugin), so it earns one extra read to detect.
+#
+# Two signals, deliberately in this order:
+#
+#   1. The ARCHIVED RECORD (free — cdx.txt is already on disk). Works when
+#      nothing is live, which is the whole point on a dead site. Commerce URL
+#      shapes and CDN hosts in the census are the strongest available tell.
+#   2. An HTML FINGERPRINT — live first, then the most-recent Wayback replay.
+#      Matched against the FULL document, not frontdoor.txt's 900-byte head:
+#      the Shopify tells sit in theme JS and preload tags well past byte 900.
+#
+# Echoes nothing; sets COMMERCE_* and writes commerce.txt.
+
+COMMERCE_PLATFORM=""     # shopify | swell | fourthwall | adidas | generic | ""
+COMMERCE_SOURCE=""       # cdx | live | wayback
+MYSHOPIFY_ALIAS=""
+
+commerce_probe() {
+  : > "$OUTDIR/commerce.txt"
+  local hits=0
+
+  # ── signal 1: the archived record ──
+  if [[ -s "$OUTDIR/cdx.txt" ]]; then
+    local n_prod n_coll n_cart n_shopcdn n_swell n_fourth
+    n_prod="$(gcounti '/products?/' "$OUTDIR/cdx.txt")"
+    n_coll="$(gcounti '/collections?/' "$OUTDIR/cdx.txt")"
+    n_cart="$(gcounti '/(cart|checkout)(/|\?|$)' "$OUTDIR/cdx.txt")"
+    n_shopcdn="$(gcounti 'cdn\.shopify\.com|/cdn/shop/' "$OUTDIR/cdx.txt")"
+    n_swell="$(gcounti 'cdn\.swell\.store' "$OUTDIR/cdx.txt")"
+    n_fourth="$(gcounti 'imgproxy\.fourthwall\.com' "$OUTDIR/cdx.txt")"
+    {
+      echo "## signal 1 — archived record (cdx.txt)"
+      printf '   /products/ %s · /collections/ %s · /cart|/checkout %s\n' "$n_prod" "$n_coll" "$n_cart"
+      printf '   shopify-cdn %s · swell-cdn %s · fourthwall-cdn %s\n' "$n_shopcdn" "$n_swell" "$n_fourth"
+    } >> "$OUTDIR/commerce.txt"
+
+    (( n_shopcdn > 0 )) && { COMMERCE_PLATFORM="shopify";    COMMERCE_SOURCE="cdx"; }
+    (( n_swell   > 0 )) && { COMMERCE_PLATFORM="swell";      COMMERCE_SOURCE="cdx"; }
+    (( n_fourth  > 0 )) && { COMMERCE_PLATFORM="fourthwall"; COMMERCE_SOURCE="cdx"; }
+    hits=$(( n_prod + n_coll + n_cart ))
+    if [[ -z "$COMMERCE_PLATFORM" ]] && (( hits >= 5 )); then
+      COMMERCE_PLATFORM="generic"; COMMERCE_SOURCE="cdx"
+    fi
+  else
+    echo "## signal 1 — archived record: no cdx.txt (census skipped or empty)" >> "$OUTDIR/commerce.txt"
+  fi
+
+  # ── signal 2: HTML fingerprint, live then archived ──
+  # A dead store answers nothing live, so the Wayback replay is not a fallback
+  # here so much as the expected path. `id_` is mandatory: without it the
+  # replay injects toolbar HTML and the signatures drown in Wayback's own markup.
+  local tmp="$OUTDIR/.commerce-body" url src
+  echo >> "$OUTDIR/commerce.txt"
+  echo "## signal 2 — HTML fingerprint" >> "$OUTDIR/commerce.txt"
+  for url in "https://$D/" "https://www.$D/" \
+             "https://web.archive.org/web/2id_/https://$D/" \
+             "https://web.archive.org/web/2id_/https://www.$D/"; do
+    case "$url" in *web.archive.org*) src="wayback" ;; *) src="live" ;; esac
+    curl -sS -A "$UA" -L --connect-timeout 10 --max-time 45 \
+         --max-filesize 2000000 "$url" -o "$tmp" 2>/dev/null
+    [[ -s "$tmp" ]] || continue
+
+    local plat=""
+    grep -qiE 'cdn\.shopify\.com|ShopifyAnalytics|Shopify\.shop[[:space:]]*=|shopify-checkout-api-token|/cdn/shop/(files|products)/' "$tmp" && plat="shopify"
+    [[ -z "$plat" ]] && grep -qiE 'cdn\.swell\.store' "$tmp" && plat="swell"
+    [[ -z "$plat" ]] && grep -qiE 'imgproxy\.fourthwall\.com|fourthwall\.com/api' "$tmp" && plat="fourthwall"
+    [[ -z "$plat" ]] && grep -qiE 'assets\.adidas\.com/images/' "$tmp" && plat="adidas"
+
+    if [[ -n "$plat" ]]; then
+      printf '   %s (%s) -> %s\n' "$url" "$src" "$plat" >> "$OUTDIR/commerce.txt"
+      # An HTML fingerprint is stronger evidence than a URL-shape count, so it
+      # overrides a `generic` guess — but never downgrades a named platform
+      # the census already proved via its own CDN host.
+      if [[ -z "$COMMERCE_PLATFORM" || "$COMMERCE_PLATFORM" == "generic" ]]; then
+        COMMERCE_PLATFORM="$plat"; COMMERCE_SOURCE="$src"
+      fi
+      # The .myshopify alias is the single most valuable thing to carry into
+      # the handoff: it is a whole extra host the storefront domain never reveals.
+      if [[ -z "$MYSHOPIFY_ALIAS" ]]; then
+        MYSHOPIFY_ALIAS="$(grep -oE '[a-z0-9-]+\.myshopify\.com' "$tmp" 2>/dev/null | head -1)"
+        [[ -n "$MYSHOPIFY_ALIAS" ]] && \
+          printf '   myshopify alias: %s\n' "$MYSHOPIFY_ALIAS" >> "$OUTDIR/commerce.txt"
+      fi
+      break
+    fi
+  done
+  rm -f "$tmp"
+
+  [[ -z "$COMMERCE_PLATFORM" ]] && echo "   (no storefront signature)" >> "$OUTDIR/commerce.txt"
+  {
+    echo
+    printf '## verdict: %s (source: %s)\n' "${COMMERCE_PLATFORM:-not-a-storefront}" "${COMMERCE_SOURCE:-none}"
+  } >> "$OUTDIR/commerce.txt"
 }
 
 # ── the four-way liveness read ───────────────────────────────────────────────
@@ -414,7 +533,12 @@ pick_probe_host() {
     for h in "www.$D" "$D"; do
       grep -q "^$h " "$OUTDIR/dns.txt" && { echo "$h"; return; }
     done
-    h="$(awk '{print $1}' "$OUTDIR/dns.txt" | grep -vE '^(mail|webmail|autodiscover|ftp)\.' | head -1)"
+    # dns.txt also carries `#` comment lines (the wildcard warning) and a
+    # literal `(no names resolved)` placeholder. Without a hostname-shape
+    # filter, awk happily returns `(no` and every later probe targets garbage.
+    h="$(awk '{print $1}' "$OUTDIR/dns.txt" \
+         | grep -E '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' \
+         | grep -vE '^(mail|webmail|autodiscover|ftp)\.' | head -1)"
     [[ -n "$h" ]] && { echo "$h"; return; }
   fi
   echo "$D"
@@ -424,7 +548,7 @@ pick_probe_host() {
 
 say "probe 1/6 — DNS triage"
 dns_triage
-note "$(grep -c . "$OUTDIR/dns.txt" 2>/dev/null || echo 0) names resolved"
+note "$(gcount . "$OUTDIR/dns.txt") names resolved"
 
 say "probe 2/6 — front door"
 front_door
@@ -452,7 +576,7 @@ PROBE_TARGET="$(pick_probe_host)"
 if $DO_LIVENESS; then
   say "liveness — four-way read against $PROBE_TARGET (serialized)"
   liveness "$PROBE_TARGET"
-  note "200: $(grep -cE '^2[0-9][0-9] ' "$OUTDIR/liveness.txt" 2>/dev/null || echo 0)  403: $(grep -cE '^40[13] ' "$OUTDIR/liveness.txt" 2>/dev/null || echo 0)  30x: $(grep -cE '^3[0-9][0-9] ' "$OUTDIR/liveness.txt" 2>/dev/null || echo 0)"
+  note "200: $(gcount '^2[0-9][0-9] ' "$OUTDIR/liveness.txt")  403: $(gcount '^40[13] ' "$OUTDIR/liveness.txt")  30x: $(gcount '^3[0-9][0-9] ' "$OUTDIR/liveness.txt")"
 else
   note "liveness read skipped (--no-liveness)"
 fi
@@ -461,11 +585,16 @@ if ((${#PIDS[@]})); then
   say "waiting on background probes"
   wait "${PIDS[@]}" 2>/dev/null
 fi
+
+# Runs last: its strongest signal is the CDX census, which only just landed.
+say "commerce fingerprint"
+commerce_probe
+note "${COMMERCE_PLATFORM:-not a storefront}${COMMERCE_SOURCE:+ (via $COMMERCE_SOURCE)}"
 echo
 
 # ── the dossier ──────────────────────────────────────────────────────────────
 
-cnt() { [[ -f "$1" ]] && grep -c . "$1" 2>/dev/null || echo 0; }
+cnt() { gcount . "$1"; }
 top() { [[ -f "$1" ]] && head -"${2:-12}" "$1" 2>/dev/null; }
 
 CDX_ROWS="$(cnt "$OUTDIR/cdx.txt")"
@@ -476,6 +605,11 @@ if [[ -n "$WILDCARD_IPS" ]]; then
   WILDCARD_NOTE="**YES → $WILDCARD_IPS** — a bogus name resolves, so \`[wildcard]\` rows below prove nothing. Confirm each host over HTTP before believing it exists."
 else
   WILDCARD_NOTE="no — a resolving subdomain is real evidence"
+fi
+if [[ -n "$COMMERCE_PLATFORM" ]]; then
+  STOREFRONT_NOTE="**YES — \`$COMMERCE_PLATFORM\`** (evidence: $COMMERCE_SOURCE${MYSHOPIFY_ALIAS:+; alias \`$MYSHOPIFY_ALIAS\`}). See \`commerce.txt\` and the handoff under Branch C."
+else
+  STOREFRONT_NOTE="no storefront signature — see \`commerce.txt\`"
 fi
 
 {
@@ -488,6 +622,7 @@ cat <<EOF
 - **SPA catch-all:** $CATCHALL
 - **Wildcard DNS:** $WILDCARD_NOTE
 - **Wayback rows:** $CDX_ROWS (of which $CDX_IMGS image URLs) — see \`cdx-pages.txt\` for completeness
+- **Storefront:** $STOREFRONT_NOTE
 
 > The archive is a map. The origin is the treasure. They are usually DISJOINT.
 > Dirs Wayback saw that are now 404 were **deleted**. Dirs that are **live but
@@ -596,6 +731,39 @@ EOF
     ;;
 esac
 
+# The storefront handoff is ORTHOGONAL to the A/B/C/D routing above, not a
+# fifth branch: a dead store is routinely PARKED *and* archive-only, or
+# REDIRECTED *and* still serving its CDN. So it prints on its own terms.
+if [[ -n "$COMMERCE_PLATFORM" ]]; then
+cat <<EOF
+
+## → Storefront detected: \`$COMMERCE_PLATFORM\` — hand off, do not hand-roll
+
+This is a **dead store**, which is the one recovery shape with a purpose-built pipeline: the
+\`wayback-archive\` plugin (CDX dump → index → filter → fetch → CDN discovery → match → download →
+normalize → build, with a SQLite ledger and an audit gate). Rebuilding a catalog by hand from
+\`cdx-images.txt\` throws away the product↔image association, which is the actual product.
+
+Evidence: \`$COMMERCE_SOURCE\`${MYSHOPIFY_ALIAS:+ · myshopify alias \`$MYSHOPIFY_ALIAS\`}. Detail in \`commerce.txt\`.
+
+Feed it **this** census rather than letting bootstrap re-derive a weaker one — its own host
+enumeration is a single bounded \`limit=5000\` sample, while the census above is
+\`matchType=domain\` across every subdomain and depth:
+
+\`\`\`bash
+python3 <wayback-archive>/scripts/bootstrap.py --from-recon "$OUTDIR/recon.json"
+
+# equivalent without the dossier, if you are on an older wayback-archive:
+python3 <wayback-archive>/scripts/bootstrap.py \\
+  --input "\$(awk '{print \$2}' "$OUTDIR/cdx-subdomains.txt" | paste -sd, -)"
+\`\`\`
+
+**Before assuming the images are gone:** on a dead storefront the CDN routinely outlives the
+store — probe the CDN paths, not the storefront subdomain. It is a tendency, not a guarantee.
+See \`registry/dead-shopify-storefronts.md\`, and record any negative with its disproving evidence.
+EOF
+fi
+
 cat <<EOF
 
 **Branch D — assets migrated to still-open cloud storage.** Grep the SPA JS and old
@@ -612,6 +780,86 @@ then list it: \`?list-type=2&prefix=\` on S3, \`?prefix=&max-keys=1000\` on GCS.
   **document dead ends with their disproving evidence** so nobody re-runs a proven-dead path.
 EOF
 } > "$OUTDIR/RECON.md"
+
+# ── recon.json — the machine-readable dossier ────────────────────────────────
+# RECON.md is prose with embedded code fences; nothing can parse it. This is the
+# contract another tool consumes (schema 1). Hosts carry the EVIDENCE that put
+# them here, because a consumer needs to tell a host proven by a CDX capture
+# from one that merely resolves under a wildcard.
+
+json_esc() { sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\r//g' -e 's/\t/ /g'; }
+
+# Emit `"host": "<h>", "evidence": [...]` rows. A host can be attested by more
+# than one probe, and more attestations means more confidence.
+hosts_json() {
+  local tmp="$OUTDIR/.hosts-agg"
+  : > "$tmp"
+  [[ -f "$OUTDIR/dns.txt" ]] && awk '/^[a-z0-9]/ && $0 !~ /\[wildcard\]/ {print $1" dns"}' "$OUTDIR/dns.txt" >> "$tmp"
+  [[ -f "$OUTDIR/dns.txt" ]] && awk '/\[wildcard\]/ {print $1" dns-wildcard"}' "$OUTDIR/dns.txt" >> "$tmp"
+  [[ -f "$OUTDIR/crtsh.txt" ]] && awk '/^[a-z0-9]/ {print $1" ct"}' "$OUTDIR/crtsh.txt" >> "$tmp"
+  [[ -f "$OUTDIR/cdx-subdomains.txt" ]] && awk 'NF==2 {print $2" cdx"}' "$OUTDIR/cdx-subdomains.txt" >> "$tmp"
+  [[ -n "$MYSHOPIFY_ALIAS" ]] && printf '%s myshopify-alias\n' "$MYSHOPIFY_ALIAS" >> "$tmp"
+
+  sort -u "$tmp" | awk '
+    { ev[$1] = ev[$1] (ev[$1] ? "," : "") "\"" $2 "\"" }
+    END {
+      n = 0
+      for (h in ev) {
+        printf "%s    { \"host\": \"%s\", \"evidence\": [%s] }", (n++ ? ",\n" : ""), h, ev[h]
+      }
+      if (n) printf "\n"
+    }'
+  rm -f "$tmp"
+}
+
+# Branches this run lit up — the same routing RECON.md printed, as data.
+branches_json() {
+  local out=""
+  case "${FD%%|*}" in LIVE|PARKED|REDIRECTED) out="\"A\"" ;; esac
+  case "${FD%%|*}" in SPA|REDIRECTED) out="${out:+$out, }\"B\"" ;; esac
+  case "${FD%%|*}" in DEAD|UNKNOWN|PARKED) out="${out:+$out, }\"C\"" ;; esac
+  printf '%s' "$out"
+}
+
+CDX_PAGES="$(sed -n 's/^# pages reported by CDX: \([^ ]*\).*/\1/p' "$OUTDIR/cdx-pages.txt" 2>/dev/null | head -1)"
+[[ "$CDX_PAGES" == "1" ]] && CDX_COMPLETE=true || CDX_COMPLETE=false
+grep -q 'CATCH-ALL DETECTED' "$OUTDIR/liveness.txt" 2>/dev/null && CATCHALL_J=true || CATCHALL_J=false
+[[ -n "$WILDCARD_IPS" ]] && WILDCARD_J=true || WILDCARD_J=false
+
+cat > "$OUTDIR/recon.json" <<EOF
+{
+  "schema": 1,
+  "tool": "hunt/recon.sh",
+  "domain": "$D",
+  "run": "$STAMP",
+  "outdir": "$(printf '%s' "$OUTDIR" | json_esc)",
+  "front_door": {
+    "class": "${FD%%|*}",
+    "detail": "$(printf '%s' "${FD#*|}" | json_esc)"
+  },
+  "branches": [$(branches_json)],
+  "storefront": {
+    "detected": $([[ -n "$COMMERCE_PLATFORM" ]] && echo true || echo false),
+    "platform": $([[ -n "$COMMERCE_PLATFORM" ]] && printf '"%s"' "$COMMERCE_PLATFORM" || echo null),
+    "evidence_source": $([[ -n "$COMMERCE_SOURCE" ]] && printf '"%s"' "$COMMERCE_SOURCE" || echo null),
+    "myshopify_alias": $([[ -n "$MYSHOPIFY_ALIAS" ]] && printf '"%s"' "$MYSHOPIFY_ALIAS" || echo null)
+  },
+  "warnings": {
+    "spa_catch_all": $CATCHALL_J,
+    "wildcard_dns": $WILDCARD_J,
+    "cdx_census_complete": $CDX_COMPLETE
+  },
+  "archive": {
+    "cdx_rows": $CDX_ROWS,
+    "cdx_image_rows": $CDX_IMGS,
+    "cdx_pages_reported": $([[ -n "$CDX_PAGES" ]] && printf '"%s"' "$CDX_PAGES" || echo null)
+  },
+  "probe_host": "$PROBE_TARGET",
+  "hosts": [
+$(hosts_json)
+  ]
+}
+EOF
 
 # A pre-filled lore stub, so a cracked host ends up in the registry instead of
 # in someone's memory.
@@ -644,7 +892,10 @@ EOF
 
 say "done"
 note "dossier:  $OUTDIR/RECON.md"
+note "machine:  $OUTDIR/recon.json"
 note "raw:      $OUTDIR/"
 note "lore stub: $OUTDIR/registry-stub.md"
+[[ -n "$COMMERCE_PLATFORM" ]] && \
+  note "storefront: $COMMERCE_PLATFORM — hand off to wayback-archive (see RECON.md)"
 echo
 sed -n '1,12p' "$OUTDIR/RECON.md"

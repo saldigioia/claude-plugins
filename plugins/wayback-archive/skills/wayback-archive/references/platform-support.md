@@ -3,6 +3,14 @@
 Sites migrate between commerce platforms over time. The pipeline detects and
 handles multiple platforms via config-driven CDN patterns and URL rules.
 
+> **Scope of this file.** It owns the *pipeline* mapping: which detection signal picks which
+> config template, which stage consumes it, and which failure mode means which fix. It does not
+> own per-host image lore. The **lever, the trap, the enumeration surface, and the dead ends with
+> their disproving evidence** live in the `hunt` plugin's portable `registry/` —
+> `dead-shopify-storefronts.md`, `swell-commerce.md`, `fourthwall.md`. Read those before
+> concluding that a store's images are unrecoverable, and write findings back there rather than
+> here, so they survive outside this pipeline.
+
 ## Platform Detection
 
 | Platform | CDN | Detection Signals | Key Endpoints |

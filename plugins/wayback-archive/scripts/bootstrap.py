@@ -10,6 +10,15 @@ Usage:
     python3 bootstrap.py --input "https://kanyewest.com"
     python3 bootstrap.py --input "yeezysupply.com,shop.yeezysupply.com"
     python3 bootstrap.py --input "kanyewest.com" --name kanyewest --dry-run
+    python3 bootstrap.py --from-recon ./recon-kanyewest.com/recon.json
+
+The --from-recon form is preferred when the site is dead: hunt's recon.sh has
+already run an authoritative `matchType=domain` CDX census across every
+subdomain and depth, with a completeness check. This script's own enumeration
+is a single bounded limit=5000 sample by comparison, so consuming the dossier
+is a strict upgrade — and it carries over the storefront verdict, the
+.myshopify alias, and the wildcard-DNS / SPA-catch-all warnings that make a
+host list untrustworthy.
 
 Output:
     - JSON plan to stdout (always)
@@ -20,6 +29,7 @@ Exit codes:
     0  plan emitted, config written
     2  input could not be parsed
     3  template missing
+    4  recon dossier missing, unparseable, or an unsupported schema
 """
 from __future__ import annotations
 
@@ -45,6 +55,11 @@ from wayback_archiver.env import load_env  # noqa: E402
 load_env()
 
 TEMPLATE_DIR = REPO_ROOT / "skills" / "wayback-archive" / "configs"
+
+# The vendored CDN quality probe. Config files live under <projects-root>/<name>/,
+# which is deliberately outside the plugin tree, so a relative path would resolve
+# against the project dir and miss. Always write the absolute path.
+CDN_TOOL = REPO_ROOT / "tools" / "cdn" / "app.sh"
 
 
 def _default_projects_root() -> Path:
@@ -136,6 +151,67 @@ def _apex_regex(apex: str) -> str:
 # ── Host enumeration ──────────────────────────────────────────────────────────
 
 COMMON_PREFIXES = ["www", "shop", "store", "us", "uk", "ca", "eu", "m", "mobile", "checkout"]
+
+
+# ── recon dossier ingest ──────────────────────────────────────────────────────
+
+RECON_SCHEMA_SUPPORTED = 1
+
+# Evidence tags from hunt's recon.json that count as proof a host existed.
+# `dns-wildcard` is deliberately excluded: under a wildcard zone every name
+# resolves, so it attests to nothing. `ct` is a certificate-transparency hit —
+# real enough to enumerate, since somebody once issued a cert for it.
+TRUSTED_EVIDENCE = frozenset({"cdx", "dns", "ct", "myshopify-alias"})
+
+
+class ReconError(Exception):
+    """The dossier could not be used. Message is user-facing."""
+
+
+def load_recon(path: Path) -> dict:
+    """Read and validate a hunt recon.json dossier.
+
+    Raises ReconError with an actionable message rather than a traceback —
+    this runs inside a skill where the output is read by a model.
+    """
+    try:
+        data = json.loads(path.read_text())
+    except FileNotFoundError:
+        raise ReconError(f"no recon dossier at {path}") from None
+    except (OSError, ValueError) as e:
+        raise ReconError(f"cannot parse {path}: {type(e).__name__}: {e}") from None
+
+    if not isinstance(data, dict):
+        raise ReconError(f"{path} is not a JSON object")
+    schema = data.get("schema")
+    if schema != RECON_SCHEMA_SUPPORTED:
+        raise ReconError(
+            f"recon.json schema {schema!r} is not supported "
+            f"(this bootstrap understands schema {RECON_SCHEMA_SUPPORTED}). "
+            "Upgrade whichever of hunt / wayback-archive is older."
+        )
+    if not data.get("domain"):
+        raise ReconError(f"{path} has no domain")
+    return data
+
+
+def hosts_from_recon(recon: dict) -> tuple[list[str], list[str]]:
+    """Split a dossier's hosts into (trusted, rejected).
+
+    Rejected hosts are returned rather than dropped silently — a host that only
+    resolved under a wildcard is a finding worth surfacing, not a nonevent.
+    """
+    trusted: list[str] = []
+    rejected: list[str] = []
+    for row in recon.get("hosts") or []:
+        if not isinstance(row, dict):
+            continue
+        host = _normalize_host(str(row.get("host", "")))
+        if not host:
+            continue
+        evidence = set(row.get("evidence") or [])
+        (trusted if evidence & TRUSTED_EVIDENCE else rejected).append(host)
+    return sorted(set(trusted)), sorted(set(rejected))
 
 
 def enumerate_hosts_via_wayback(apex: str, timeout: float = 20.0) -> list[str]:
@@ -301,11 +377,16 @@ def render_config(platform: str, name: str, display_name: str, apex: str, hosts:
         raise FileNotFoundError(f"Template not found: {template_path}")
     body = template_path.read_text()
     domains_block = "\n".join(f"  - {h}" for h in hosts) or f"  - {apex}"
+    # An engine that isn't there would make load_config resolve a path to a
+    # missing file; the download stage checks existence, but writing an empty
+    # value keeps the config honest about what is actually available.
+    cdn_tool = str(CDN_TOOL) if CDN_TOOL.exists() else '""'
     body = body.replace("{NAME}", name)
     body = body.replace("{DISPLAY_NAME}", display_name)
     body = body.replace("{APEX}", apex)
     body = body.replace("{APEX_REGEX}", _apex_regex(apex))
     body = body.replace("{DOMAINS}", domains_block)
+    body = body.replace("{CDN_TOOL}", cdn_tool)
     return body
 
 
@@ -317,6 +398,7 @@ def bootstrap(
     dry_run: bool = False,
     projects_root: Path | None = None,
     reuse_existing: bool = True,
+    recon: dict | None = None,
 ) -> dict:
     """Scaffold a project from an input URL.
 
@@ -340,6 +422,12 @@ def bootstrap(
         h = _normalize_host(token)
         if h:
             seeds.append(h)
+    # A dossier carries its own target, so --from-recon alone is a complete
+    # invocation; --input on top of it just adds seeds.
+    if not seeds and recon is not None:
+        h = _normalize_host(str(recon.get("domain", "")))
+        if h:
+            seeds.append(h)
     if not seeds:
         print(json.dumps({"error": "no parseable host in input", "input": raw_input}), file=sys.stdout)
         sys.exit(2)
@@ -348,17 +436,41 @@ def bootstrap(
     name = name_override or _safe_name(apex)
     display_name = _display_name(apex)
 
-    # 2. Enumerate captured hosts via Wayback + add common prefixes + user seeds
-    t0 = time.time()
-    wb_hosts = enumerate_hosts_via_wayback(apex)
-    wb_elapsed = time.time() - t0
+    # 2. Enumerate captured hosts.
+    #
+    # A recon dossier replaces this step outright. hunt's census is
+    # `matchType=domain` across every subdomain and depth with a completeness
+    # check; the fallback below is a single bounded limit=5000 sample. When we
+    # have the better list, taking the weaker one too would only add noise.
+    recon_rejected: list[str] = []
+    if recon is not None:
+        recon_hosts, recon_rejected = hosts_from_recon(recon)
+        wb_hosts = recon_hosts
+        wb_elapsed = 0.0
+        confirmed = set(seeds) | set(recon_hosts) | {apex}
+        alias = (recon.get("storefront") or {}).get("myshopify_alias")
+        if alias:
+            normalized_alias = _normalize_host(str(alias))
+            if normalized_alias:
+                confirmed.add(normalized_alias)
+        # Speculation exists to compensate for the weak sample. A COMPLETE
+        # census already lists every subdomain that was ever archived, so a
+        # guessed host is guaranteed to dump empty — and it would sit in the
+        # ledger inflating `unenumerated_hosts` for the rest of the run.
+        census_complete = bool((recon.get("warnings") or {}).get("cdx_census_complete"))
+        speculative = set() if census_complete else {f"{p}.{apex}" for p in COMMON_PREFIXES}
+    else:
+        t0 = time.time()
+        wb_hosts = enumerate_hosts_via_wayback(apex)
+        wb_elapsed = time.time() - t0
 
-    # Confirmed hosts: user seeds + Wayback sample hits + apex itself.
-    confirmed: set[str] = set(seeds) | set(wb_hosts) | {apex}
-    # Speculative hosts: common e-commerce prefixes. CDX dump on an empty host
-    # is cheap (~seconds, produces an empty file); missing a real host is
-    # expensive (entire subtree of products lost). Default to aggressive.
-    speculative: set[str] = {f"{p}.{apex}" for p in COMMON_PREFIXES}
+        # Confirmed hosts: user seeds + Wayback sample hits + apex itself.
+        confirmed = set(seeds) | set(wb_hosts) | {apex}
+        # Speculative hosts: common e-commerce prefixes. CDX dump on an empty
+        # host is cheap (~seconds, produces an empty file); missing a real host
+        # is expensive (entire subtree of products lost). Default to aggressive.
+        speculative = {f"{p}.{apex}" for p in COMMON_PREFIXES}
+
     hosts = sorted(confirmed | speculative)
 
     # 3. Probe platform (try apex + www first, fall back to all hosts)
@@ -372,6 +484,18 @@ def bootstrap(
 
     # 5. Render config
     platform_key = probe.platform if probe.confidence >= 0.5 else "unknown"
+
+    # A dossier's verdict is a fallback, never an override. recon fingerprints
+    # the same signatures, but its strongest signal is the archived record —
+    # which can name a platform the store MIGRATED AWAY FROM years before it
+    # died. A live/most-recent probe that actually matched is closer to the
+    # truth, so it wins; recon only fills the gap where the probe found nothing.
+    recon_platform = None
+    if recon is not None:
+        recon_platform = (recon.get("storefront") or {}).get("platform")
+        if platform_key == "unknown" and recon_platform in TEMPLATE_FILES and recon_platform != "generic":
+            platform_key = recon_platform
+
     try:
         config_yaml = render_config(platform_key, name, display_name, apex, hosts)
     except FileNotFoundError as e:
@@ -409,8 +533,24 @@ def bootstrap(
         "plan_path": str(plan_path) if not dry_run else None,
         "template_used": TEMPLATE_FILES.get(platform_key, "_template_generic.yaml"),
         "dry_run": dry_run,
-        "notes": _build_notes(probe, platform_key, len(confirmed)),
+        "notes": _build_notes(probe, platform_key, len(confirmed), recon, recon_rejected),
     }
+
+    if recon is not None:
+        plan["recon"] = {
+            "schema": recon.get("schema"),
+            "domain": recon.get("domain"),
+            "run": recon.get("run"),
+            "front_door": (recon.get("front_door") or {}).get("class"),
+            "branches": recon.get("branches"),
+            "storefront_platform": recon_platform,
+            "cdx_census_complete": bool((recon.get("warnings") or {}).get("cdx_census_complete")),
+            "hosts_accepted": len(wb_hosts),
+            "hosts_rejected_no_evidence": recon_rejected,
+            # Warnings that make any single finding suspect downstream.
+            "spa_catch_all": bool((recon.get("warnings") or {}).get("spa_catch_all")),
+            "wildcard_dns": bool((recon.get("warnings") or {}).get("wildcard_dns")),
+        }
 
     if not dry_run:
         project_dir.mkdir(parents=True, exist_ok=True)
@@ -456,14 +596,62 @@ def bootstrap(
     return plan
 
 
-def _build_notes(probe: PlatformProbe, platform_key: str, confirmed_count: int) -> list[str]:
+def _build_notes(
+    probe: PlatformProbe,
+    platform_key: str,
+    confirmed_count: int,
+    recon: dict | None = None,
+    recon_rejected: list[str] | None = None,
+) -> list[str]:
     notes: list[str] = []
+    if recon is not None:
+        warnings = recon.get("warnings") or {}
+        notes.append(
+            f"Hosts came from a hunt recon dossier ({recon.get('domain')}, run {recon.get('run')}) "
+            "instead of this script's own Wayback sample."
+        )
+        if warnings.get("cdx_census_complete"):
+            notes.append(
+                "Recon's CDX census was COMPLETE, so speculative common-prefix hosts were "
+                "skipped — every archived subdomain is already in the list, and a guessed "
+                "host would only dump empty and inflate `unenumerated_hosts`."
+            )
+        else:
+            notes.append(
+                "Recon's CDX census was truncated or absent — speculative common-prefix hosts "
+                "were added as usual. Re-run recon and check cdx-pages.txt before trusting "
+                "the host list as exhaustive."
+            )
+        if recon_rejected:
+            notes.append(
+                f"Dropped {len(recon_rejected)} host(s) attested only by wildcard DNS "
+                f"(no CDX/CT/DNS evidence): {', '.join(recon_rejected[:8])}"
+                + (" …" if len(recon_rejected) > 8 else "")
+            )
+        if warnings.get("spa_catch_all"):
+            notes.append(
+                "Recon flagged an SPA CATCH-ALL on this host: it returns 200 for garbage paths. "
+                "Any 200 in downstream fetch results is suspect — match size against the guard."
+            )
+        if warnings.get("wildcard_dns"):
+            notes.append(
+                "Recon flagged WILDCARD DNS on this zone: a resolving name is not evidence a "
+                "host exists. Only CDX/CT-attested hosts were carried over."
+            )
     if platform_key == "unknown":
         notes.append("Platform detection returned low confidence — review cdn_patterns before running `download`.")
     if probe.sample_source == "wayback":
         notes.append("Live site unreachable; detection used most-recent Wayback capture (confidence discounted 15%).")
     if probe.sample_source == "none":
-        notes.append("Could not fetch any sample HTML (live or archived). Proceeding with generic config.")
+        if platform_key != "unknown":
+            notes.append(
+                "Could not fetch any sample HTML (live or archived); the platform above "
+                f"comes from the recon dossier's verdict, not a probe. If the store "
+                f"migrated platforms before it died, `{platform_key}` may describe the "
+                "wrong era — check config.yaml's cdn_patterns against captured HTML."
+            )
+        else:
+            notes.append("Could not fetch any sample HTML (live or archived). Proceeding with generic config.")
     if confirmed_count <= 1:
         notes.append("Wayback found no captured subdomains — only the apex is confirmed. Speculative common prefixes (www./shop./store./…) were added; their CDX dumps may come back empty.")
     if probe.myshopify_domain:
@@ -473,7 +661,20 @@ def _build_notes(probe: PlatformProbe, platform_key: str, confirmed_count: int) 
 
 def main():
     parser = argparse.ArgumentParser(description="Wayback-archive bootstrap: URL → plan JSON + config.yaml")
-    parser.add_argument("--input", required=True, help="URL or comma-separated host list")
+    parser.add_argument(
+        "--input", default="",
+        help="URL or comma-separated host list. Optional when --from-recon is given "
+             "(the dossier carries the target); any value is merged in as extra seeds.",
+    )
+    parser.add_argument(
+        "--from-recon", default=None, metavar="RECON_JSON",
+        help="Path to a hunt recon.json dossier (schema 1). Replaces this script's "
+             "own Wayback host sample with recon's authoritative matchType=domain "
+             "census, carries over the storefront verdict and any .myshopify alias, "
+             "drops wildcard-only hosts, and skips speculative common-prefix hosts "
+             "when the census is complete. Produce one with: "
+             "bash <hunt>/scripts/recon.sh -o ./recon-<domain> <domain>",
+    )
     parser.add_argument("--name", default=None, help="Override project short name (default: derived from apex)")
     parser.add_argument("--dry-run", action="store_true", help="Emit plan JSON only; do not write files")
     parser.add_argument(
@@ -499,12 +700,25 @@ def main():
     args = parser.parse_args()
 
     projects_root = Path(args.project_root).expanduser() if args.project_root else None
+
+    recon = None
+    if args.from_recon:
+        try:
+            recon = load_recon(Path(args.from_recon).expanduser())
+        except ReconError as e:
+            print(json.dumps({"error": str(e), "from_recon": args.from_recon}))
+            sys.exit(4)
+    elif not args.input:
+        print(json.dumps({"error": "one of --input or --from-recon is required"}))
+        sys.exit(2)
+
     plan = bootstrap(
         args.input,
         name_override=args.name,
         dry_run=args.dry_run,
         projects_root=projects_root,
         reuse_existing=args.reuse_existing,
+        recon=recon,
     )
     print(json.dumps(plan, indent=2))
 

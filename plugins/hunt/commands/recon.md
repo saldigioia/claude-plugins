@@ -34,22 +34,29 @@ each state has a different road to the treasure. Do not start extracting before 
 
    The archive is a map; the origin is the treasure; they are usually **disjoint**.
 
-4. **Run the branches `RECON.md` lit up** (often more than one) per the skill's Phase 2. Before
+4. **If `RECON.md` says a storefront was detected, hand off — don't hand-roll the catalog.** A
+   dead store is the one shape with a purpose-built pipeline. Run the command the dossier prints:
+   `bootstrap.py --from-recon <outdir>/recon.json` in the `wayback-archive` plugin, which consumes
+   this run's census rather than re-deriving a weaker one. Rebuilding by hand from `cdx-images.txt`
+   discards the product↔image association, which is the actual deliverable. If that plugin isn't
+   installed, say so and stop rather than improvising a pipeline.
+
+5. **Run the branches `RECON.md` lit up** (often more than one) per the skill's Phase 2. Before
    crawling, fingerprint the gallery generator and go straight to its ceiling tier — Photoshop
    Web Photo Gallery has no original tier at all, JAlbum/Lightroom keeps it at
    `content/bin/images/large/`. Then mirror as **crawler ∪ index backfill**: `wget --mirror`
    silently misses files reachable only from the directory listing, so enumerate the index
    independently, diff against disk, and curl the gaps.
 
-5. **One host, one queue.** Parallelize across different hosts only. A fragile legacy origin
+6. **One host, one queue.** Parallelize across different hosts only. A fragile legacy origin
    answers *empty* rather than 429 under concurrency, which corrupts enumeration without
    erroring — the failure looks like "there was nothing there."
 
-6. **Verify** any master by ranged read rather than download
+7. **Verify** any master by ranged read rather than download
    (`curl -r 0-400000 "$URL" -o head.bin && file head.bin`), and resolve individual files to
    their true masters with `/hunt:master`. A camera-original filename is not proof of a master.
 
-7. **Deliver** `CITATIONS.md` (host/IP, access method, retrieval date), `manifest.csv`
+8. **Deliver** `CITATIONS.md` (host/IP, access method, retrieval date), `manifest.csv`
    (url, bytes, sha256), `FILE_TREE.txt` — and **document dead ends with their disproving
    evidence**, so nobody re-runs a proven-dead path. `{"archived_snapshots":{}}` from
    `archive.org/wayback/available` is the only authoritative "never archived"; never call

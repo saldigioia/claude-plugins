@@ -1,7 +1,7 @@
 {
   "name": "hunt",
-  "version": "1.0.0",
-  "description": "Recover the byte-exact master behind any CDN/CMS transform, and recover assets from dead, parked, redirected, or archive-only websites. Two skills over one vendored engine: a 48-resolver master-image pipeline (proxy peeling, param stripping, clamp-vs-upscale tests, no-webp Accept, WAF impersonation) and a dead-site triage tree (DNS/CT/CDX recon, four-way liveness read, open-index enumeration, Wayback id_ raw recovery). Carries a trap catalog for every way a candidate wins on bytes or format while carrying fewer real pixels. Verifies before it believes; never claims a dead end without the disproving evidence.",
+  "version": "1.1.0",
+  "description": "Recover the byte-exact master behind any CDN/CMS transform, and recover assets from dead, parked, redirected, or archive-only websites. Two skills over one vendored engine: a 48-resolver master-image pipeline (proxy peeling, param stripping, clamp-vs-upscale tests, no-webp Accept, WAF impersonation) and a dead-site triage tree (DNS/CT/CDX recon, four-way liveness read, open-index enumeration, Wayback id_ raw recovery). Carries a trap catalog for every way a candidate wins on bytes or format while carrying fewer real pixels. Verifies before it believes; never claims a dead end without the disproving evidence. Recon emits recon.json (schema 1) \u2014 every host tagged with the evidence that found it \u2014 and fingerprints dead storefronts, handing those off to the `wayback-archive` plugin for full catalog recovery rather than hand-rolling one.",
   "author": {
     "name": "Rare Data Club",
     "email": "salthecowboy@proton.me"
@@ -23,6 +23,9 @@
     "har-analysis",
     "open-directory",
     "data-recovery",
-    "digital-preservation"
+    "digital-preservation",
+    "shopify",
+    "storefront",
+    "recon"
   ]
 }

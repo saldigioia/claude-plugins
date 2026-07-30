@@ -1,6 +1,6 @@
 ---
 name: wayback-archive
-description: Recover a complete product catalog (data + images) from a defunct e-commerce site via Wayback, CommonCrawl, and Shopify CDN archaeology. Use when a URL, domain, or host list points at a dead store and the full catalog should be rebuilt end-to-end.
+description: Recover a complete product catalog (data + images) from a defunct e-commerce site via Wayback, CommonCrawl, and Shopify CDN archaeology. Use when a URL, domain, or host list points at a dead STORE and the full catalog should be rebuilt end-to-end. Scope is e-commerce catalogs only, and the run is heavy — Python deps, a SQLite ledger, and a nine-stage pipeline that takes tens of minutes. Do NOT use for a dead site that is not a storefront, for a single image or gallery, or when it is not yet established that the site is dead or where its assets survive: that is the `hunt` plugin (`/hunt:recon` to triage a dead domain, `/hunt:master` to resolve one URL to its byte-exact master). Recon first is also the better path INTO this skill — `/hunt:recon` produces an authoritative host census that beats this skill's own bootstrap sample.
 argument-hint: "<url-or-domain> [--dry-run]"
 allowed-tools:
   - Bash(python3 *)
@@ -36,6 +36,27 @@ The bootstrap script above has already:
 ## Your task
 
 Read the JSON plan above. Then do the following, in order:
+
+### 0. Was there a recon dossier?
+
+If the user has already run `/hunt:recon` on this domain — or a `recon.json` exists next to the
+target — bootstrap should have consumed it instead of re-deriving hosts:
+
+```bash
+python3 "${CLAUDE_SKILL_DIR}/../../scripts/bootstrap.py" --from-recon <path-to-recon.json>
+```
+
+Recon's census is `matchType=domain` across every subdomain and depth with a completeness check;
+this script's own enumeration is a single bounded `limit=5000` sample. The dossier also carries
+the storefront verdict, the `.myshopify` alias, and two warnings that decide whether *any* result
+is trustworthy. When the plan JSON has a `recon` block, read it before anything else:
+
+- `spa_catch_all: true` — the host returns 200 for garbage paths. Every downstream 200 is suspect.
+- `wildcard_dns: true` — a resolving name is not evidence a host exists.
+- `cdx_census_complete: false` — the host list is **not** exhaustive; speculative hosts were kept.
+
+No dossier is not a blocker. But if the site's liveness is unknown, or the run comes back thin,
+stop and run recon rather than re-running stages against a host list that may be missing subtrees.
 
 ### 1. Sanity check
 

@@ -77,7 +77,8 @@ alternative_archives:
 
 # ── Stage 4: Download cascade ───────────────────────────────
 download_cascade:
+  # These three are the only implemented strategies; anything else is
+  # dropped at load with a warning. See references/site-config-schema.md.
   - live_cdn
   - direct_fetch
   - wayback_cdx_best
-  - exhaustive

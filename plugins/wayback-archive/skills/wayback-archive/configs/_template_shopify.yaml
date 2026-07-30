@@ -11,6 +11,13 @@ domains:
 
 project_dir: .
 
+# CDN quality probe (tools/cdn/app.sh) — 48 host resolvers + a generic
+# fallback. Used by the download stage for URLs still served by a live
+# CDN, where it resolves the highest-fidelity rendition instead of
+# taking whatever the page linked. Filled in by bootstrap.py; blank it
+# out to fall back to a plain direct fetch.
+cdn_tool: {CDN_TOOL}
+
 cdx_dump_max_age_days: 7
 cdx_dump_proxy_mode: auto
 
@@ -95,8 +102,7 @@ alternative_archives:
     - memento
 
 download_cascade:
+  # Only these three exist in download.py; site_config.py warns on anything else.
   - live_cdn
   - direct_fetch
   - wayback_cdx_best
-  - exhaustive
-  - asset_rescue

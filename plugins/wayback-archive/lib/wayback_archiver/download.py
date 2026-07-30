@@ -1,14 +1,19 @@
 """
 Image acquisition cascade — multi-strategy download system.
 
-Strategies (executed in order per product until images are recovered):
-1. Live CDN via quality probe tool (app.sh)
-2. Direct HTTP fetch
-3. Wayback CDX best-size query (find largest cached variant)
-4. Exhaustive snapshot search (try every captured page snapshot)
-5. Asset CDN rescue (parse CDX for asset domain captures)
+Strategies (executed in order per product until images are recovered), each
+selectable via a config's `download_cascade`:
 
-Replaces 6 download scripts with a single configurable cascade.
+1. ``live_cdn``        — CDN quality probe (tools/cdn/app.sh), live URLs only
+2. ``direct_fetch``    — direct HTTP fetch from the origin
+3. ``wayback_cdx_best``— Wayback CDX query for the largest cached variant
+
+That is the complete list. `exhaustive` (try every captured snapshot) and
+`asset_rescue` (parse CDX for asset-domain captures) were named here and in
+every config template for a long time but were never implemented; they have
+been removed rather than left advertised. `site_config.IMPLEMENTED_DOWNLOAD_
+STRATEGIES` is the authority, and a config naming anything outside it gets a
+warning at load.
 
 IMPORTANT: Wayback downloads MUST use the `id_` or `im_` suffix in the URL
 to get raw content. Without it, Wayback injects toolbar HTML into responses,
@@ -166,6 +171,51 @@ def clean_filename(url: str) -> str:
 # ---------------------------------------------------------------------------
 # Strategy 1: Live CDN via quality probe tool (app.sh)
 # ---------------------------------------------------------------------------
+
+# Hosts that serve archived bytes rather than origin bytes. The quality probe
+# negotiates with a live CDN — format ladders, param stripping, Accept headers.
+# A replay URL is frozen: there is nothing to negotiate, and pointing the probe
+# at one just burns requests against archive.org.
+_ARCHIVE_HOSTS = ("web.archive.org", "archive.org", "archive.ph", "archive.today")
+
+
+def has_live_cdn_url(urls: list[str], cdn_patterns: list[dict] | None = None) -> bool:
+    """True when at least one URL is a live CDN asset the probe can improve on.
+
+    ``cdn_patterns`` comes from the site config (``name``/``regex`` dicts). The
+    generic template ships an empty list, so fall back to the built-in platform
+    patterns rather than silently answering False for every non-Shopify store —
+    that fallback is the whole reason this is not just a substring test.
+    """
+    if not urls:
+        return False
+
+    if cdn_patterns:
+        regexes = [p["regex"] for p in cdn_patterns if p.get("regex")]
+    else:
+        from .extract import (SHOPIFY_CDN, SHOPIFY_DOMAIN_CDN, SWELL_CDN,
+                              FOURTHWALL_CDN, ADIDAS_CDN)
+        regexes = [p.regex for p in (SHOPIFY_CDN, SHOPIFY_DOMAIN_CDN, SWELL_CDN,
+                                     FOURTHWALL_CDN, ADIDAS_CDN)]
+
+    compiled = []
+    for r in regexes:
+        try:
+            compiled.append(re.compile(r))
+        except re.error:
+            log.warning("has_live_cdn_url: skipping uncompilable cdn pattern %r", r)
+    if not compiled:
+        return False
+
+    for url in urls:
+        host = _host_of(url)
+        # Exact or subdomain match — a plain endswith would also catch
+        # something like "notarchive.org".
+        if not host or any(host == a or host.endswith("." + a) for a in _ARCHIVE_HOSTS):
+            continue
+        if any(c.search(url) for c in compiled):
+            return True
+    return False
 
 def download_via_cdn_tool(
     urls: list[str],
@@ -383,9 +433,16 @@ def download_product_images(
     cdn_tool: Path | None = None,
     is_live_cdn: bool = False,
     politeness_delay: float = 0.5,
+    cascade: list[str] | None = None,
 ) -> dict:
     """
-    Run the full download cascade for a single product.
+    Run the download cascade for a single product.
+
+    ``cascade`` is the config's `download_cascade`, already validated down to
+    implemented strategy names. It genuinely selects behaviour: dropping
+    ``live_cdn`` skips the quality probe, dropping ``wayback_cdx_best`` makes a
+    failed origin fetch terminal instead of falling back to the archive. None
+    means "everything", which is the default for direct callers.
 
     Before downloading, URLs are:
     1. Filtered to remove site chrome (favicons, logos, icons, tracking pixels)
@@ -395,6 +452,8 @@ def download_product_images(
     Returns dict with: downloaded (int), failed (int), skipped (int),
                        strategies_used (list[str])
     """
+    from .site_config import IMPLEMENTED_DOWNLOAD_STRATEGIES
+    enabled = set(cascade) if cascade is not None else set(IMPLEMENTED_DOWNLOAD_STRATEGIES)
     dest_dir.mkdir(parents=True, exist_ok=True)
     result = {"downloaded": 0, "failed": 0, "skipped": 0, "strategies_used": []}
 
@@ -415,36 +474,54 @@ def download_product_images(
         else:
             result["skipped"] += 1
 
-    # Strategy 1: CDN quality probe for live URLs
-    if is_live_cdn and cdn_tool and cdn_tool.exists():
+    # Strategy 1 — live_cdn: quality probe, live URLs only
+    if "live_cdn" in enabled and is_live_cdn and cdn_tool and cdn_tool.exists():
         before = set(f.name for f in dest_dir.iterdir())
         download_via_cdn_tool(deduped_urls, dest_dir, cdn_tool)
         after = set(f.name for f in dest_dir.iterdir())
         new_files = after - before
         if new_files:
             result["downloaded"] += len(new_files)
-            result["strategies_used"].append("cdn_tool")
+            result["strategies_used"].append("live_cdn")
 
-    # Strategy 2+3: Direct fetch with Wayback CDX fallback
-    from .normalize import list_images
-    existing_stems = {f.stem.lower() for f in list_images(dest_dir)}
+    # Strategies 2 and 3 — direct_fetch, then wayback_cdx_best.
+    #
+    # Called separately rather than through download_with_fallback() so each is
+    # independently selectable, and so we can report WHICH one won. The old
+    # combined call inferred the strategy from `dest.exists()`, which is always
+    # true after any success — so "wayback_cdx" was unreportable.
+    want_direct = "direct_fetch" in enabled
+    want_wayback = "wayback_cdx_best" in enabled
 
-    for url in deduped_urls:
-        fname = clean_filename(url)
-        stem = Path(fname).stem.lower()
-        if stem in existing_stems:
-            continue
+    if want_direct or want_wayback:
+        from .normalize import list_images
+        existing_stems = {f.stem.lower() for f in list_images(dest_dir)}
 
-        dest = dest_dir / fname
-        if download_with_fallback(url, dest, session, politeness_delay):
-            result["downloaded"] += 1
-            existing_stems.add(stem)
-            strategy = "direct" if dest.exists() else "wayback_cdx"
-            if strategy not in result["strategies_used"]:
-                result["strategies_used"].append(strategy)
-        else:
-            result["failed"] += 1
+        for url in deduped_urls:
+            fname = clean_filename(url)
+            stem = Path(fname).stem.lower()
+            if stem in existing_stems:
+                continue
 
-        time.sleep(politeness_delay)
+            dest = dest_dir / fname
+            won = None
+
+            if want_direct and download_direct(url, dest, session):
+                won = "direct_fetch"
+            elif want_wayback:
+                wb_url = find_best_wayback_url(url, session)
+                time.sleep(politeness_delay)
+                if wb_url and download_wayback_image(wb_url, dest, session):
+                    won = "wayback_cdx_best"
+
+            if won:
+                result["downloaded"] += 1
+                existing_stems.add(stem)
+                if won not in result["strategies_used"]:
+                    result["strategies_used"].append(won)
+            else:
+                result["failed"] += 1
+
+            time.sleep(politeness_delay)
 
     return result

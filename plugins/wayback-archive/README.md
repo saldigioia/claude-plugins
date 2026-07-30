@@ -4,6 +4,47 @@ Claude Code plugin for recovering complete product databases (catalog data + ima
 
 Supports Shopify, Swell Commerce, Fourthwall, and custom platforms via config-driven CDN patterns.
 
+## Scope — and when to use `hunt` instead
+
+This plugin rebuilds **one thing**: the product catalog of a defunct store, end to end. It is a
+heavy, stateful run — Python dependencies, a SQLite ledger, nine resumable stages, tens of
+minutes. That cost only pays off against a storefront with a real catalog behind it.
+
+Reach for [`hunt`](../hunt/) instead when:
+
+| Situation | Use |
+|---|---|
+| The dead site is **not a storefront** — a photographer, a magazine, a brand microsite | `hunt` — `/hunt:recon` |
+| You want **one image** at its highest fidelity, or one gallery | `hunt` — `/hunt:master` |
+| You don't yet know **whether the site is dead**, or where its assets survive | `hunt` — `/hunt:recon` |
+| You have a `.har`, a bare CDN URL, or an unknown host | `hunt` — `/hunt:master` |
+| A dead **store** whose whole catalog you want rebuilt | **this plugin** |
+
+**Recon first is also the better road into this plugin.** `/hunt:recon` runs an authoritative
+Wayback CDX census (`matchType=domain`, every subdomain, every depth, with a completeness check)
+plus DNS, certificate-transparency, and reverse-IP host discovery. `bootstrap.py`'s own host
+enumeration is a single bounded `limit=5000` sample by comparison. Handing recon's host list to
+bootstrap is a strict upgrade, and it works today with no extra tooling:
+
+```bash
+bash ../hunt/scripts/recon.sh -o ./recon-mystore mystore.com
+python3 scripts/bootstrap.py --from-recon ./recon-mystore/recon.json
+```
+
+`--from-recon` consumes `recon.json` (schema 1) and, versus deriving everything itself:
+
+- replaces the bounded host sample with recon's full census;
+- carries over the storefront platform verdict and any `.myshopify` alias;
+- **drops hosts attested only by wildcard DNS** — under a wildcard zone every name resolves, so
+  those are not evidence, and they would otherwise be dumped and tracked forever;
+- **skips speculative common-prefix hosts when the census is complete**, since a guessed host is
+  then guaranteed to dump empty and inflate the ledger's `unenumerated_hosts` for the whole run;
+- surfaces recon's `spa_catch_all` and `wildcard_dns` warnings in the plan's `recon` block, so a
+  fake-200 host doesn't get mistaken for a live one downstream.
+
+A live platform probe still wins over recon's verdict when it matches — a store can migrate
+platforms before it dies, and the archived record may name the earlier era.
+
 ## Installation
 
 Add the marketplace and install:
@@ -13,10 +54,11 @@ Add the marketplace and install:
 /plugin install wayback-archive@rare-data-club
 ```
 
-Then install Python dependencies:
+Then install Python dependencies. The install directory is version-stamped, so resolve the
+current one rather than hardcoding a version that goes stale on every release:
 
 ```bash
-pip install -r ~/.claude/plugins/cache/rare-data-club/wayback-archive/1.3.0/requirements.txt
+pip install -r "$(ls -d ~/.claude/plugins/cache/rare-data-club/wayback-archive/*/ | sort -V | tail -1)requirements.txt"
 ```
 
 ### Local development

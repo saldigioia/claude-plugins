@@ -80,7 +80,7 @@ python3 scripts/run_stage.py <stage> --config configs/site.yaml [--dry-run]
 | `fetch` | Queue-based cascade: direct -> CommonCrawl WARC -> proxy | `fetch_archive.py` |
 | `cdn_discover` | Shopify CDN archaeology (finds delisted product images) | `shopify_downloader.py` |
 | `match` | Fuzzy slug-to-SKU matching + dedup | `lib/wayback_archiver/match.py` |
-| `download` | Image cascade: live CDN -> Wayback CDX best -> exhaustive | `lib/wayback_archiver/download.py` |
+| `download` | Image cascade: live_cdn -> direct_fetch -> wayback_cdx_best | `lib/wayback_archiver/download.py` |
 | `normalize` | Rename images, generate metadata.txt per product | `lib/wayback_archiver/normalize.py` |
 | `build` | Compile final catalog JSON + stats | `lib/wayback_archiver/util.py` |
 

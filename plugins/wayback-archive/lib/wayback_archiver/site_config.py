@@ -6,11 +6,50 @@ Adding a new target site = writing a YAML file, no Python code needed.
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+
+log = logging.getLogger(__name__)
+
+# Download strategies that exist as code in download.py. Anything else in a
+# config's `download_cascade` is inert.
+#
+# `exhaustive` and `asset_rescue` were declared in every template and in this
+# module's default for a long time without ever being implemented — the config,
+# the templates, and download.py's own docstring all advertised a five-strategy
+# cascade over a three-strategy implementation. They are gone from the defaults;
+# a config that still names them gets a warning rather than silent no-op.
+IMPLEMENTED_DOWNLOAD_STRATEGIES = ("live_cdn", "direct_fetch", "wayback_cdx_best")
+
+DEFAULT_DOWNLOAD_CASCADE = list(IMPLEMENTED_DOWNLOAD_STRATEGIES)
+
+
+def _validate_cascade(cascade: list[str], source: str) -> list[str]:
+    """Drop unimplemented strategy names, loudly.
+
+    Returning the filtered list rather than the raw one means a typo degrades
+    to "that step didn't run" with a warning, instead of silently doing
+    nothing while the config claims otherwise.
+    """
+    known, unknown = [], []
+    for name in cascade:
+        (known if name in IMPLEMENTED_DOWNLOAD_STRATEGIES else unknown).append(name)
+    if unknown:
+        log.warning(
+            "%s: download_cascade names %d unimplemented strateg%s (%s) — ignoring. "
+            "Implemented: %s",
+            source, len(unknown), "y" if len(unknown) == 1 else "ies",
+            ", ".join(unknown), ", ".join(IMPLEMENTED_DOWNLOAD_STRATEGIES),
+        )
+    if not known:
+        log.warning("%s: download_cascade has no implemented strategies — using the default",
+                    source)
+        return list(DEFAULT_DOWNLOAD_CASCADE)
+    return known
 
 
 @dataclass
@@ -43,9 +82,8 @@ class SiteConfig:
     catalog_api_patterns: list[str] = field(default_factory=list)
 
     # Stage 4: Download cascade
-    download_cascade: list[str] = field(default_factory=lambda: [
-        "live_cdn", "direct_fetch", "wayback_cdx_best", "exhaustive", "asset_rescue"
-    ])
+    download_cascade: list[str] = field(
+        default_factory=lambda: list(DEFAULT_DOWNLOAD_CASCADE))
 
     # Image validation
     min_image_bytes: int = 500
@@ -167,9 +205,8 @@ def load_config(config_path: Path) -> SiteConfig:
         cdn_patterns=data.get("cdn_patterns", []),
         metadata_extractors=data.get("metadata_extractors", {}),
         catalog_api_patterns=data.get("catalog_api_patterns", []),
-        download_cascade=data.get("download_cascade", [
-            "live_cdn", "direct_fetch", "wayback_cdx_best", "exhaustive", "asset_rescue"
-        ]),
+        download_cascade=_validate_cascade(
+            data.get("download_cascade", DEFAULT_DOWNLOAD_CASCADE), str(config_path)),
         min_image_bytes=data.get("min_image_bytes", 500),
         alternative_archives=data.get("alternative_archives", {}),
         _raw=data,

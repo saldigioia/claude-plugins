@@ -1384,7 +1384,7 @@ def run_match(config, dry_run=False, **_kw):
 
 def run_download(config, dry_run=False, **_kw):
     """Stage 4: Download images via cascade."""
-    from wayback_archiver.download import download_product_images
+    from wayback_archiver.download import download_product_images, has_live_cdn_url
     from wayback_archiver.normalize import list_images
     from wayback_archiver.util import build_dirname
     import requests
@@ -1428,13 +1428,14 @@ def run_download(config, dry_run=False, **_kw):
             )
             dest_dir = config.products_dir / dir_name
 
-            is_live = any("cdn.shopify.com" in u for u in urls)
+            is_live = has_live_cdn_url(urls, config.cdn_patterns)
 
             log.info("[%d/%d] %s (%d URLs)", i, len(tasks), slug, len(urls))
             result = download_product_images(
                 slug, urls, dest_dir, session,
                 cdn_tool=config.cdn_tool_path,
                 is_live_cdn=is_live,
+                cascade=config.download_cascade,
             )
             total_dl += result["downloaded"]
             total_fail += result["failed"]

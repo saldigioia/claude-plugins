@@ -107,12 +107,20 @@ cdn_patterns:
 
 ```yaml
 download_cascade:
-  - live_cdn         # app.sh for live Shopify CDN
-  - direct_fetch     # Direct HTTP
-  - wayback_cdx_best # CDX API for largest variant
-  - exhaustive       # Try every snapshot
-  - asset_rescue     # CDX asset domain rescue
+  - live_cdn         # tools/cdn/app.sh quality probe, live (non-replay) CDN URLs only
+  - direct_fetch     # Direct HTTP from the origin
+  - wayback_cdx_best # CDX API for the largest cached variant
 ```
+
+**These three are the complete set.** `site_config.IMPLEMENTED_DOWNLOAD_STRATEGIES` is the
+authority; anything else in a config is dropped at load with a warning. (`exhaustive` and
+`asset_rescue` were documented and shipped in every template for a long time without ever being
+implemented — if you find them in an old `config.yaml`, they were doing nothing.)
+
+Each entry genuinely selects behaviour: drop `live_cdn` to skip the quality probe, drop
+`wayback_cdx_best` to make a failed origin fetch terminal rather than falling back to the archive.
+`live_cdn` is additionally gated at runtime by `has_live_cdn_url()`, so it costs nothing when a
+product's URLs are all Wayback replays or point at no known CDN.
 
 ## Optional Fields
 
@@ -277,5 +285,4 @@ download_cascade:
   - live_cdn
   - direct_fetch
   - wayback_cdx_best
-  - exhaustive
 ```

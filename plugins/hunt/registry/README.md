@@ -11,6 +11,13 @@ Knowledge lives in three places, and they are not interchangeable:
 | `skills/master-image-hunt/CDN_TABLE.md` | one-line-per-CDN index of lever + trap | when a host looks familiar |
 | **this directory** | full findings: lever, trap, enumeration surface, dead ends | when the one-liner isn't enough, or the host isn't wired |
 
+**Not every entry here is wired into the engine.** Where a host has lore but no resolver — Etsy,
+eBay, Depop, Grailed, TheRealReal, Swell, Fourthwall, Brandfolder, SFCC/Scene7, and the
+digital-edition platforms — `app.sh` falls through to its generic fallback and **the lever has to
+be applied by hand**. Each entry's `Engine:` line says which case it is. Closing that gap is the
+standing invitation: verify a pure string transform, then promote it to `cdn_resolve_<name>()`
+with fixtures.
+
 `CDN_TABLE.md` cites `project_*_resolver` memory files. Those are personal auto-memory on one
 machine and **do not travel with the plugin** — this directory is the portable equivalent.
 
@@ -55,6 +62,8 @@ machine and **do not travel with the plugin** — this directory is the portable
 | [gap](gap.md) | `?impolicy=original` on the Akamai host; the Cortex `/d/` assets are NOT the campaign photos |
 | [pacsun-sfcc-scene7](pacsun-sfcc-scene7.md) | SFCC content library survives deploys; Scene7 403 vs `exists=0` discriminator |
 | [dead-shopify-storefronts](dead-shopify-storefronts.md) | Probe the CDN, not the storefront — but confirm per store |
+| [swell-commerce](swell-commerce.md) | `__data.json` is the catalog — but it's `devalue`-encoded, not JSON |
+| [fourthwall](fourthwall.md) | `imgproxy.fourthwall.com` is stock imgproxy — decode the source out of the path, if unsigned |
 
 ### Portfolios and DAMs
 

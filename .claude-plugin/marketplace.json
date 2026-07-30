@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Rare Data Club's Claude Code plugins: CSS layout primitives, web-archive recovery, archival-grade audio mixdown, lossless video remuxing, and canonical product-catalog curation.",
-    "version": "1.4.0"
+    "version": "1.5.0"
   },
   "plugins": [
     {
@@ -30,7 +30,7 @@
     {
       "name": "wayback-archive",
       "source": "./plugins/wayback-archive",
-      "description": "Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline: CDX dump, filter, fetch, Shopify CDN discovery, match, download, normalize, build. Supports Shopify, Swell Commerce, Fourthwall, and custom platforms.",
+      "description": "Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline: CDX dump, filter, fetch, Shopify CDN discovery, match, download, normalize, build. Supports Shopify, Swell Commerce, Fourthwall, and custom platforms. Scope is e-commerce catalogs ONLY, and the run is heavy (Python deps, a SQLite ledger, tens of minutes): for a dead site that is not a storefront, for a single image, or when the site's liveness is not yet established, use `hunt` first. Consumes hunt's recon.json via `bootstrap.py --from-recon` for an authoritative matchType=domain host census instead of its own bounded sample.",
       "category": "data-recovery",
       "keywords": [
         "wayback",
@@ -99,7 +99,7 @@
     {
       "name": "hunt",
       "source": "./plugins/hunt",
-      "description": "Recover the byte-exact master behind any CDN/CMS transform, and recover assets from dead, parked, redirected, or archive-only websites. Two skills over one vendored engine: a 48-resolver master-image pipeline (proxy peeling, param stripping, clamp-vs-upscale tests, no-webp Accept negotiation, WAF impersonation) plus a dead-site triage tree (DNS/CT/CDX recon, four-way liveness read, open-index enumeration, Wayback id_ raw recovery). Ships a six-probe recon script that classifies a dead front door and routes to the right recovery branch, 128 offline engine tests, and a trap catalog for every way a candidate wins on bytes or format while carrying fewer real pixels.",
+      "description": "Recover the byte-exact master behind any CDN/CMS transform, and recover assets from dead, parked, redirected, or archive-only websites. Two skills over one vendored engine: a 48-resolver master-image pipeline (proxy peeling, param stripping, clamp-vs-upscale tests, no-webp Accept negotiation, WAF impersonation) plus a dead-site triage tree (DNS/CT/CDX recon, four-way liveness read, open-index enumeration, Wayback id_ raw recovery). Ships a six-probe recon script that classifies a dead front door and routes to the right recovery branch, 128 offline engine tests, and a trap catalog for every way a candidate wins on bytes or format while carrying fewer real pixels. Recon also fingerprints dead storefronts and emits recon.json (schema 1) — every host tagged with the evidence that found it — for handoff to the `wayback-archive` plugin, which rebuilds a dead store's full product catalog.",
       "category": "data-recovery",
       "keywords": [
         "cdn",

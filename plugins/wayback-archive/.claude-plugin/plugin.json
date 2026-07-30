@@ -1,14 +1,24 @@
 {
   "name": "wayback-archive",
-  "version": "1.3.0",
-  "description": "Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline: CDX dump, filter, fetch, Shopify CDN discovery, match, download, normalize, build. Supports Shopify, Swell Commerce, Fourthwall, and custom platforms. Use for recovering products from dead websites, archiving defunct stores, rebuilding catalogs from web archives, CDX dumps, WARC files, or Shopify CDN URLs.",
+  "version": "1.4.0",
+  "description": "Recover product databases from defunct e-commerce sites via Wayback Machine, CommonCrawl, and Shopify CDN archaeology. Self-contained 9-stage pipeline: CDX dump, filter, fetch, Shopify CDN discovery, match, download, normalize, build. Supports Shopify, Swell Commerce, Fourthwall, and custom platforms. Use for recovering products from dead websites, archiving defunct stores, rebuilding catalogs from web archives, CDX dumps, WARC files, or Shopify CDN URLs. Scope is e-commerce catalogs only and the run is heavy (Python deps, SQLite ledger, tens of minutes) \u2014 for a non-storefront dead site, a single image, or unknown liveness, use the `hunt` plugin first. `bootstrap.py --from-recon` consumes hunt's recon.json for an authoritative host census, the storefront verdict, and the wildcard-DNS / SPA-catch-all warnings.",
   "author": {
     "name": "Rare Data Club"
   },
   "keywords": [
-    "wayback", "archive", "web-scraping", "e-commerce",
-    "shopify", "commoncrawl", "cdx", "warc",
-    "product-catalog", "image-recovery", "cdn",
-    "data-recovery", "defunct-sites", "internet-archive"
+    "wayback",
+    "archive",
+    "web-scraping",
+    "e-commerce",
+    "shopify",
+    "commoncrawl",
+    "cdx",
+    "warc",
+    "product-catalog",
+    "image-recovery",
+    "cdn",
+    "data-recovery",
+    "defunct-sites",
+    "internet-archive"
   ]
 }

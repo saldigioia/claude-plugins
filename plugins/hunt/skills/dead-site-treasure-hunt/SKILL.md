@@ -154,6 +154,23 @@ The creator rebuilt on Netlify/Vercel; the *data* lives behind a public API.
   knowing definitively rather than guessing.)
 - CommonCrawl WARC, Google/Bing cache, `timetravel.mementoweb.org` aggregator for other mirrors.
 - Ceiling here = whatever the crawler happened to fetch (often only the web-display tier).
+- **If the dead site is a STOREFRONT, hand off — do not hand-roll the catalog.** A store is the one
+  Branch-C shape with a purpose-built pipeline: the `wayback-archive` plugin does CDX dump → index →
+  filter → fetch → CDN discovery → match → download → normalize → build, with a SQLite ledger and an
+  audit gate, across Shopify / Swell / Fourthwall / custom platforms. Tells that you are looking at
+  one: `/products/`, `/collections/`, `/cart` in `cdx-dirs.txt`; `cdn.shopify.com`, `/cdn/shop/`,
+  `cdn.swell.store`, or `imgproxy.fourthwall.com` in `cdx.txt`; a `.myshopify.com` alias in any
+  captured HTML. Feed it the census this recon already produced rather than letting it re-derive a
+  weaker one:
+
+  ```bash
+  python3 <wayback-archive>/scripts/bootstrap.py \
+    --input "$(awk '{print $2}' <recon-dir>/cdx-subdomains.txt | paste -sd, -)"
+  ```
+
+  **The storefront CDN usually outlives the storefront** — see `registry/dead-shopify-storefronts.md`
+  before assuming a dead product page means dead images. It is a tendency, not a guarantee: confirm
+  per store and record the negative with its evidence.
 
 ### Branch D — Assets migrated to still-open cloud storage
 - S3/GCS/R2 bucket **list**: `?list-type=2` / `?prefix=` on the bucket host; open Firebase; a CDN
@@ -231,7 +248,9 @@ post-mortem.
 ## Adjacent tooling
 
 - **`master-image-hunt`** skill — once you have one live URL, resolve it to its byte-exact master.
-- **`wayback-archive`** skill — dead *e-commerce* catalog (products + images) recovery by URL.
+- **`wayback-archive`** plugin — dead *e-commerce* catalog (products + images) recovery, end to end.
+  A separate install (Python + a stateful pipeline), and the correct move for a dead **store**
+  rather than hand-rolling one. See the handoff in Branch C for the tells and the invocation.
 - **`${CLAUDE_PLUGIN_ROOT}/tools/cdn/app.sh`** — 48 CDN resolvers + a generic fallback; run on any
   recovered URL. `--vimeo` for video. Offline tests: `bash tools/cdn/tests/run.sh`.
 - **`${CLAUDE_PLUGIN_ROOT}/scripts/recon.sh`** — automates Phase 1 into a `RECON.md` dossier.
