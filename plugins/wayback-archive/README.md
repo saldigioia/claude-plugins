@@ -16,7 +16,7 @@ Add the marketplace and install:
 Then install Python dependencies:
 
 ```bash
-pip install -r ~/.claude/plugins/cache/rare-data-club/wayback-archive/1.2.0/requirements.txt
+pip install -r ~/.claude/plugins/cache/rare-data-club/wayback-archive/1.3.0/requirements.txt
 ```
 
 ### Local development

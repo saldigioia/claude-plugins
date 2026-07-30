@@ -165,6 +165,18 @@ else
         die "Marketplace manifest is out of sync with plugins/ (see above). Register/remove the plugin, or re-run with ALLOW_PLUGIN_DRIFT=1 to override."
 fi
 
+# Refuse to publish divergent copies of the shared CDN engine. Several plugins
+# vendor tools/cdn/app.sh and each must ship a real file (plugins install
+# individually, so a cross-plugin symlink would dangle), which makes silent
+# drift possible — one plugin once shipped an engine 16 resolvers behind.
+if [[ "${ALLOW_ENGINE_DRIFT:-0}" == "1" ]]; then
+    printf '\nALLOW_ENGINE_DRIFT=1 set — skipping vendored-engine verification.\n'
+else
+    printf '\n%s\n' '=== Verifying vendored CDN engine ==='
+    "$REPO_ROOT/bin/sync-engine.sh" --check ||
+        die "Vendored copies of tools/cdn/app.sh have drifted (see above). Run bin/sync-engine.sh to reconcile and bump the affected plugin version, or re-run with ALLOW_ENGINE_DRIFT=1 to override."
+fi
+
 if [[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]]; then
     printf 'Nothing to publish. The working tree is clean.\n'
     exit 0

@@ -1,0 +1,28 @@
+{
+  "name": "hunt",
+  "version": "1.0.0",
+  "description": "Recover the byte-exact master behind any CDN/CMS transform, and recover assets from dead, parked, redirected, or archive-only websites. Two skills over one vendored engine: a 48-resolver master-image pipeline (proxy peeling, param stripping, clamp-vs-upscale tests, no-webp Accept, WAF impersonation) and a dead-site triage tree (DNS/CT/CDX recon, four-way liveness read, open-index enumeration, Wayback id_ raw recovery). Carries a trap catalog for every way a candidate wins on bytes or format while carrying fewer real pixels. Verifies before it believes; never claims a dead end without the disproving evidence.",
+  "author": {
+    "name": "Rare Data Club",
+    "email": "salthecowboy@proton.me"
+  },
+  "license": "MIT",
+  "keywords": [
+    "cdn",
+    "master-image",
+    "image-provenance",
+    "dead-site",
+    "web-archive",
+    "wayback",
+    "commoncrawl",
+    "cdx",
+    "imgix",
+    "cloudinary",
+    "sanity",
+    "photon",
+    "har-analysis",
+    "open-directory",
+    "data-recovery",
+    "digital-preservation"
+  ]
+}

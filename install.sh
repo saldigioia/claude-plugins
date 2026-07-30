@@ -9,6 +9,9 @@ PLUGINS=(
   "every-layout"
   "wayback-archive"
   "stems-to-mixdown"
+  "remuxing-to-mov"
+  "catalog-forge"
+  "hunt"
 )
 
 if ! command -v claude >/dev/null 2>&1; then
