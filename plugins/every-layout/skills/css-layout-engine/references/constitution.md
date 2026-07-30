@@ -202,6 +202,17 @@ Use this checklist when auditing layout code:
 - [ ] Animations respect prefers-reduced-motion (ELP_028)
 - [ ] Content readable without CSS/JS (ELP_027)
 
+### Typography & Context
+- [ ] `word-break`/`overflow-wrap`/`hyphens` granted only on content containers — never body/`:root`/`*`/headings (ELP_034); for every grant ask "who granted this, and to whom?"
+- [ ] `light-dark()` never ships without `color-scheme` (ELP_016)
+- [ ] Root gradients/images layer above an explicit `background-color` ground (ELP_035)
+- [ ] `animation-iteration-count: infinite` only for status/progress indication, marked `/* motion: status */`
+
+### Review Process
+- [ ] **Hunt the class** — any confirmed violation triggers a corpus grep for its siblings before the finding closes. The precedent: a body-level word-break fix that missed the identical disease in accordion headings until a later pass. One instance found = one *class* suspected; the finding is not done until the grep comes back empty.
+- [ ] **Species rule** — a visual device that exists twice (two CTA dressings, two card borders, two badge shapes) gets one owner file; a second variant costs a recorded decision (in DECISIONS.md or equivalent), not a second class name. Two of a device with no decision on record is a defect, not a style.
+- [ ] **Backlog aging** — a diagnosed finding older than one release cycle is either scheduled into the next release or explicitly wontfixed with a reason. A backlog that only accumulates is a diary, not a queue.
+
 ---
 
 ## Escalation Path

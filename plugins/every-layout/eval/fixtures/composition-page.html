@@ -1,0 +1,133 @@
+<!--
+  FIXTURE: Composition page — the Window Classics seven in miniature.
+  One artifact, many teeth: this page feeds the C1/C2 mechanical gates
+  (css-strict.sh fails it), the css-lint-hook warn tiers, the render-sweep
+  probes (unpainted dark ground, mid-word fracture), and the /render-audit
+  model-judged checklist (the rank/species findings no grep can see).
+
+  The seven seeded defects:
+    F1  subordinate h1 — the page title (28px/500, cool near-black) is
+        outranked by its own section h2s (42px/700, warm near-black)
+    F2  two near-black inks in one heading system (--ink-page #111827 vs
+        --ink-section #1d232b — near-duplicate tripwire distance)
+    F3  one device, two dressings — the same CTA link shipped as .cta-solid
+        on one card and .cta-ghost-caps on the other (species drift)
+    F4  body-wide word-break: break-word — "The Manufacturers We Trust"
+        fractures mid-word at ~390px (ELP_034)
+    F5  unpainted canvas — body paints a 37.5rem gradient, no
+        background-color anywhere on html/body (ELP_035)
+    F6  adjacent breakpoints — @media (min-width: 640px) and (min-width:
+        641px) in one stylesheet
+    F7  light-dark() used for the accent token with NO color-scheme
+        declaration (ELP_016) — and a decorative infinite hero animation
+        (motion-allowlist infinite-motion rule)
+
+  EXPECTED AUDIT RESULT: Score: 6-10/24
+    Static tier must flag: F4 (ELA_003/ELP_034), F5 (ELA_002/ELP_035),
+    F7 light-dark half (ELA_002/ELP_016); warn tiers: F2 (near-duplicate
+    tokens), F6 (adjacent breakpoints), F7 animation half (INFINITE
+    ANIMATION). Motion Safety scores at most 1/3 (decorative infinite
+    animation) — no 0-cap since the reduced-motion gate is present.
+    F1 (rank inversion) and F3 (CTA species) are MODEL-JUDGED render-tier
+    findings — a static auditor must NOT claim them from source alone; it
+    must close with the /render-audit referral line.
+-->
+<style>
+  :root {
+    /* VIOLATION F2: two near-black inks in one heading system — max
+       per-channel delta 12,  the near-duplicate tripwire prints this pair */
+    --ink-page: #111827;
+    --ink-section: #1d232b;
+    --accent: light-dark(#2563eb, #60a5fa); /* VIOLATION F7a: light-dark() with no color-scheme anywhere (ELP_016) */
+  }
+
+  body {
+    font-family: system-ui, sans-serif;
+    margin: 0;
+    /* VIOLATION F5: sized gradient over a transparent canvas — dark-preference
+       browsers render everything below 37.5rem on UA black (ELP_035) */
+    background: linear-gradient(180deg, #dbeafe 0%, #eff6ff 100%);
+    background-size: 100% 37.5rem;
+    background-repeat: no-repeat;
+    /* VIOLATION F4: content-tier permission granted site-wide — display type
+       inherits it and fractures mid-word at ~390px (ELP_034) */
+    word-break: break-word;
+  }
+
+  /* VIOLATION F1 (model-judged, render tier): the page h1 is outranked by
+     its section h2s — smaller, lighter, and set in the OTHER near-black */
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 500;
+    color: var(--ink-page);
+  }
+  h2 {
+    font-size: 2.625rem;
+    font-weight: 700;
+    color: var(--ink-section);
+  }
+
+  .wrap {
+    max-inline-size: var(--measure, 65ch);
+    margin-inline: auto;
+    padding: var(--s1, 1.5rem);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    /* VIOLATION F7b: decorative infinite animation — the reduced-motion gate
+       does not excuse a perpetual decoration (motion-allowlist.md) */
+    .hero-badge {
+      animation: bounce 2s ease-in-out infinite;
+    }
+    @keyframes bounce {
+      from { transform: translateY(0); }
+      to { transform: translateY(-0.296rem); }
+    }
+  }
+
+  .cta-solid {
+    display: inline-block;
+    padding: var(--s-1, 0.667rem) var(--s0, 1rem);
+    background-color: #2563eb;
+    color: #ffffff;
+    text-decoration: none;
+  }
+  /* VIOLATION F3 (model-judged, render tier): the same device in a second
+     dressing — one CTA species per site, or a recorded decision */
+  .cta-ghost-caps {
+    display: inline-block;
+    padding: var(--s-1, 0.667rem) var(--s0, 1rem);
+    border: 2px solid #2563eb;
+    color: #2563eb;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* VIOLATION F6: adjacent breakpoints, 1px apart — one of these is off the
+     grid (the queries hold no layout properties; ELA_001 is not in play) */
+  @media (min-width: 640px) {
+    .card { color: #1d232b; }
+  }
+  @media (min-width: 641px) {
+    .card-banner { color: #111827; }
+  }
+</style>
+
+<div class="wrap">
+  <h1>Window Classics of Pensacola</h1>
+  <span class="hero-badge" aria-hidden="true">★</span>
+
+  <section class="card">
+    <h2>The Manufacturers We Trust</h2>
+    <p>Precision extrusions and coastal-rated hardware from partners we have
+      installed for twenty years.</p>
+    <a class="cta-solid" href="/quote">Request a quote</a>
+  </section>
+
+  <section class="card-banner">
+    <h2>Service After the Storm</h2>
+    <p>Same-crew repairs, documented torque specs, and honest lead times.</p>
+    <a class="cta-ghost-caps" href="/quote">Request a quote</a>
+  </section>
+</div>

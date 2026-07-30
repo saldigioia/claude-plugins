@@ -446,14 +446,23 @@ scan_typo_grants() {
 # cross-file signals the corpus checks need. Emits TAB-delimited records to
 # $CORPUS_TMP:
 #   LD      file line snippet   first light-dark() use in the file
-#   CS      file                a color-scheme: declaration exists
+#   CS      file scope          a color-scheme: declaration exists
 #   PAINT   file line snippet   body/html/:root block paints an image/gradient
 #                               or sets background-size
-#   GROUND  file                body/html/:root block paints a ground color
+#   GROUND  file scope          body/html/:root block paints a ground color
 #   TOKEN   file line name hex  custom property whose value is a bare hex
 #   BP      file line px        @media min-width breakpoint value
+#
+# scope: "g" = reaches the whole corpus (.css, or .astro containing
+# is:global); "f" = file-scoped (plain .astro <style> is component-scoped by
+# Astro's scoper — a dev page's body background never paints another
+# route's canvas; file-level granularity is the documented approximation).
 collect_corpus_signals() {
   local file="$1" rname="$2"
+  local scope="g"
+  case "$rname" in
+    *.astro) grep -q 'is:global' "$rname" 2>/dev/null || scope="f" ;;
+  esac
 
   # One block-aware, comment-stripping pass gathers the light-dark()/
   # color-scheme signals (ELP_016) and the painted-ground signals (ELP_035).
@@ -462,7 +471,7 @@ collect_corpus_signals() {
   # non-transparent value, or a background shorthand whose color sits OUTSIDE
   # url()/gradient() args (iterative paren-stripping; var()/color functions
   # survive as bare names).
-  awk -v rname="$rname" '
+  awk -v rname="$rname" -v scope="$scope" '
     function trim(s) { gsub(/^[[:space:]]+/, "", s); gsub(/[[:space:]]+$/, "", s); return s }
     function rootish_subject(part,    s, n, toks, subj) {
       s = part
@@ -506,7 +515,7 @@ collect_corpus_signals() {
         }
         if (!cs_seen && decl ~ /^color-scheme[[:space:]]*:/) {
           cs_seen = 1
-          printf "CS\t%s\n", rname
+          printf "CS\t%s\t%s\n", rname, scope
         }
         if (!root) continue
         val = decl
@@ -517,10 +526,10 @@ collect_corpus_signals() {
         } else if (decl ~ /^background-size[[:space:]]*:/) {
           printf "PAINT\t%s\t%d\t%s\n", rname, ln, substr(decl, 1, 80)
         } else if (decl ~ /^background-color[[:space:]]*:/) {
-          if (val !~ /^(transparent|none|inherit|initial|unset|revert|revert-layer)$/) printf "GROUND\t%s\n", rname
+          if (val !~ /^(transparent|none|inherit|initial|unset|revert|revert-layer)$/) printf "GROUND\t%s\t%s\n", rname, scope
         } else if (decl ~ /^background[[:space:]]*:/) {
           if (val ~ /gradient[[:space:]]*\(/ || val ~ /url[[:space:]]*\(/) printf "PAINT\t%s\t%d\t%s\n", rname, ln, substr(decl, 1, 80)
-          if (has_bare_color(val)) printf "GROUND\t%s\n", rname
+          if (has_bare_color(val)) printf "GROUND\t%s\t%s\n", rname, scope
         }
       }
     }
@@ -636,11 +645,13 @@ check_document_context() {
 corpus_checks() {
   local ld_rec ld_file ld_line ld_snip
   # ELP_016 — light-dark() somewhere in the fragment corpus needs color-scheme
-  # somewhere in the same corpus.
+  # reachable from it: a corpus-scoped ("g") declaration anywhere, or a
+  # file-scoped one in the same file (plain .astro styles are
+  # component-scoped and do not opt other routes in).
   ld_rec=$(awk -F'\t' '$1=="LD" && $2 !~ /\.html$/ { print; exit }' "$CORPUS_TMP")
   if [ -n "$ld_rec" ]; then
-    if ! awk -F'\t' '$1=="CS" && $2 !~ /\.html$/ { found=1; exit } END { exit !found }' "$CORPUS_TMP"; then
-      ld_file=$(printf '%s' "$ld_rec" | cut -f2)
+    ld_file=$(printf '%s' "$ld_rec" | cut -f2)
+    if ! awk -F'\t' -v ldf="$ld_file" '$1=="CS" && $2 !~ /\.html$/ && ($3=="g" || $2==ldf) { found=1; exit } END { exit !found }' "$CORPUS_TMP"; then
       ld_line=$(printf '%s' "$ld_rec" | cut -f3)
       ld_snip=$(printf '%s' "$ld_rec" | cut -f4)
       if [ "$MODE_FILE" -eq 1 ]; then
@@ -652,22 +663,24 @@ corpus_checks() {
     fi
   fi
 
-  # ELP_035 — a painted root image/gradient needs a painted ground somewhere
-  # in the same fragment corpus.
-  if awk -F'\t' '$1=="PAINT" && $2 !~ /\.html$/ { found=1; exit } END { exit !found }' "$CORPUS_TMP"; then
-    if ! awk -F'\t' '$1=="GROUND" && $2 !~ /\.html$/ { found=1; exit } END { exit !found }' "$CORPUS_TMP"; then
-      local pfile pline psnip
-      while IFS="$(printf '\t')" read -r pfile pline psnip; do
-        [ -z "$pfile" ] && continue
-        if [ "$MODE_FILE" -eq 1 ]; then
-          warn_note "background image/gradient on body/html/:root at $pfile:$pline with no background-color ground in this file (ELP_035) — verify the project paints the canvas (single-file scan cannot see siblings)"
-        else
-          fail "ELA_002" "$pfile" "$pline" "$psnip" \
-            "Background image/gradient painted on an unpainted canvas (ELP_035) — no background-color reaches body/html/:root anywhere in the scanned corpus; dark-preference browsers show black wherever the image stops"
-        fi
-      done < <(awk -F'\t' '$1=="PAINT" && $2 !~ /\.html$/ { printf "%s\t%s\t%s\n", $2, $3, $4 }' "$CORPUS_TMP")
+  # ELP_035 — every painted root image/gradient needs a ground reachable
+  # from it: a corpus-scoped ("g") ground anywhere, or a file-scoped one in
+  # the same file. A dev page's scoped body background never paints another
+  # route's canvas — the exact false-negative the Window Classics tree
+  # demonstrated.
+  local pfile pline psnip
+  while IFS="$(printf '\t')" read -r pfile pline psnip; do
+    [ -z "$pfile" ] && continue
+    if awk -F'\t' -v pf="$pfile" '$1=="GROUND" && $2 !~ /\.html$/ && ($3=="g" || $2==pf) { found=1; exit } END { exit !found }' "$CORPUS_TMP"; then
+      continue
     fi
-  fi
+    if [ "$MODE_FILE" -eq 1 ]; then
+      warn_note "background image/gradient on body/html/:root at $pfile:$pline with no background-color ground in this file (ELP_035) — verify the project paints the canvas (single-file scan cannot see siblings)"
+    else
+      fail "ELA_002" "$pfile" "$pline" "$psnip" \
+        "Background image/gradient painted on an unpainted canvas (ELP_035) — no background-color reaches body/html/:root from any corpus-scoped stylesheet; dark-preference browsers show black wherever the image stops"
+    fi
+  done < <(awk -F'\t' '$1=="PAINT" && $2 !~ /\.html$/ { printf "%s\t%s\t%s\n", $2, $3, $4 }' "$CORPUS_TMP")
 
   # Warn-tier: near-duplicate hex tokens (drift, token-rules.md). Pairs are
   # compared within one file always, across files only for fragment corpora

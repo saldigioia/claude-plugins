@@ -27,3 +27,5 @@ The canonical rubric lives in `eval/rubric.md` at the plugin root. The canonical
 - **Positive findings** — what the code does well
 
 If the code under review is already compliant (≥20/24), report a short pass with the one or two dimensions that could be tightened.
+
+When the audit covers a whole project or page, the report ends with the rendered-tier referral: static audit does not judge rendered composition (heading rank as drawn, shared axes, device species in situ, dark-scheme ground, narrow-width fractures) — run `/render-audit` for that tier.

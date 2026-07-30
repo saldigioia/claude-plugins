@@ -137,7 +137,7 @@ body {
   margin: 0;
   font-family: var(--br-font-body);
   color: var(--br-color-text);
-  background-color: var(--br-color-surface);
+  background-color: var(--br-color-surface); /* ELP_035 — the painted ground; the canvas is never left to the UA. tokens.css's color-scheme (ELP_016) decides what an unpainted canvas WOULD have been; this line makes sure nobody finds out by accident. Gradients/images layer above it, never replace it. */
 }
 
 h1, h2, h3, h4, h5, h6 {
@@ -195,6 +195,21 @@ cp "${CLAUDE_PLUGIN_ROOT}/escapes.md.template" "escapes.md"
 
 If it already exists, leave it untouched and note that in the report — this skill never overwrites an existing escapes registry.
 
+### 2b. Rendered-tier config + copy contract
+
+Two more project-root files, same never-overwrite rule: Glob for each first; copy only the ones that do not exist (leave existing files untouched and say so in the report):
+
+```!
+cp "${CLAUDE_PLUGIN_ROOT}/render-sweep.config.json.template" "render-sweep.config.json"
+```
+
+```!
+cp "${CLAUDE_PLUGIN_ROOT}/PROTECTED-COPY.md.template" "PROTECTED-COPY.md"
+```
+
+- `render-sweep.config.json` — routes/widths config for `bin/render-sweep.sh`, the opt-in rendered tier (`/render-audit`). Edit `serveDist`/`routes` once the project has a build; the dark-scheme captures it produces are the ones nobody looks at until a user does (ELP_035).
+- `PROTECTED-COPY.md` — the copy-vs-decoration contract: named prose zones, the classification question, and the per-sentence sign-off rule (pass-level approval is not sentence-level approval; a rotating headline's word list is content). Have the project owner fill the zones table on day one. Its rules cite ELP_034 (CSS never fractures copy) and ELP_035 (the canvas under the words is a decision).
+
 ### 3. Offer the pre-commit gate (ask, don't auto-run)
 
 Ask the user whether they want the axiom gate wired into `git commit`. Do not run this without an explicit yes:
@@ -211,6 +226,7 @@ Run nothing that mutates state beyond the file creation and copies above. The fi
 
 - Which of the 4 files were created (all 4, on a clean scaffold) and their paths.
 - Whether `escapes.md` was created or already existed.
+- Whether `render-sweep.config.json` and `PROTECTED-COPY.md` were created or already existed (and that the zones table in the latter needs the owner's names on day one).
 - Whether the pre-commit hook was installed (or declined/skipped).
 - Next actions: run `/strict-check <target>` to confirm the gate passes, and `/audit-layout` once real markup exists to score it against the 24-point rubric.
 - The performance budget the new system must stay under: **34 KB minified / 8.5 KB gzipped** CSS; **15 KB per-route / 30 KB page-total** JavaScript (both from `skills/css-design-system/references/performance-rules.md`).

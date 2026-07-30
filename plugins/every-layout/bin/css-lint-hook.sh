@@ -18,7 +18,9 @@
 #   5. Infinite animations without a /* motion: status */ marker — infinite
 #      iteration is allowed only for status/progress indication
 #      (motion-allowlist.md); decorative infinite motion is a violation even
-#      under prefers-reduced-motion: no-preference.
+#      under prefers-reduced-motion: no-preference. Also runs on framework
+#      templates (the field case's two perpetual hero animations lived in an
+#      .astro style block, not a .css file).
 #   6. Content-tier typographic permissions (word-break/overflow-wrap/
 #      hyphens) granted at body/:root/*/heading scope (ELP_034; shared
 #      scanner in bin/lib/typo-scope.sh — the hard version lives in
@@ -105,6 +107,22 @@ case "$FILE" in
     ;;
 
   *.astro|*.tsx|*.jsx|*.vue|*.svelte)
+    # 5 (templates too). Infinite animations inside component <style> blocks —
+    #    same rule and marker as the .css branch.
+    awk '
+      BEGIN { prev = "" }
+      {
+        if ($0 ~ /animation[^;]*infinite/ \
+            && $0 !~ /motion:[[:space:]]*status/ \
+            && prev !~ /motion:[[:space:]]*status/) {
+          printf "INFINITE ANIMATION: %d: %s — infinite iteration is allowed only for status/progress indication; mark it /* motion: status */ or make it single-run (motion-allowlist.md, ELP_028)\n", NR, substr($0, 1, 100)
+          n++
+        }
+        prev = $0
+        if (n >= 3) exit
+      }
+    ' "$FILE" 2>/dev/null || true
+
     # 7. Inline style="..." scan. Primitive-parameter custom properties are the
     #    only declarations legitimately carried on a template element (they
     #    parameterize ELC_STACK, ELC_SIDEBAR, ELC_SWITCHER, ELC_COVER,

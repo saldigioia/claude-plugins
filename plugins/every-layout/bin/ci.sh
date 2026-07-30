@@ -14,8 +14,10 @@ set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 FAIL=0
 WITH_BUILD=0
+WITH_RENDER=0
 for arg in "$@"; do
   [ "$arg" = "--with-build" ] && WITH_BUILD=1
+  [ "$arg" = "--with-render" ] && WITH_RENDER=1
 done
 
 step() { printf '\n== %s ==\n' "$1"; }
@@ -73,6 +75,24 @@ if [ "$WITH_BUILD" -eq 1 ]; then
         && bash "$ROOT/bin/js-budget.sh" dist ) || FAIL=1
   else
     echo "npm not found — --with-build requested but unavailable"
+    FAIL=1
+  fi
+fi
+
+if [ "$WITH_RENDER" -eq 1 ]; then
+  step "render-sweep — archive-site dist, rendered probes (opt-in --with-render)"
+  # The render tier is opt-in forever: without node + a resolvable local
+  # playwright (RENDER_PW_ROOT may point at a project that has one) the
+  # sweep prints SKIP and default gates are unaffected.
+  if [ -d "$ROOT/demos/archive-site/dist" ]; then
+    ( cd "$ROOT" && bash bin/render-sweep.sh \
+        ${RENDER_PW_ROOT:+--pw-root "$RENDER_PW_ROOT"} \
+        --serve-dist demos/archive-site/dist \
+        --routes "/,/react-port/" \
+        --out tmp/render-sweep \
+        --strict ) || FAIL=1
+  else
+    echo "demos/archive-site/dist missing — run with --with-build first"
     FAIL=1
   fi
 fi

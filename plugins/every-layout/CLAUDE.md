@@ -2,7 +2,7 @@
 
 Claude Code plugin providing composable CSS layout primitives, design system tokens, Astro 6 site architecture, archival data patterns, and framework component implementations based on Every Layout methodology.
 
-**Version:** 4.10.0 | **Author:** Rare Data Club
+**Version:** 4.11.0 | **Author:** Rare Data Club
 
 ## The commitment
 
@@ -11,7 +11,7 @@ This plugin treats **simple, durable, CSS-dominant web design as a requirement, 
 ## Architecture
 
 ```
-skills/                  14 skills (knowledge base + task workflows)
+skills/                  15 skills (knowledge base + task workflows)
 
   Knowledge skills (auto-invokable)
     css-layout-engine/       13 primitives, 28 layout principles, 17 reference files
@@ -29,7 +29,8 @@ skills/                  14 skills (knowledge base + task workflows)
     measure-budget/          /measure-budget — runs bin/css-budget.sh via shell injection
     diagnose-layout/         /diagnose-layout — forks to css-diagnostician agent to explain
     strict-check/            /strict-check — axiom gate (exits non-zero); CI-grade enforcement
-    scaffold-system/         /scaffold-system — greenfield scaffolder: tokens, layers, primitives, escapes.md
+    scaffold-system/         /scaffold-system — greenfield scaffolder: tokens, layers, primitives, escapes.md + render-sweep config + PROTECTED-COPY contract
+    render-audit/            /render-audit — rendered adversarial composition review (tier 4, model-judged; runs bin/render-sweep.sh)
 
 agents/                  3 agents
   site-builder.md          Sonnet — autonomous Astro site builder, uses all 5 knowledge skills
@@ -50,7 +51,9 @@ bin/                     Shell utilities
   test-escapes.sh          Acceptance test for escape suppression (suppressed/expired/unregistered)
   test-gates.sh            Acceptance test for the hardened gate checks (38 assertions)
   install-git-hooks.sh     Installs a pre-commit hook that runs both gates on every commit
-  css-lint-hook.sh         PostToolUse warning hook (.css + inline-style scan for .astro/.tsx/.jsx/.vue/.svelte)
+  css-lint-hook.sh         PostToolUse warning hook (.css + template scan: inline styles, infinite animations, ELP_034 grants)
+  render-sweep.sh          OPT-IN render tier — screenshots (10 widths × light/dark) + overflow/ground/fracture probes; SKIPs without local playwright
+  lib/render-sweep.cjs     Node driver for render-sweep.sh (static server, probes, PNG pixel sample)
   css-audit.sh             Directory-wide CSS lint with colored output
   css-budget.sh            Performance budget measurement (sizes, properties, specificity)
   run-evals.sh             Eval fixture structural validation
@@ -58,7 +61,7 @@ bin/                     Shell utilities
   db-schema.sh             SQLite schema dump
 
 eval/                    Evaluation fixtures and prompts
-  prompts/                 10 eval prompts with scoring rubrics
+  prompts/                 11 eval prompts with scoring rubrics
   fixtures/                HTML/Astro fixtures (compliant + non-compliant)
   rubric.md                24-point scoring rubric (8 dimensions x 0-3)
   expected-properties.md   Required/forbidden CSS per primitive
@@ -89,6 +92,7 @@ Workflow skills reference knowledge skills by name (not by dependency):
   generate-port → css-layout-engine + framework-implementations
   measure-budget → css-design-system/references/performance-rules.md via bin/css-budget.sh
   scaffold-system → css-design-system token/layer contracts + demos/every-layout.css (copied verbatim)
+  render-audit → bin/render-sweep.sh captures + probes → model-judged composition checklist (no agent fork; needs vision)
 ```
 
 The site-builder agent wires all 5 knowledge skills. The css-auditor and css-diagnostician use only the two CSS skills.
@@ -191,8 +195,17 @@ Deprecation process: mark `deprecated: true`, add `deprecated_reason`, add `supe
 | 1 | Skills/agents (advice, ID citations, recipes) | Persuasion — Claude follows prose |
 | 2 | PostToolUse hook (`css-lint-hook.sh`, ports-lint warnings) | Visible warnings inside Claude sessions; never blocks |
 | 3 | `install-git-hooks.sh` pre-commit + `bin/ci.sh` in CI | Hard gate — commits/builds fail on axiom violations |
+| 4 | `/render-audit` + `bin/render-sweep.sh` (`bin/ci.sh --with-render`) | **Model-judged** rendered review, opt-in (needs a local playwright; SKIPs without one) |
 
 A project that never installs tier 3 has an advisory system, not a contract.
+Tier 4 exists because some defect classes live ONLY there: heading rank as
+rendered, one ink/family per tier as drawn, shared axes, device species in
+situ, optical centering vs reserved animation slots. The mechanical probes
+(overflow, unpainted dark ground, mid-word fracture) pre-screen; the
+composition checklist is judged from captures, never grepped — pretending
+composition is grep-able is the failure mode the Window Classics retro
+documents. A project that never runs tier 4 has never actually seen its own
+dark-mode below the fold.
 
 ## Release Checklist
 
@@ -204,5 +217,6 @@ Run before every version bump:
 4. `ids.json` contains any new IDs (run-evals cross-checks citations)
 5. `baseline-registry.md` "Last verified" dates acceptable — re-verify drifted rows
 6. Agent `model:` aliases still valid names
-7. CHANGELOG entry written; version bumped in plugin.json + CLAUDE.md + README.md
-8. Commit, then **push** (and schedule the standalone-repo sync)
+7. Render-sweep the demos when a local playwright is reachable: `bin/ci.sh --with-render` (or `RENDER_PW_ROOT=<project-with-playwright> bin/ci.sh --with-render`) — probe table clean; SKIP acceptable only on a machine with no playwright anywhere
+8. CHANGELOG entry written; version bumped in plugin.json + CLAUDE.md + README.md
+9. Commit, then **push** (the monorepo is the single canonical home)

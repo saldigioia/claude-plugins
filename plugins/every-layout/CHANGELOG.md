@@ -7,6 +7,91 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [4.11.0] - 2026-07-11
+
+Campaign 3 Phases C3–C4 ("eyes"): the rendered adversarial tier. The retro's
+central finding — every screenshot the field deployment ever took was
+light-mode, comfortable-width, motion-on — gets a mechanical answer (render
++ probe) and a judgment answer (a model-judged composition checklist),
+plus the process authority that keeps findings from recurring.
+
+### Added — the rendered tier (Phase C3)
+
+- **`bin/render-sweep.sh` + `bin/lib/render-sweep.cjs`** — opt-in harness:
+  drives a locally resolvable playwright (never bundled; `--pw-root` can
+  borrow a sibling project's) across a route list at ten widths
+  (320–1440), light AND dark emulated, reduced-motion emulated for stable
+  captures; serves a dist dir itself when asked (`--serve-dist`, built-in
+  static server). Prints a per-route probe table and writes `probes.json`:
+  horizontal overflow, the ELP_035 unpainted-canvas ground (computed
+  html/body transparency + a literal bottom-center pixel decoded from the
+  PNG), and the ELP_034 mid-word fracture (any heading word spanning two
+  line boxes). Without node/playwright it prints `SKIP` and exits 0 —
+  default CI stays offline and dependency-free forever. Wired as
+  `bin/ci.sh --with-render` (honors `RENDER_PW_ROOT`).
+- **`/render-audit` skill (15th skill, tier 4)** — runs the sweep, then
+  reviews captures against the composition checklist static gates cannot
+  see: heading rank monotonic, one ink/family per tier as rendered, shared
+  axes, device species (the CTA test), reserved-slot vs optical centering,
+  dark-scheme ground, narrow fractures, breakpoint seams. Report mirrors
+  css-auditor's finding shape, explicitly labeled MODEL-JUDGED, no /24
+  score — that scale belongs to the static rubric.
+- **Validation against the motivating field case** — the pre-remediation
+  Window Classics tree (27a1883, disposable worktree): the 4.10.0 static
+  gates + hook mechanically reproduce **6 of the retro's 7 findings**
+  (body word-break at the exact line, light-dark-without-color-scheme,
+  unpainted 600px-gradient canvas, near-duplicate inks, 640/641
+  breakpoints — plus a 768/769 sibling the retro itself missed — and both
+  perpetual hero animations); the remaining rank/species classes are
+  exactly the /render-audit checklist. Two gate refinements fell out:
+  scoped-`.astro` ground/color-scheme records no longer satisfy other
+  files' checks (a dev page's body background never painted the real
+  site's canvas; `is:global` still counts corpus-wide), and the
+  infinite-animation warning now scans framework-template style blocks
+  (the two hero animations lived in index.astro, not a .css file).
+- **css-auditor honesty** — new "Static Composition Subset" (what IS
+  source-checkable: ELP_034/035/016, heading-tier tokens, species
+  candidates) and a mandatory rendered-tier referral line closing every
+  whole-project audit; mirrored in `/audit-layout`.
+- **`eval/fixtures/composition-page.html` + `eval/prompts/composition_audit.md`**
+  — the WC seven in miniature (subordinate h1, two near-blacks, body-wide
+  word-break, light-dark sans color-scheme, unpainted gradient body,
+  640+641, decorative infinite animation); one artifact feeding the
+  gates, the hook, the render probes, and the model-judged checklist. The
+  prompt scores tier honesty: overclaiming rendered findings from source
+  is penalized.
+- **Scaffold discipline** — `/scaffold-system` now also emits
+  `render-sweep.config.json` and `PROTECTED-COPY.md` (named prose zones,
+  the copy-vs-decoration classification question, per-sentence sign-off;
+  cites ELP_034/035) from new plugin-root templates, and annotates the
+  ELP_035 painted-ground line it already emitted.
+
+### Added — authority & process (Phase C4)
+
+- **Constitution** — code-review checklist gains a Typography & Context
+  block (ELP_034/016/035/infinite-motion) and a Review Process block:
+  *hunt the class* (a confirmed violation triggers a sibling grep before
+  the finding closes), *species rule* (a device that exists twice gets one
+  owner file; a second variant costs a recorded decision), *backlog aging*
+  (older than one release cycle → scheduled or wontfixed).
+- **site-builder copy authority** — classify copy vs decoration before any
+  text touch; never invent/reword/delete owner copy; subtraction requires
+  the owner's exact surviving sentence; visible design decisions ship as
+  options-with-renders. (Also fixed a stale "32 documented ELP_*".)
+- **Diagnostician traces** — "site renders on black in dark mode"
+  (color-scheme? reachable root ground? sized background stopping short?
+  → ELP_016/035) and "word fractures mid-heading at narrow width" (walk
+  the cascade for the granting selector → ELP_034), in both the agent and
+  `/diagnose-layout`.
+- **Tier 4 in the honesty tables** — README + CLAUDE.md enforcement tiers
+  gain the rendered row and name the defect classes that live only there;
+  the release checklist gains the render-sweep step.
+- **Dogfood** — full `bin/ci.sh --with-render` over the archive-site demo:
+  40 captures (2 routes × 10 widths × 2 schemes), probe table clean
+  (painted ground verified to the pixel: #fafafa light / #1a1a1a dark).
+
+---
+
 ## [4.10.0] - 2026-07-10
 
 Campaign 3 Phases C1–C2 ("teeth"), from the Window Classics performance

@@ -49,6 +49,16 @@ an Every Layout primitive, you explain *why* it's happening by tracing the algor
 **Trace:** Check the track definition first: bare `1fr` means `minmax(auto, 1fr)` — the hidden `auto` floor is the culprit, not the `1fr` ceiling. Then check the child: `aspect-ratio` feeds wrapped-label height back into a larger minimum width; long unbreakable strings raise min-content directly. Reproduce by narrowing the container until combined minimums exceed it.
 **Fix:** `minmax(0, 1fr)` on the tracks (or a definite minimum like the canonical Grid's `min(var(--min), 100%)`), or `min-inline-size: 0` on the child. Never fix with a media query. Exception: Reel children (`flex: 0 0 auto`) are correct-by-design — scrolling is their overflow strategy.
 
+### Site Renders on Black in Dark Mode
+**Cause:** An unpainted canvas showing through where the decoration stops (ELP_035), usually compounded by a `color-scheme` opt-in the tokens assumed (ELP_016).
+**Trace:** Three questions, in order. (1) Is `color-scheme` actually declared — a real `color-scheme:` declaration on `:root` or a `<meta name="color-scheme">`, not a doc comment claiming it? If it opts into `dark`, an unpainted canvas is UA near-black for dark-preference users. (2) Does any rule paint `background-color` on `body`/`html`/`:root` — and is it reachable (a scoped .astro dev-page style does not paint other routes)? (3) Does a `background-image`/gradient carry `background-size`/`no-repeat` — everywhere it stops, the canvas shows through; sampling the page's bottom pixel in a dark-emulated capture (bin/render-sweep.sh's `ground` probe) makes this visible.
+**Fix:** Declare `background-color` on the root (theme-aware via `light-dark()`), keep the gradient as decoration above it; declare `color-scheme` to match the token regime. Never "fix" by removing the gradient — the ground was the missing piece.
+
+### Word Fractures Mid-Heading at Narrow Width
+**Cause:** A content-tier typographic permission granted at global or heading scope — `word-break`/`overflow-wrap`/`hyphens` on `body`, `:root`, `*`, or an `h1–h6` selector — that display type cashes in at an untested width (ELP_034).
+**Trace:** Walk the cascade for the granting selector: inspect the fractured heading's computed `word-break`/`overflow-wrap`, then find which rule granted it — the grant is usually far away, in a reset or a "defensive" body block. Confirm the signature: the heading renders fine at the widths that were tested and opens a line with an orphan letter at the one that wasn't (`bin/render-sweep.sh`'s `fracture` probe detects any heading word spanning two line boxes).
+**Fix:** Remove the global/heading grant; re-grant on the prose/data container that actually holds unbreakable tokens (`failure-mechanics.md` §2). Then hunt the class: grep the corpus for the other granting selectors before closing. A heading that then genuinely overflows is a copy conversation, not a CSS permission.
+
 ### Cover Content Not Centering
 **Cause:** Missing `.principal` class on the centered element.
 **Trace:** `margin-block: auto` only applies to `.principal` children. Without it, the element gets the default `--space` margin.

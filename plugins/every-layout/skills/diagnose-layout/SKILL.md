@@ -21,6 +21,8 @@ Canonical inputs before diagnosing:
 - Primitive definition: `skills/css-layout-engine/references/primitives.md` — the `applies_when`, `fails_when`, and custom-property defaults for the primitive in question.
 - Hooks: `skills/css-layout-engine/references/hooks.md` — how each primitive responds to its custom properties.
 - For clipping/overflow-at-narrow-widths symptoms: ELP_033 (Neutralized Auto-Minimum) in `references/principles.md` — check bare `1fr` tracks and the `min-width: auto` floor before anything else.
+- For "site renders on black in dark mode": ELP_016/ELP_035 — is `color-scheme` really declared? does a reachable `background-color` paint `body`/`html`/`:root`? does a sized/no-repeat background stop short of the page height?
+- For "word fractures mid-heading at narrow width": ELP_034 — walk the cascade for the granting selector (`body`? `*`? a heading?); the fix moves the grant to the token's container, never widens it.
 
 ## Report shape
 

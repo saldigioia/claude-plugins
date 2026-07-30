@@ -1,0 +1,51 @@
+# Protected Copy — the owner's words
+
+<!-- Scaffolded by /scaffold-system. Fill the zones table on day one and
+     keep it current: this file is the contract that separates the system's
+     voice (decoration) from the owner's voice (copy). The precedent: six
+     "approved" copy edits reverted wholesale because pass-level approval
+     was mistaken for sentence-level approval. -->
+
+## The classification question
+
+Before ANY text touch, classify it:
+
+- **Copy** — the owner's voice: headlines, product claims, names, prices,
+  legal lines, the word list of a rotating headline. Copy is *content*, even
+  when it lives inside a visual device.
+- **Decoration** — the system's voice: placeholder strings, `aria-label`
+  boilerplate, empty-state filler the owner never wrote.
+
+If the answer is "copy," the rules below apply. If you are unsure, it is
+copy.
+
+## Named prose zones
+
+| Zone | Where it lives | Owner | Sign-off granularity |
+|------|----------------|-------|----------------------|
+| Page titles + section headings | every route | [OWNER] | per sentence |
+| Hero headline + rotating word list | `/` hero | [OWNER] | per word |
+| Product/service claims | cards, feature sections | [OWNER] | per sentence |
+| Legal / compliance lines | footer, forms | [OWNER] | per sentence |
+
+## The rules
+
+1. **Never invent, reword, or delete owner copy.** A layout fix that changes
+   the words is a copy edit in disguise. Subtraction or a move requires the
+   owner's exact surviving sentence, written by the owner.
+2. **Per-sentence sign-off.** Approval of a pass ("the new hero looks good")
+   is not approval of each changed sentence. Diff the words separately from
+   the styles and get the words approved as words.
+3. **CSS never fractures copy.** Display type wraps at word boundaries or
+   overflows visibly; a `word-break`/`overflow-wrap` grant that reaches a
+   heading is a violation, not a fix (ELP_034 — the gate enforces it). If a
+   headline genuinely does not fit at 320px, that is a conversation with the
+   copy's owner, not a CSS permission.
+4. **The canvas under the words is design, not accident.** The page ground
+   is an explicit painted decision (`background-color` on the root,
+   ELP_035); copy must never end up on a UA-default canvas the owner never
+   saw. Verify with the dark-scheme captures in `/render-audit`.
+5. **Visible design decisions ship as options-with-renders.** When a change
+   alters what the reader sees of the owner's words (rank, ink, family,
+   placement), present rendered options and let the owner pick — never land
+   an unpicked option.

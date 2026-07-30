@@ -2,7 +2,7 @@
 
 Composable CSS layout primitives, Astro 6 site architecture, archival data engine, and design system tokens for Claude Code. Built on the [Every Layout](https://every-layout.dev) methodology by Andy Bell and Heydon Pickering.
 
-**Version:** 4.10.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
+**Version:** 4.11.0 &middot; **Author:** Rare Data Club &middot; **License:** MIT
 
 ## The commitment
 
@@ -51,6 +51,17 @@ bash /path/to/every-layout-plugin/bin/install-git-hooks.sh
 
 Every `git commit` now runs `bin/css-strict.sh` and `bin/js-budget.sh` against your project. A commit that violates any axiom is blocked. To bypass (emergency only): `git commit --no-verify`. To register an intentional exception: add an entry to `escapes.md` with an expiry date.
 
+The enforcement tiers, plainly:
+
+| Tier | Mechanism | Force |
+|---|---|---|
+| 1 | Skills/agents (advice, ID citations, recipes) | Persuasion — Claude follows prose |
+| 2 | PostToolUse hook (`css-lint-hook.sh`, ports-lint warnings) | Visible warnings inside Claude sessions; never blocks |
+| 3 | `install-git-hooks.sh` pre-commit + the gates in CI | Hard gate — commits/builds fail on axiom violations |
+| 4 | `/render-audit` + `bin/render-sweep.sh` (opt-in, needs playwright) | **Model-judged** rendered review — heading rank as drawn, device species in situ, shared axes, optical centering live ONLY here; no static tier can see them |
+
+"Adoption = contract" is realized at tier 3; tier 4 is where composition is seen at all.
+
 For CI (GitHub Actions, GitLab CI, etc.), run the gates directly:
 
 ```bash
@@ -66,7 +77,7 @@ To run **this plugin's own gates** (dogfooding, or CI for this repo), there is a
 bash bin/ci.sh
 ```
 
-It syntax-checks every script in `bin/`, runs both acceptance batteries, the eval validation (including the `ids.json` citation cross-check), the strict gate across demos and stress tests, the CSS-in-JS/Tailwind-bracket lints (including `--docs` regression over the reference-port docs), and the archival external-dependency sweep. Add `--with-build` (requires node) to also build the archive-site demo and run the real `js-budget.sh` against its `dist/`.
+It syntax-checks every script in `bin/`, runs both acceptance batteries, the eval validation (including the `ids.json` citation cross-check), the strict gate across demos and stress tests, the CSS-in-JS/Tailwind-bracket lints (including `--docs` regression over the reference-port docs), and the archival external-dependency sweep. Add `--with-build` (requires node) to also build the archive-site demo and run the real `js-budget.sh` against its `dist/`. Add `--with-render` (requires node + a locally resolvable playwright, or `RENDER_PW_ROOT` pointing at a project that has one) to also run `bin/render-sweep.sh` over the built demo — full-page captures at ten widths in light **and** dark emulation, plus overflow / unpainted-ground / mid-word-fracture probes. Without playwright the render step prints `SKIP` and default CI is unaffected — the render tier is opt-in forever.
 
 ### Registering intentional exceptions (`escapes.md`)
 
@@ -89,7 +100,7 @@ for reproducible runs. Format and field rules: `escapes.md.template` and
 
 | Directory | What's inside |
 |---|---|
-| `skills/` | 14 skills — **5 knowledge** (`css-layout-engine`, `css-design-system`, `framework-implementations`, `astro-site-architect`, `archival-data-engine`) that Claude loads automatically when relevant; their `paths` globs scope each skill to the file types it covers; **9 workflow** (`/strict-check`, `/audit-layout`, `/diagnose-layout`, `/choose-primitive`, `/refactor-to-primitives`, `/generate-port`, `/plan-migration`, `/measure-budget`, `/scaffold-system`) are user-invoked |
+| `skills/` | 15 skills — **5 knowledge** (`css-layout-engine`, `css-design-system`, `framework-implementations`, `astro-site-architect`, `archival-data-engine`) that Claude loads automatically when relevant; their `paths` globs scope each skill to the file types it covers; **10 workflow** (`/strict-check`, `/audit-layout`, `/diagnose-layout`, `/choose-primitive`, `/refactor-to-primitives`, `/generate-port`, `/plan-migration`, `/measure-budget`, `/scaffold-system`, `/render-audit`) are user-invoked |
 | `agents/` | 3 subagents: `site-builder` (Sonnet, autonomous Astro builder), `css-auditor` (Haiku, read-only scorer), `css-diagnostician` (Haiku, primitive behavior explainer) |
 | `hooks/` | PostToolUse CSS linter that flags physical properties, arbitrary px, and media queries on every CSS write |
 | `bin/` | Axiom gates (`css-strict.sh` — scans `.html`/`.astro` too, `js-budget.sh`), CSS-in-JS detector (`ports-lint.sh`), CI entry point (`ci.sh`), acceptance batteries (`test-escapes.sh`, `test-gates.sh`), git-hook installer, CSS lint/audit/budget scripts, Astro typecheck, eval runner, SQLite schema dump |
@@ -109,7 +120,8 @@ for reproducible runs. Format and field rules: `escapes.md.template` and
 - `/measure-budget [dir]` — per-file CSS budget check with pass/fail per metric
 
 **Migration & authoring:**
-- `/scaffold-system <styles-dir>` — greenfield scaffolder: tokens (with the 9 mandatory `--br-*` brand tokens), layer order, canonical primitives stylesheet, `escapes.md`, optional pre-commit gate
+- `/scaffold-system <styles-dir>` — greenfield scaffolder: tokens (with the 9 mandatory `--br-*` brand tokens), layer order, canonical primitives stylesheet, `escapes.md`, `render-sweep.config.json`, `PROTECTED-COPY.md`, optional pre-commit gate
+- `/render-audit <url-or-dist> [routes]` — the rendered adversarial tier (tier 4, **model-judged**): runs `bin/render-sweep.sh`, then reviews the captures against the composition checklist static gates cannot see — heading rank as drawn, one ink/family per tier, shared axes, device species, dark-scheme ground, narrow-width fractures, breakpoint seams. Validated against the field case that motivated it: the new static gates alone reproduce 6 of that retro's 7 findings from pre-remediation source; the remaining rank/species classes are exactly what this skill's checklist covers
 - `/plan-migration [dir]` — scans codebase; produces phased adoption plan with violation counts
 - `/refactor-to-primitives [path]` — converts non-compliant CSS into primitive composition
 - `/choose-primitive "<problem>"` — decision tree picks the right primitive with ELP citations

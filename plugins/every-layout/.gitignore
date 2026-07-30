@@ -8,3 +8,6 @@ review/
 demos/**/node_modules/
 demos/**/dist/
 demos/**/.astro/
+
+# render-sweep output (bin/render-sweep.sh / bin/ci.sh --with-render)
+tmp/

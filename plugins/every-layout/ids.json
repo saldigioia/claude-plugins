@@ -1,6 +1,6 @@
 {
   "$comment": "Machine-readable registry of every canonical ID. IDs are immutable (see CLAUDE.md 'ID Immutability'). bin/run-evals.sh cross-checks that every ID cited in skills/, agents/, and eval/ exists here. Deprecations get an entry in 'deprecated' (never removed from their list).",
-  "version": "4.10.0",
+  "version": "4.11.0",
   "axioms": [
     "ELA_001", "ELA_002", "ELA_003", "ELA_004", "ELA_005", "ELA_006"
   ],

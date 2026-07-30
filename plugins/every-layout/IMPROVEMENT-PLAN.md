@@ -634,7 +634,7 @@ species, optical centering) are invisible to file-shaped checks *by nature* —
 this tier renders and looks. It stays **opt-in** (H2.6 precedent): default
 `bin/ci.sh` remains offline and dependency-free.
 
-- [ ] **C3.1 `bin/render-sweep.sh`** — opt-in harness (generalized from the
+- [x] **C3.1 `bin/render-sweep.sh`** — opt-in harness (generalized from the
       WC `tmp/curation` fullsweep): detects `node` + a resolvable local
       `playwright` (else exits "SKIP — render tier unavailable", code 0
       unless `--strict`). Given a base URL + route list (flags or
@@ -647,7 +647,7 @@ this tier renders and looks. It stays **opt-in** (H2.6 precedent): default
       `bin/ci.sh --with-render` against a served `demos/archive-site` build.
       *Accept:* sweep over demos produces shots + a clean probe table;
       SKIP path proven on a playwright-less shell.
-- [ ] **C3.2 `/render-audit` skill** — new `skills/render-audit/SKILL.md`
+- [x] **C3.2 `/render-audit` skill** — new `skills/render-audit/SKILL.md`
       (user-invocable): runs C3.1, then reviews the captures against the
       composition checklist the static rubric cannot judge — heading rank
       monotonic (h1 ≥ its sections); one ink/family per tier as *rendered*;
@@ -659,14 +659,14 @@ this tier renders and looks. It stays **opt-in** (H2.6 precedent): default
       labeled **model-judged** — distinct tier from the 24-point rubric.
       *Accept:* run against the WC repo reproduces ≥5 of the retro's 7
       findings from pre-remediation HEAD (`27a1883`); documented in README.
-- [ ] **C3.3 css-auditor honesty + static composition greps** —
+- [x] **C3.3 css-auditor honesty + static composition greps** —
       `agents/css-auditor.md`: add the static subset it *can* check (heading
       selectors' color/font tokens per tier from source; ELP_034/035/016
       citations; duplicate component species by filename/class heuristic),
       and a mandatory closing line when auditing a whole project: "static
       audit does not judge rendered composition — run `/render-audit`."
       Mirror one line in `skills/audit-layout/SKILL.md`.
-- [ ] **C3.4 Composition eval fixture** —
+- [x] **C3.4 Composition eval fixture** —
       `eval/fixtures/composition-page.html`: a single page embodying the WC
       seven in miniature (subordinate h1, two near-black tokens, body-wide
       `word-break`, `light-dark()` without `color-scheme`, unpainted gradient
@@ -674,7 +674,7 @@ this tier renders and looks. It stays **opt-in** (H2.6 precedent): default
       `eval/prompts/composition_audit.md` with expected findings; wire into
       `bin/run-evals.sh` (this fixture also feeds the C1/C2 gate fixtures —
       one artifact, many teeth).
-- [ ] **C3.5 Scaffold the discipline into new projects** —
+- [x] **C3.5 Scaffold the discipline into new projects** —
       `skills/scaffold-system/SKILL.md` emissions grow: (a) tokens template
       already carries `color-scheme` — verify, and add root
       `background-color` (ELP_035); (b) `render-sweep.config.json` template;
@@ -688,7 +688,7 @@ this tier renders and looks. It stays **opt-in** (H2.6 precedent): default
 
 ## Phase C4 — Authority & process — part of **4.11.0 (MINOR)**
 
-- [ ] **C4.1 Constitution additions** —
+- [x] **C4.1 Constitution additions** —
       `skills/css-layout-engine/references/constitution.md` code-review
       checklist: (a) *hunt the class* — any confirmed violation triggers a
       corpus grep for siblings before the finding closes; (b) *species rule*
@@ -696,30 +696,30 @@ this tier renders and looks. It stays **opt-in** (H2.6 precedent): default
       variant costs a recorded decision; (c) *backlog aging* — a diagnosed
       finding older than one release cycle is either scheduled or explicitly
       wontfixed (a backlog that only accumulates is a diary, not a queue).
-- [ ] **C4.2 site-builder copy authority** — `agents/site-builder.md`
+- [x] **C4.2 site-builder copy authority** — `agents/site-builder.md`
       constraints: classify every text touch as copy vs decoration *before*
       editing; never invent, reword, or delete owner copy — subtraction/move
       requires the owner's exact surviving sentence; visible design
       decisions ship as options-with-renders, never landed unpicked. (WC
       precedent: six "approved" copy edits reverted wholesale; the rule now
       lives in that repo's CLAUDE.md — this bakes it into the toolchain.)
-- [ ] **C4.3 Diagnostician symptom paths** — `agents/css-diagnostician.md`
+- [x] **C4.3 Diagnostician symptom paths** — `agents/css-diagnostician.md`
       + `skills/diagnose-layout/SKILL.md`: two new traces — "site renders on
       black in dark mode" → `color-scheme` declared? root
       `background-color` painted? sized/no-repeat background stopping short?
       (ELP_016/035); "word fractures mid-heading at narrow width" → walk the
       cascade for the granting selector (`body`? `*`? heading?) → ELP_034.
-- [ ] **C4.4 Enforcement-tiers table gains the render tier** — README +
+- [x] **C4.4 Enforcement-tiers table gains the render tier** — README +
       CLAUDE.md (H2.7's table): tier 4 — rendered review (`/render-audit` +
       `render-sweep.sh`), model-judged, opt-in; states plainly which defect
       classes live *only* here. Add "render-sweep demos before release" to
       the CLAUDE.md release checklist (H2.10).
-- [ ] **C4.5 Dogfood sweep** — run the full C1/C2 gate set plus
+- [x] **C4.5 Dogfood sweep** — run the full C1/C2 gate set plus
       `--with-render` over `demos/` + `stress-tests/`; fix violations
       (expected: none structural; possibly gallery/artsheet heading
       permissions) or register escapes with expiry. Self-compliance is the
       Phase-3 precedent: the plugin passes its own new teeth.
-- [ ] **C4.6 Release** — CHANGELOG 4.11.0 (C3+C4), bump, `claude plugin
+- [x] **C4.6 Release** — CHANGELOG 4.11.0 (C3+C4), bump, `claude plugin
       validate`, full ci green incl. new fixtures, commit. → **USER: push
       (and clear H3.1/H3.2 while at it — two campaigns of history still
       live on one disk).**

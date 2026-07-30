@@ -1,0 +1,8 @@
+{
+  "$comment": "render-sweep.config.json — config for bin/render-sweep.sh (the opt-in rendered tier, tier 4). Set 'base' to a served URL OR 'serveDist' to a build directory the sweep serves itself. The sweep captures every route at every width in light AND dark emulation and probes horizontal overflow, the ELP_035 unpainted-canvas ground (computed + bottom-pixel sample), and ELP_034 mid-word heading fractures. Review the captures with /render-audit — the dark-scheme captures are the ones nobody looks at until a user does.",
+  "serveDist": "dist",
+  "base": "",
+  "routes": ["/"],
+  "widths": [320, 360, 390, 414, 640, 768, 834, 1024, 1280, 1440],
+  "out": "tmp/render-sweep"
+}
