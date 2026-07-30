@@ -14,16 +14,22 @@
 #   bin/sync-engine.sh --list     show canonical + consumers with their hashes
 #
 # Optional external working copy (a scratch checkout outside the repo):
-#   ENGINE_WORKING_COPY=/path/to/app.sh bin/sync-engine.sh --check
-# If that path is a symlink resolving to the canonical file it can never drift
-# and is reported as linked. If it is a regular file it is diffed like any other
-# consumer. Unset (the default) skips the check entirely, so this stays portable.
+#   ENGINE_WORKING_COPY=~/Downloads/cdn/app.sh bin/sync-engine.sh --check
+# A symlink resolving to the canonical file can never drift and is reported as
+# linked; a regular file is compared and flagged. The tests/run.sh beside it is
+# checked the same way. Unset (the default) skips this, so the script stays
+# portable to a machine that has no working copy at all.
 
 set -uo pipefail
 
 # ── configuration ────────────────────────────────────────────────────────────
 
 CANONICAL="plugins/hunt/tools/cdn/app.sh"
+
+# The suite that guards the engine. No plugin vendors it (only hunt ships it),
+# but the external working copy sits next to its own tests/run.sh, so that path
+# is checked alongside the engine.
+CANONICAL_TESTS="plugins/hunt/tools/cdn/tests/run.sh"
 
 # Every other in-repo copy that must match CANONICAL byte-for-byte.
 # Add a line when a new plugin vendors the engine.
@@ -105,23 +111,38 @@ for c in "${CONSUMERS[@]}"; do
   esac
 done
 
-# Optional external working copy.
-if [[ -n "${ENGINE_WORKING_COPY:-}" ]]; then
-  echo
-  w="$ENGINE_WORKING_COPY"
+# Optional external working copy. Both the engine AND the tests/run.sh beside
+# it are checked: a regular file at either path is the same silent-drift hazard
+# the vendored copies have, except it lives outside the repo where no commit
+# gate can ever see it.
+check_working_copy() {
+  local w="$1" canon="$2" target
   if [[ -L "$w" ]]; then
     target="$(cd "$(dirname "$w")" && cd "$(dirname "$(readlink "$w")")" 2>/dev/null && pwd)/$(basename "$(readlink "$w")")"
-    if [[ "$target" == "$REPO_ROOT/$CANONICAL" ]]; then
+    if [[ "$target" == "$canon" ]]; then
       printf '  [ok] %-52s symlinked to canonical (cannot drift)\n' "$w"
     else
       printf '  [!!] %-52s symlink points elsewhere: %s\n' "$w" "$target"
       drift=$((drift + 1))
     fi
   elif [[ -f "$w" ]]; then
-    report_one "$w" "$w (working copy, regular file)"
+    if cmp -s "$w" "$canon"; then
+      printf '  [~~] %-52s regular file, identical for now — will drift\n' "$w"
+      printf '       symlink it:  ln -sfn %s %s\n' "$canon" "$w"
+    else
+      printf '  [!!] %-52s DRIFTED from canonical (regular file)\n' "$w"
+      drift=$((drift + 1))
+    fi
   else
     printf '  [--] %-52s not present, skipped\n' "$w"
   fi
+}
+
+if [[ -n "${ENGINE_WORKING_COPY:-}" ]]; then
+  echo
+  check_working_copy "$ENGINE_WORKING_COPY" "$REPO_ROOT/$CANONICAL"
+  check_working_copy "$(dirname "$ENGINE_WORKING_COPY")/tests/run.sh" \
+                     "$REPO_ROOT/$CANONICAL_TESTS"
 fi
 
 echo
