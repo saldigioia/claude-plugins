@@ -123,7 +123,7 @@
     {
       "name": "catalog-forge",
       "source": "./plugins/catalog-forge",
-      "description": "Verify, enrich, finalize, and promote canonical-3.1 product catalogs against a truth-root archive. Wraps an existing 4-axis verifier and collection pipeline behind one CLI engine: one-command verify (no symlink staging), CDN master-rendition fetch resolver, flag-only liveness sweep, propose-only enrichment queue, scaffolds, gated promotion. Ships a curator subagent and a PreToolUse hook that locks metadata.json (POS truth is read-only). Mechanical steps auto-apply; identity/naming/merge/inclusion stay curator-gated.",
+      "description": "Verify, enrich, finalize, and promote canonical-3.1 product catalogs against a truth-root archive. Wraps an existing 4-axis verifier and collection pipeline behind one CLI engine: one-command verify (no symlink staging), CDN master-rendition fetch resolver, flag-only liveness sweep, propose-only enrichment queue, scaffolds, gated promotion. Ships a PreToolUse hook that locks metadata.json (POS truth is read-only). Mechanical steps auto-apply; identity/naming/merge/inclusion stay curator-gated.",
       "category": "data-curation",
       "keywords": [
         "catalog",

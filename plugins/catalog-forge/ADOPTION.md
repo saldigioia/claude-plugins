@@ -17,7 +17,6 @@ finish Kanye West and keep future collections aligned.
 | Scheduled liveness + rendition-ceiling sweep | `catalog sweep` / `/catalog-sweep` — flag-only; `--online` probes URLs; schedulable over the truth root |
 | New-collection scaffold | `catalog scaffold collection|product` (+ `CHECKLIST.md`) |
 | The skill that keeps sessions aligned | `skills/canonical-collections/SKILL.md` |
-| The "specialization" (delegated work stays on-contract) | `agents/catalog-curator.md` |
 | Propose-never-assert, enforced structurally | `hooks/hooks.json` + `scripts/hook_guard.py` block any write to `metadata.json` |
 | Human-in-the-loop queue | one `queue.json`, typed verdicts, consumed by finalize/merge |
 | Promotion | `catalog-promote` (gated, irreversible) |

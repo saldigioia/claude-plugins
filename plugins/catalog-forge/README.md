@@ -1,10 +1,9 @@
 # catalog-forge
 
 A Claude Code / Cowork plugin that operationalizes the canonical-3.1 catalog workflow: one
-skill that keeps every session on-contract, a curator subagent for delegated work, a hook that
-locks POS truth, and a set of commands over your **existing** `verify_all.py` and
-`collection_pipeline.py`. It wraps your engines — it does not replace them, and it never makes a
-judgment call.
+skill that keeps every session on-contract, a hook that locks POS truth, and a set of commands
+over your **existing** `verify_all.py` and `collection_pipeline.py`. It wraps your engines — it
+does not replace them, and it never makes a judgment call.
 
 Built from `WORKFLOW_AUTOMATION_PROPOSAL.md` (one level up). See `ADOPTION.md` for how the
 pieces map to that plan and `FINDINGS.md` for what the live test run turned up.
@@ -14,12 +13,9 @@ pieces map to that plan and `FINDINGS.md` for what the live test run turned up.
 ```
 catalog-forge/
 ├── .claude-plugin/
-│   ├── plugin.json            # manifest (v0.2.0)
-│   └── marketplace.json       # local install source
+│   └── plugin.json            # manifest (v0.3.0)
 ├── skills/
 │   └── canonical-collections/SKILL.md   # the contract + playbook + directives, auto-loaded
-├── agents/
-│   └── catalog-curator.md     # the "specialization": propose-never-assert subagent for delegated work
 ├── hooks/
 │   └── hooks.json             # PreToolUse: blocks any Write/Edit to metadata.json (POS truth lock)
 ├── commands/

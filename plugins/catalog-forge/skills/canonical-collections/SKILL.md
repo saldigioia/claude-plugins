@@ -133,8 +133,6 @@ Engine: `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/catalog.py" <verify|scaffold|enr
 It wraps the existing `verify_all.py` and `collection_pipeline.py`; it never re-implements
 the verifier and never makes a judgment call.
 
-**Two structural guardrails ship with the plugin:**
-- A **PreToolUse hook** (`hooks/hooks.json`) blocks any Write/Edit to a `metadata.json` — the
-  prime directive is enforced by the harness, not just by this text. Don't work around it.
-- A **`catalog-curator` subagent** (`agents/`) embodies this contract for delegated work; hand
-  it audits, queue prep, scaffolds, or source tracing and it stays propose-only.
+**One structural guardrail ships with the plugin:** a **PreToolUse hook** (`hooks/hooks.json`)
+blocks any Write/Edit to a `metadata.json` — the prime directive is enforced by the harness,
+not just by this text. Don't work around it.
