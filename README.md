@@ -12,7 +12,9 @@ claude plugin marketplace add saldigioia/claude-plugins
 claude plugin install every-layout@rare-data-club
 claude plugin install wayback-archive@rare-data-club
 claude plugin install stems-to-mixdown@rare-data-club
-claude plugin install stems-from-mix@rare-data-club
+claude plugin install remuxing-to-mov@rare-data-club
+claude plugin install hunt@rare-data-club
+claude plugin install catalog-forge@rare-data-club
 ```
 
 Or from inside an interactive Claude Code session:
@@ -22,7 +24,9 @@ Or from inside an interactive Claude Code session:
 /plugin install every-layout@rare-data-club
 /plugin install wayback-archive@rare-data-club
 /plugin install stems-to-mixdown@rare-data-club
-/plugin install stems-from-mix@rare-data-club
+/plugin install remuxing-to-mov@rare-data-club
+/plugin install hunt@rare-data-club
+/plugin install catalog-forge@rare-data-club
 ```
 
 To install everything in one shot:
@@ -60,11 +64,21 @@ claude-plugins/
 │   ├── every-layout/           # Self-contained plugin with its own plugin.json
 │   ├── wayback-archive/        # Self-contained plugin with its own plugin.json
 │   ├── stems-to-mixdown/       # Self-contained plugin with its own plugin.json
-│   └── stems-from-mix/         # Self-contained plugin with its own plugin.json
+│   ├── remuxing-to-mov/        # Self-contained plugin with its own plugin.json
+│   ├── hunt/                   # Self-contained plugin with its own plugin.json
+│   └── catalog-forge/          # Self-contained plugin with its own plugin.json
+├── bin/
+│   └── sync-engine.sh          # Reconcile vendored copies of tools/cdn/app.sh
 ├── install.sh                  # One-command bootstrap
+├── publish.sh                  # Gated commit + push (manifest and engine drift)
 ├── LICENSE
 └── README.md
 ```
+
+`hunt` and `wayback-archive` both vendor the shared CDN engine at `tools/cdn/app.sh`.
+Plugins install individually, so each must carry a real file rather than a symlink —
+`bin/sync-engine.sh` reconciles them from the canonical copy in `hunt`, and `publish.sh`
+refuses to publish while they disagree.
 
 Each plugin is self-contained and versioned independently via its own `.claude-plugin/plugin.json`. Adding a new plugin is one commit: drop the plugin directory under `plugins/` and append an entry to `marketplace.json`.
 

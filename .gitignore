@@ -13,3 +13,13 @@ node_modules/
 demos/**/node_modules/
 demos/**/dist/
 demos/**/.astro/
+
+# Local packaging artifacts and editor backups. publish.sh stages with
+# `git add --all`, so anything left lying around here lands in a release
+# commit unless it is ignored. Force-add with `git add -f` if one is ever
+# genuinely meant to ship.
+plugins/*.zip
+*.bak
+*.bak-*
+*.orig
+*.rej
