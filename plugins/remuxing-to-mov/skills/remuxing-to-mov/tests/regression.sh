@@ -747,6 +747,148 @@ o=$(bash "$SC/verify.sh" "$AUD_X" "$WORK/m_x.mov" 2>&1) || true
 hasnt "$o" "MASTER-PURITY WARN" "dual-track access audio (Lavc) never trips the video-scoped check"
 
 echo
+echo "== 24. Backhaul refusal gate (1.8.0): 4:2:2 QT-undecodable, timeline rot, resync layout guard, --silence parity =="
+# SYNTHESIS LIMIT: a real 12 GB contribution feed with mid-file splice rot cannot
+# be minted here; as elsewhere, the MECHANISMS are pinned via the injection hooks
+# (DISC_DTS_FILE for the whole-file gap+rot scan, RTM_LAYOUTS_FILE for the
+# layout-change scan) plus real tiny fixtures for the ffprobe-field gates.
+
+# (a) disc_scan whole-file DTS-rot counters (backward + duplicate ride the same pass)
+awk 'BEGIN{t=0;for(i=0;i<300;i++){printf "%.6f\n",t; if(i==50){t+=0.5} else if(i==100){t-=0.08} else if(i==150){t+=0} else t+=0.04}}' > "$WORK/rot.dts"
+awk 'BEGIN{t=0;for(i=0;i<300;i++){printf "%.6f\n",t;t+=0.04;if(i==80||i==160)t+=0.5}}' > "$WORK/bh_gaponly.dts"
+eval "$(DISC_DTS_FILE="$WORK/rot.dts" DISC_FRAMEDUR_IN=0.04 disc_scan)"
+{ [ "${DISC_COUNT:-0}" -ge 1 ] && [ "${DISC_BACK:-0}" = 1 ] && [ "${DISC_DUP:-0}" = 1 ]; } \
+  && ok "disc_scan counts whole-file rot (gaps=$DISC_COUNT back=$DISC_BACK dup=$DISC_DUP)" \
+  || no "disc_scan rot counters wrong (gaps=${DISC_COUNT:-?} back=${DISC_BACK:-?} dup=${DISC_DUP:-?})"
+eval "$(DISC_DTS_FILE="$WORK/bh_gaponly.dts" DISC_FRAMEDUR_IN=0.04 disc_scan)"
+{ [ "${DISC_COUNT:-0}" = 2 ] && [ "${DISC_BACK:-0}" = 0 ] && [ "${DISC_DUP:-0}" = 0 ]; } \
+  && ok "disc_scan: gap-only timeline -> gaps without rot" || no "gap-only miscount (gaps=${DISC_COUNT:-?} back=${DISC_BACK:-?} dup=${DISC_DUP:-?})"
+
+# (b) fixtures: MPEG-2 TS in 4:2:2 (the backhaul mastering profile) and 4:2:0
+M422="$WORK/bh422.ts"; M420="$WORK/bh420.ts"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v mpeg2video -pix_fmt yuv420p -f mpegts "$M420"
+if ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v mpeg2video -pix_fmt yuv422p -f mpegts "$M422" 2>/dev/null; then
+  # primary gate: QT-undecodable profile refuses instantly, writes nothing
+  o=$(bash "$SC/mov.sh" "$M422" "$WORK/bh422.mov" 2>&1); rc=$?
+  { [ "$rc" -eq 11 ] && case "$o" in *"QT-UNDECODABLE"*) true;; *) false;; esac; } \
+    && ok "mov.sh: MPEG-2 4:2:2 -> REFUSED exit 11 (QT-undecodable)" || no "4:2:2 gate wrong (rc=$rc)"
+  has "$o" "MOV_REFUSED profile=qt-undecodable" "refusal emits the machine-readable MOV_REFUSED line"
+  has "$o" "rung4" "refusal names the attested re-encode route"
+  has "$o" "OUT.mkv" "refusal names the lossless MKV playback route"
+  { [ ! -f "$WORK/bh422.mov" ] && [ ! -f "$WORK/bh422.mov.part" ]; } && ok "4:2:2 refusal writes nothing" || no "refusal left an output/.part"
+  # --force-backhaul runs the build; the DONE line must NOT claim QuickTime-ready
+  o=$(bash "$SC/mov.sh" "$M422" "$WORK/bh422f.mov" --force-backhaul 2>&1); rc=$?
+  { [ "$rc" -ne 11 ] && [ -f "$WORK/bh422f.mov" ]; } && ok "--force-backhaul proceeds past the gate (rc=$rc)" || no "--force-backhaul did not build (rc=$rc)"
+  hasnt "$o" "QuickTime-ready, verified lossless" "forced 4:2:2 build never reports itself QuickTime-ready"
+  has "$o" "NOT QuickTime-playable" "forced 4:2:2 build states the honest deliverable class"
+  # diagnose carries the decodability banner
+  o=$(bash "$SC/diagnose.sh" "$M422" 2>&1)
+  has "$o" "QT-UNDECODABLE PROFILE" "diagnose prints the 4:2:2 decodability banner"
+else
+  echo "  (skip: this ffmpeg's mpeg2video encoder can't mint yuv422p — 4:2:2 gate untested here)"
+fi
+
+# (c) secondary gate: mpegts/mpeg2video + gaps + rot -> refused before any build
+o=$(DISC_DTS_FILE="$WORK/rot.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/mov.sh" "$M420" "$WORK/bhrot.mov" 2>&1); rc=$?
+{ [ "$rc" -eq 11 ] && case "$o" in *"BACKHAUL TIMELINE ROT"*) true;; *) false;; esac; } \
+  && ok "mov.sh: gaps + non-monotonic DTS -> REFUSED exit 11 (timeline rot)" || no "rot gate wrong (rc=$rc)"
+has "$o" "MOV_REFUSED profile=timeline-rot" "rot refusal emits the machine-readable line"
+{ [ ! -f "$WORK/bhrot.mov" ] && [ ! -f "$WORK/bhrot.mov.part" ]; } && ok "rot refusal writes nothing" || no "rot refusal left an output/.part"
+# gaps ALONE do not refuse (the 2008 recovery class) — the build proceeds
+o=$(DISC_DTS_FILE="$WORK/bh_gaponly.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/mov.sh" "$M420" "$WORK/bhgap.mov" 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && [ -f "$WORK/bhgap.mov" ]; } && ok "gap-only mpeg2 TS passes the gate and builds" || no "gap-only was refused/failed (rc=$rc)"
+has "$o" "backhaul scan clear" "gate announces the clear scan before continuing"
+# codec guard: an H.264 TS with the same injected rot never trips the gate
+o=$(DISC_DTS_FILE="$WORK/rot.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/mov.sh" "$S" "$WORK/bh264.mov" 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && case "$o" in *REFUSED*) false;; *) true;; esac; } \
+  && ok "H.264 TS with rot -> gate does not fire (codec guard)" || no "codec guard leaked (rc=$rc)"
+# probe --kv carries the field the primary gate reads
+kv=$(bash "$SC/probe.sh" "$M420" --kv 2>&1)
+has "$kv" "PR_PIX_FMT=yuv420p" "probe --kv exports PR_PIX_FMT"
+# diagnose reaches the rot verdict with routes (clean tiny file + injected step-4 scan)
+o=$(DISC_DTS_FILE="$WORK/rot.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/diagnose.sh" "$M420" 2>&1)
+has "$o" "BACKHAUL TIMELINE ROT" "diagnose: mpegts/mpeg2video rot -> backhaul verdict"
+has "$o" "Do NOT route this to" "diagnose verdict warns off resync on the rot class"
+o=$(DISC_DTS_FILE="$WORK/bh_gaponly.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/diagnose.sh" "$M420" 2>&1)
+has "$o" "DISCONTINUOUS SOURCE" "diagnose: gap-only mpeg2 keeps the resync route"
+
+# (d) resync layout-change guard: mid-stream channel-layout change -> exit 11, nothing written
+BHRS="$WORK/bhrs.ts"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=440 -t 3 -c:v libx264 -g 25 -pix_fmt yuv420p -c:a aac -shortest "$BHRS"
+printf '2,stereo\n6,5.1(side)\n' > "$WORK/bh_layouts.txt"
+o=$(RTM_LAYOUTS_FILE="$WORK/bh_layouts.txt" bash "$SC/resync.sh" "$BHRS" "$WORK/bhrs.mov" 2>&1); rc=$?
+{ [ "$rc" -eq 11 ] && case "$o" in *"channel-layout change"*) true;; *) false;; esac; } \
+  && ok "resync: mid-stream layout change -> REFUSED exit 11" || no "layout guard wrong (rc=$rc)"
+{ [ ! -f "$WORK/bhrs.mov" ] && [ ! -f "$WORK/bhrs.mov.part" ]; } && ok "layout refusal writes nothing" || no "layout refusal left an output"
+has "$o" "dual-track" "layout refusal routes to the natural dual-track build"
+# single-layout source still builds, and its verify pass runs the --silence gate
+o=$(bash "$SC/resync.sh" "$BHRS" "$WORK/bhrsok.mov" 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && case "$o" in *">> DONE"*) true;; *) false;; esac; } \
+  && ok "resync: single-layout source builds + verifies (guard is not a blanket refusal)" || no "single-layout resync broken (rc=$rc)"
+has "$o" "silence content-parity" "resync's verify pass includes the --silence gate"
+
+# (e) verify --silence: injected silence FAILs; a clean copy passes
+SV="$WORK/silv.mov"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 12 -c:v libx264 -g 25 -pix_fmt yuv420p "$SV"
+ff -i "$SV" -f lavfi -i sine=440 -map 0:v:0 -map 1:a:0 -c:v copy -c:a pcm_s16le -t 12 -f mov "$WORK/silsrc.mov"
+ff -i "$SV" -f lavfi -i sine=440 -map 0:v:0 -map 1:a:0 -c:v copy \
+   -af "volume=enable='between(t,3,9)':volume=0" -c:a pcm_s16le -t 12 -f mov "$WORK/silbad.mov"
+ff -i "$WORK/silsrc.mov" -map 0:v:0 -map 0:a:0 -c copy -f mov "$WORK/silgood.mov"
+o=$(bash "$SC/verify.sh" "$WORK/silsrc.mov" "$WORK/silbad.mov" --silence 2>&1); rc=$?
+{ [ "$rc" -eq 1 ] && case "$o" in *"NO counterpart in the source"*) true;; *) false;; esac; } \
+  && ok "--silence: ~6s injected silence -> FAIL (duration parity is blind to it)" || no "--silence missed injected silence (rc=$rc)"
+o=$(bash "$SC/verify.sh" "$WORK/silsrc.mov" "$WORK/silgood.mov" --silence 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && case "$o" in *"parity consistent"*) true;; *) false;; esac; } \
+  && ok "--silence: clean copy -> consistent, no false FAIL" || no "--silence false-positive (rc=$rc)"
+
+echo
+echo "== 25. ts-health.sh: consolidated demux-only capture scan, every finding routed =="
+# Real transport loss / PTS wrap / mid-GOP broadcast starts can't be minted by
+# libx264 (encoders stamp and sequence everything) — the same injection-hook
+# doctrine as sections 17/19/24: TSH_PKT_FILE for the packet scan, TSH_LOG_FILE
+# for the transport log.
+THV="$WORK/th_v.ts"
+ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v libx264 -g 25 -pix_fmt yuv420p -f mpegts "$THV"
+# (a) clean file -> CLEAN, exit 0
+o=$(bash "$SC/ts-health.sh" "$THV" 2>&1); rc=$?
+{ [ "$rc" -eq 0 ] && case "$o" in *">> CLEAN"*) true;; *) false;; esac; } \
+  && ok "ts-health: clean capture -> CLEAN exit 0" || no "clean capture misjudged (rc=$rc)"
+# (b) missing timestamps -> genpts route; gap count across the holes is annotated unreliable
+awk 'BEGIN{for(i=0;i<100;i++){ if(i%2) printf "0,N/A,N/A,3600,__\n"; else printf "0,%d,%d,3600,%s\n", i*3600, i*3600, (i%25==0?"K__":"___")}}' > "$WORK/th_miss.csv"
+o=$(TSH_PKT_FILE="$WORK/th_miss.csv" TSH_FDUR_TICKS=3600 bash "$SC/ts-health.sh" "$THV" 2>&1); rc=$?
+{ [ "$rc" -eq 10 ] && case "$o" in *"missing timestamps"*) true;; *) false;; esac; } \
+  && ok "ts-health: missing PTS/DTS -> FINDINGS exit 10" || no "missing-ts finding wrong (rc=$rc)"
+has "$o" "genpts" "missing-ts finding routes to the timestamp repair"
+has "$o" "unreliable until the missing-timestamp repair" "gap count across missing timestamps is annotated, not asserted"
+# (c) 33-bit PTS wraparound: classified as wrap, NOT backward-DTS rot
+awk 'BEGIN{t=0;for(i=0;i<100;i++){printf "0,%d,%d,3600,%s\n", t, t, (i%25==0?"K__":"___"); t+=3600; if(i==50) t-=8589934592}}' > "$WORK/th_wrap.csv"
+kv=$(TSH_PKT_FILE="$WORK/th_wrap.csv" TSH_FDUR_TICKS=3600 bash "$SC/ts-health.sh" "$THV" --kv 2>&1) || true
+has "$kv" "TSH_WRAP=1" "wraparound detected (TSH_WRAP=1)"
+has "$kv" "TSH_BACK=0" "wraparound is not miscounted as backward-DTS rot"
+has "$kv" "TSH_VERDICT=FINDINGS" "kv mode carries the verdict"
+# (d) mid-GOP start -> lossless trim route
+awk 'BEGIN{for(i=0;i<100;i++){printf "0,%d,%d,3600,%s\n", i*3600, i*3600, ((i>=7 && (i-7)%25==0)?"K__":"___")}}' > "$WORK/th_gop.csv"
+o=$(TSH_PKT_FILE="$WORK/th_gop.csv" TSH_FDUR_TICKS=3600 bash "$SC/ts-health.sh" "$THV" 2>&1) || true
+has "$o" "starts mid-GOP: 7 packet(s)" "mid-GOP start counted (pre-keyframe packets)"
+has "$o" "lossless trim at the first IDR" "mid-GOP finding routes to the no-recode trim"
+# (e) transport loss: small -> honest FINDINGS; flood -> DAMAGED exit 1
+for i in 1 2 3; do echo "[mpegts @ 0x1] Continuity check failed for pid 256 expected 5 got 7"; done > "$WORK/th_log3.txt"
+awk 'BEGIN{for(i=0;i<200;i++) print "[mpegts @ 0x1] Continuity check failed for pid 256 expected 5 got 7"}' > "$WORK/th_log200.txt"
+o=$(TSH_LOG_FILE="$WORK/th_log3.txt" bash "$SC/ts-health.sh" "$THV" 2>&1); rc=$?
+{ [ "$rc" -eq 10 ] && case "$o" in *"PERMANENT but small"*) true;; *) false;; esac; } \
+  && ok "ts-health: 3 CC errors -> FINDINGS, loss stated as permanent" || no "small transport loss misjudged (rc=$rc)"
+o=$(TSH_LOG_FILE="$WORK/th_log200.txt" bash "$SC/ts-health.sh" "$THV" 2>&1); rc=$?
+{ [ "$rc" -eq 1 ] && case "$o" in *">> DAMAGED"*) true;; *) false;; esac; } \
+  && ok "ts-health: 200 CC errors -> DAMAGED exit 1 (re-capture)" || no "flood transport loss misjudged (rc=$rc)"
+# (f) codec routing rides along: the 4:2:2 fixture (if minted in section 24) is flagged
+if [ -f "$M422" ]; then
+  o=$(bash "$SC/ts-health.sh" "$M422" 2>&1) || true
+  has "$o" "QuickTime CANNOT decode this profile" "ts-health names the QT-undecodable 4:2:2 profile"
+else
+  echo "  (skip: 4:2:2 fixture unavailable — codec finding untested here)"
+fi
+
+echo
 echo "===================================================================="
 echo "  PASSED: $pass    FAILED: $fail"
 echo "===================================================================="

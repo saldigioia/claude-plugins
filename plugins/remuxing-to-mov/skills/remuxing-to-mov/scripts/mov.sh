@@ -4,7 +4,7 @@
 # Video is ALWAYS stream-copied (bit-identical); this never re-encodes video and
 # never touches or deletes the source.
 #
-# Usage: scripts/mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full]
+# Usage: scripts/mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul]
 #                       [--audio-keep all|first|layouts|IDX[,IDX...]] [metadata flags]
 #   OUTPUT         default: <input dir>/<input base>.mov
 #                  (<base>.qt.mov if the input is itself a .mov, so the source is safe)
@@ -15,6 +15,9 @@
 #                  layouts curated lossless > lossy-high > lossy-low, every drop
 #                  announced; 'first' reproduces the historical a:0-only behavior)
 #   --full         archival sign-off: pass --full to verify.sh (whole-file decode)
+#   --force-backhaul  run the build even when the backhaul refusal gate fires
+#                  (exit 11 below) — e.g. to build a verified lossless master that
+#                  will not play in QuickTime, or to collect failure evidence
 #   metadata (OPT-IN — NOTHING is tagged unless you pass one of these explicitly):
 #     --title --description --author --date --copyright --comment --keywords
 #     --key NAME=VALUE  --keep-chapters
@@ -41,16 +44,19 @@
 # audio to PCM (original not preserved — manual route via
 # references/timeline-repair.md + references/dual-track-quicktime.md if needed).
 #
-# Exit: 0 = verified OK; 10 = REVIEW (written, look closer); 1 = FAIL; 2 = usage.
+# Exit: 0 = verified OK; 10 = REVIEW (written, look closer); 1 = FAIL; 2 = usage;
+#       11 = REFUSED (backhaul profile — this source cannot honestly deliver a
+#            QuickTime-ready MOV; the refusal names the routes out).
 set -euo pipefail
 
-IN="${1:?usage: mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--audio-keep POLICY] [metadata flags]}"; shift
-OUT=""; ALWAYS=0; FULL=""; MDARGS=(); AKEEP=layouts
+IN="${1:?usage: mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul] [--audio-keep POLICY] [metadata flags]}"; shift
+OUT=""; ALWAYS=0; FULL=""; MDARGS=(); AKEEP=layouts; FORCE_BACKHAUL=0
 # optional positional OUTPUT (the next arg, only if it isn't a --flag)
 if [ "${1:-}" != "" ] && [ "${1#--}" = "${1:-}" ]; then OUT="$1"; shift; fi
 while [ $# -gt 0 ]; do case "$1" in
   --always-dual) ALWAYS=1; shift;;
   --full)        FULL="--full"; shift;;
+  --force-backhaul) FORCE_BACKHAUL=1; shift;;
   --audio-keep)  AKEEP="${2:?--audio-keep needs a value}"; shift 2;;
   --audio-keep=*) AKEEP="${1#*=}"; shift;;
   # OPT-IN metadata: collected and passed verbatim to metadata.sh after the build
@@ -86,6 +92,71 @@ apply_metadata () {  # $1 = finished .mov to tag in place via a temp
 eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
 echo "== mov: $IN -> $OUT =="
 echo "   video=$PR_VCODEC  audio=$PR_ACODEC  paff=$PF_PAFF"
+
+# --- backhaul refusal gate (exit 11): move the verdict the old pipeline reached
+# after a full mux + resync + failed verify to the cheapest possible moment.
+#   PRIMARY — QT-UNDECODABLE: mpeg2video + yuv422p. AVFoundation has NO working
+#   MPEG-2 4:2:2 decode path (controlled comparison 2026-07-30: a 4:2:2 MOV with
+#   a pristine, fully-verified timeline distorts in QuickTime exactly like the
+#   failed builds, while the Main/4:2:0 sibling plays perfectly). No container
+#   surgery can supply a missing decoder — one instant ffprobe field decides.
+#   SECONDARY — TIMELINE ROT (buildability): mpegts + mpeg2video + forward gaps
+#   + non-monotonic DTS, whole-file and demux-only (~1 min on a 12 GB capture).
+#   On that class the copy mux invents DTS (confession hard stop) and a resync
+#   build leaves near-zero sample durations that verify gate (d) rightly fails.
+#   Forward gaps ALONE do not refuse — that class rebuilds (the 2008 recovery);
+#   and an H.264 TS with gaps still rides the existing PAFF/resync machinery.
+backhaul_routes () {
+  echo "   Honest routes out:"
+  echo "     keep     the source as-is — it is already the archival master"
+  echo "     playback ffmpeg -i IN -map 0:v:0 -map '0:a?' -c copy OUT.mkv"
+  echo "              (lossless; Matroska stores per-block timestamps, so the timeline"
+  echo "               survives honestly; plays in IINA/VLC/mpv)"
+  echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the ONLY"
+  echo "              sanctioned path to a true QuickTime-native deliverable"
+  echo "   Override (run the build + verify anyway): --force-backhaul"
+}
+if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "$PR_VCODEC" = mpeg2video ]; then
+  if [ "${PR_PIX_FMT:-}" = yuv422p ]; then
+    echo ">> REFUSED: QT-UNDECODABLE PROFILE — MPEG-2 4:2:2 (pix_fmt yuv422p)."
+    echo "   AVFoundation/QuickTime has no MPEG-2 4:2:2 decode path: even a bit-identical,"
+    echo "   verify-green MOV of this source plays DISTORTED in QuickTime (FFmpeg players"
+    echo "   — IINA/VLC/mpv — decode it fine). No lossless remux can keep the"
+    echo "   QuickTime-ready promise here."
+    backhaul_routes
+    echo "   (--force-backhaul runs the normal build + verify: when the timeline is"
+    echo "    clean the result is a legitimate verified lossless NLE/archival master —"
+    echo "    it just will not play in QuickTime.)"
+    echo "MOV_REFUSED profile=qt-undecodable vcodec=$PR_VCODEC pix_fmt=${PR_PIX_FMT:-?}"   # machine-readable
+    exit 11
+  fi
+  case "${PR_CONTAINER:-}" in *mpegts*)
+    echo "   mpegts/mpeg2video -> backhaul timeline scan (whole file, demux-only)..."
+    . "$SELF_DIR/lib-paff.sh"
+    eval "$(disc_scan "$IN")"
+    if [ "${DISC_COUNT:-0}" -ge 1 ] && [ $(( ${DISC_BACK:-0} + ${DISC_DUP:-0} )) -ge 1 ]; then
+      echo ">> REFUSED: BACKHAUL TIMELINE ROT — ${DISC_COUNT} forward timestamp gap(s)"
+      echo "   (~${DISC_MISSING}s dropped, first @ ${DISC_FIRST}s) PLUS non-monotonic DTS"
+      echo "   (whole-file: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0}). On this class a plain"
+      echo "   copy makes the MOV muxer invent timing (mux-confession hard stop) and a"
+      echo "   resync build leaves near-zero sample durations that verify gate (d)"
+      echo "   correctly fails — knowable now, before a multi-gigabyte build."
+      backhaul_routes
+      echo "MOV_REFUSED profile=timeline-rot vcodec=$PR_VCODEC disc=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}"   # machine-readable
+      exit 11
+    fi
+    echo "   backhaul scan clear (gaps=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}) -> continuing."
+    ;;
+  esac
+fi
+# a FORCED build of the QT-undecodable profile must never be reported as
+# "QuickTime-ready" — the verify gates prove losslessness, not decodability
+READY_TAG="QuickTime-ready"
+if [ "$FORCE_BACKHAUL" -eq 1 ] && [ "$PR_VCODEC" = mpeg2video ] && [ "${PR_PIX_FMT:-}" = yuv422p ]; then
+  echo "   NOTE: --force-backhaul on a QT-undecodable profile (MPEG-2 4:2:2) — building"
+  echo "   a lossless MASTER; QuickTime will NOT play it (IINA/VLC/mpv and NLEs will)."
+  READY_TAG="NOT QuickTime-playable (MPEG-2 4:2:2) — lossless master"
+fi
 
 # --- field-coded: hand the timeline repair to the tested ladder driver ---
 if [ "$PF_PAFF" = yes ]; then
@@ -203,7 +274,7 @@ printf '%s\n' "$o" | sed 's/^/   /'
 echo
 echo "MOV_SUMMARY mode=$MODE out=$OUT audio_kept=${KINFO:-none} audio_dropped=${DINFO:-none}"   # machine-readable
 case "$o" in
-  *">> OK"*)     echo ">> DONE: $OUT — QuickTime-ready, verified lossless${AUDV:+ + dual-track aligned}."; exit 0 ;;
+  *">> OK"*)     echo ">> DONE: $OUT — $READY_TAG, verified lossless${AUDV:+ + dual-track aligned}."; exit 0 ;;
   *">> REVIEW"*) echo ">> REVIEW: $OUT written; verify wants a closer look (above). Source untouched."; exit 10 ;;
   *)             echo ">> FAIL: see verify output above. Source untouched; $OUT is unverified."; exit 1 ;;
 esac

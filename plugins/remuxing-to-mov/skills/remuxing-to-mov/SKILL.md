@@ -29,6 +29,14 @@ stays a human decision), and never touches the source. Exit 0 = verified, 10 =
 REVIEW, 1 = FAIL. Use the manual ladder below when you want control or hit a
 REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
 
+0. **Health-scan a fresh capture** (optional but cheap — two demux-only passes,
+   no decode): `scripts/ts-health.sh INPUT` sweeps the whole file for every
+   hidden-damage class at once — transport loss (continuity/TEI/PES, permanent,
+   counted honestly), missing PTS/DTS, backward/duplicate DTS rot, forward
+   gaps, 33-bit PTS wraparound, mid-GOP capture start, single-GOP
+   unseekability, audio duration drift — and names the **lossless** route for
+   each finding (exit 0 CLEAN / 10 FINDINGS / 1 DAMAGED; `--kv` for machine
+   output).
 1. **Probe** the source first — never guess:
    `scripts/probe.sh INPUT`
    It prints codecs+tags, field structure, Annex-B vs AVCC, color, and
@@ -106,7 +114,10 @@ Verdict → action: damaged → re-capture; missing TS on the **pair signature**
 (`pairfill-paff.sh`)**; other missing TS → Rung 2 then Rung 3; non-monotonic
 DTS → Rung 3-PAIR when real PTS/reorder survives, Rung 3 otherwise;
 **discontinuous source → `scripts/resync.sh` (video bit-identical, audio
-gap-filled), then the verify parity gate**. **Field-coded (PAFF) H.264 never
+gap-filled), then the verify parity gate**; **mpegts/MPEG-2 with gaps + rot
+(non-monotonic DTS, whole-file) → BACKHAUL TIMELINE ROT: refused with routes
+(keep the `.ts` / lossless MKV / `rung4.sh`) — never resync, it cannot survive
+verify gate (d)**. **Field-coded (PAFF) H.264 never
 goes down the genpts path** — genpts is guilty-until-proven there, because the
 strict-mux test proves timestamps are *present and monotonic*, not that the
 timeline is *seekable*, and that gap is where PAFF corrupts silently. diagnose
@@ -152,11 +163,13 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 | Situation | Rule |
 |---|---|
 | "Convert this to .mov" (the everyday ask) | `scripts/mov.sh IN` (or `/remuxing-to-mov:mov IN`) — copy video, dual-track audio only if QuickTime needs it, verified. `remux.sh` is the bare Rung-0 copy underneath |
+| Fresh capture — "is this TS healthy? what's hiding in it?" | `scripts/ts-health.sh IN` — whole-file, demux-only sweep: transport loss (CC/TEI/PES — **permanent**, no remux restores it), missing timestamps, DTS rot, forward gaps, 33-bit PTS wrap, mid-GOP start (lossless trim at first IDR), single-GOP unseekability, audio drift. Every finding printed with its lossless route; exit 0/10/1 |
 | HEVC file won't open in QuickTime | Retag, don't re-encode: `ffmpeg -i IN -c copy -tag:v hvc1 OUT.mov` |
 | Plays locally, slow start over network | `ffmpeg -i IN -c copy -movflags +faststart OUT.mov` (moov was at EOF) |
 | Video plays, audio silent in QuickTime | Audio QT can't play (AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm`. **E-AC-3 (Dolby Digital Plus) plays natively — just copy it** |
 | Glitches/tears only on scrub | Timestamps, not the video → `scripts/diagnose.sh` |
-| Audio drifts out of sync over a long capture (leads/lags the picture) | Discontinuous source: dropped frames the video keeps but raw PCM collapses on copy. `scripts/diagnose.sh` finds the forward gaps → `scripts/resync.sh IN OUT.mov` (video bit-identical, audio gap-filled) → `verify.sh` parity gate confirms |
+| Audio drifts out of sync over a long capture (leads/lags the picture) | Discontinuous source: dropped frames the video keeps but raw PCM collapses on copy. `scripts/diagnose.sh` finds the forward gaps → `scripts/resync.sh IN OUT.mov` (video bit-identical, audio gap-filled) → `verify.sh` parity gate confirms. resync **refuses** (exit 11) sources whose audio changes channel layout mid-stream — the filter-graph-rebuild silence-injection class — and its verify pass adds `--silence` content parity |
+| Backhaul/contribution TS (MPEG-2 4:2:2 `yuv422p`, ~35 Mb/s, splice gaps) | **QuickTime cannot decode MPEG-2 4:2:2 at all** — a bit-perfect, verify-green MOV still distorts (AVFoundation has no decode path; IINA/VLC/mpv are fine). `mov.sh` refuses early (exit 11) with the routes: keep the `.ts` (archival master) / lossless MKV playback copy / `rung4.sh` attested re-encode. Separately, gaps **plus** non-monotonic DTS (timeline rot, whole-file scan) refuse any lossless MOV build; gaps ALONE rebuild fine (the 2008 recovery) |
 | Field-coded (PAFF) H.264 (coded-pic rate ≈ 2× frame rate — the rate counts ALL packets, untimestamped included) | genpts is guilty-until-proven → pair-timestamped/reordered: `scripts/pairfill-paff.sh` (keeps real PTS); no reorder: `scripts/rebuild-paff.sh`; confirm with `scripts/verify.sh` (timeline + scrub gates) |
 | Mux log says `pts has no value` / `Timestamps are unset` / `Non-monotonic DTS` on a copy mux | **HARD STOP — the muxer invented the timeline.** Never ship it, whatever verify says about the essence. remux.sh/dual-track.sh refuse automatically; run `scripts/diagnose.sh` for the repair |
 | Repair looks fine but motion is subtly shuffled | Constant-rate restamp flattened a reorder pyramid (PTS=DTS = decode order). `verify.sh --full` compares framemd5 presentation ORDER; repair with `pairfill-paff.sh`, never `rebuild-paff.sh` |
@@ -264,6 +277,24 @@ referenced files.
   first `I` in display order); `seam-check.sh` catches the flash. Fix: restart on
   a closed-GOP keyframe, or smart-cut (the one edit that re-encodes).
   → `references/cutting-concat.md`
+- **MPEG-2 4:2:2 Profile is QuickTime-UNDECODABLE (backhaul batch, 2026-07-30).**
+  A controlled pair isolated the variable: the 2008 Main/`yuv420p` MOV plays
+  perfectly in QuickTime; the 2010 4:2:2/`yuv422p` MOV — pristine timeline,
+  every verify gate green, uniform sample table — distorts identically to the
+  failed builds. AVFoundation has no working MPEG-2 4:2:2 decode path; no
+  container surgery supplies a missing decoder, which is why *bit-accurate*
+  remuxes of contribution feeds (~35 Mb/s 4:2:2 mastering) still distort.
+  Timeline defects are the **orthogonal** axis (buildability, not decodability):
+  forward gaps + non-monotonic DTS = backhaul timeline rot, refused (exit 11,
+  whole-file demux scan — the windowed scan missed mid-file splice defects);
+  gaps alone rebuild fine. `mov.sh`/`diagnose.sh` refuse with routes; a verified
+  lossless 4:2:2 MOV built under `--force-backhaul` is a legitimate NLE/archival
+  master that simply won't play in QuickTime. Related: `resync.sh` refuses
+  mid-stream audio-layout-change sources — each change rebuilds the filter
+  graph and `aresample first_pts=0` re-pads silence from t=0 (the ~17-min
+  injected-silence incident, invisible to duration parity); `verify.sh
+  --silence` is the content-parity gate that catches it.
+  → `references/timeline-repair.md`
 - **Discontinuous source → blind PCM copy desyncs (gap-collapse trap).** When a
   capture drops frames, the video keeps the forward timestamp gap but raw PCM in
   MOV (a contiguous sample array, no gap mechanism) collapses it on `-c copy`, so

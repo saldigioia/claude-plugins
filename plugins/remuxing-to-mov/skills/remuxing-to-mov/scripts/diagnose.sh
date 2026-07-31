@@ -44,6 +44,19 @@ fi
 echo "** reorder pyramid: $PF_REORDER (pts!=dts on $PF_PTSNEDTS pkt(s), $PF_BACKPTS backward PTS step(s), max offset $PF_MAXOFF_TICKS ticks)"
 [ "$PF_REORDER" = yes ] && echo "**   real PTS must be KEPT — a constant-rate restamp (rebuild-paff) would play fields in DECODE order (shuffled motion, invisible to default verify)."
 
+# backhaul/contribution profile facts — they reframe every verdict below.
+CONT=$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+PIX=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+IS_TS=no; case "$CONT" in *mpegts*) IS_TS=yes;; esac
+if [ "$PF_CODEC" = mpeg2video ] && [ "$PIX" = yuv422p ]; then
+  echo "** QT-UNDECODABLE PROFILE: MPEG-2 4:2:2 (yuv422p). AVFoundation/QuickTime has no"
+  echo "** working decode path for this profile (controlled comparison 2026-07-30: a"
+  echo "** flawless-timeline, fully-verified 4:2:2 MOV still distorts; Main/4:2:0 plays)."
+  echo "** Every verdict below governs whether a verified lossless MASTER can be built —"
+  echo "** NOT QuickTime playability. QuickTime playback = scripts/rung4.sh (attested"
+  echo "** re-encode), the only sanctioned path. mov.sh refuses this profile early (exit 11)."
+fi
+
 # (1) decode-to-null: separates real decode damage from timestamp defects.
 echo "-- (1) decode-to-null integrity --"
 ffmpeg -nostdin -v error -i "$IN" -map 0:v:0 -f null - 2>"$TMP/null.err" || true
@@ -105,13 +118,36 @@ echo "   first 5000 packets: duplicate(equal) DTS=${ndup:-0}  backward DTS=${nba
 echo "-- (4) discontinuity (forward-gap) scan --"
 eval "$(disc_scan "$IN")"
 echo "   forward gaps: ${DISC_COUNT:-0}  (dropped ~${DISC_MISSING:-0}s; frame=${DISC_FRAMEDUR:-?}s)"
+# same demux pass, whole file: the DTS-rot counters the windowed step-(3) scan
+# can miss when the defects sit mid-file at splice points (the 2009/2012 class)
+echo "   whole-file DTS rot: backward=${DISC_BACK:-0}  duplicate=${DISC_DUP:-0}"
 
 # --- verdict ---
-if [ "${nmono:-0}" -ge 10 ] || [ "${ndup:-0}" -gt 0 ] || [ "${nback:-0}" -gt 0 ]; then
-  echo ">> VERDICT: NON-MONOTONIC / DUPLICATE DTS (broken timeline, common on a"
-  echo "   field-coded stream muxed on a non-integer timebase). Repair for THIS"
-  echo "   stream's timestamp profile: $REPAIR"
-  [ "$REPAIR" = "$PFILL" ] && echo "   (real PTS survives / reorder present -> keep it; a constant-rate rebuild would flatten the pyramid)"
+# rot condition includes the WHOLE-FILE counters from step (4): the windowed
+# step-(3) scan read 0 on the 2009/2012 backhaul feeds whose defects sat
+# mid-file at splice points.
+if [ "${nmono:-0}" -ge 10 ] || [ "${ndup:-0}" -gt 0 ] || [ "${nback:-0}" -gt 0 ] || [ "${DISC_BACK:-0}" -gt 0 ] || [ "${DISC_DUP:-0}" -gt 0 ]; then
+  if [ "$PF_CODEC" = mpeg2video ] && [ "$IS_TS" = yes ] && [ "${DISC_COUNT:-0}" -gt 0 ]; then
+    echo ">> VERDICT: BACKHAUL TIMELINE ROT — mpegts/mpeg2video with ${DISC_COUNT} forward"
+    echo "   gap(s) (~${DISC_MISSING:-0}s dropped) PLUS non-monotonic DTS (whole-file"
+    echo "   backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0}; windowed dup=${ndup:-0} back=${nback:-0};"
+    echo "   decode warnings=${nmono:-0}). NO lossless MOV route survives verify on this"
+    echo "   class: a plain copy makes the MOV muxer invent timing (mux-confession hard"
+    echo "   stop), and a resync build leaves near-zero sample durations that gate (d)"
+    echo "   correctly fails — the invented-timeline signature. Do NOT route this to"
+    echo "   resync.sh. mov.sh refuses it up front (exit 11). Honest routes:"
+    echo "     keep     the .ts — it is already the archival master"
+    echo "     playback ffmpeg -i \"$IN\" -map 0:v:0 -map '0:a?' -c copy OUT.mkv"
+    echo "              (Matroska stores per-block timestamps — the discontinuous"
+    echo "               timeline survives honestly; plays in IINA/VLC/mpv)"
+    echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the only"
+    echo "              sanctioned path to a QuickTime-native deliverable"
+  else
+    echo ">> VERDICT: NON-MONOTONIC / DUPLICATE DTS (broken timeline, common on a"
+    echo "   field-coded stream muxed on a non-integer timebase). Repair for THIS"
+    echo "   stream's timestamp profile: $REPAIR"
+    [ "$REPAIR" = "$PFILL" ] && echo "   (real PTS survives / reorder present -> keep it; a constant-rate rebuild would flatten the pyramid)"
+  fi
 elif [ "${mkv_ok:-1}" -eq 1 ]; then
   if [ "$PF_PAFF" = yes ]; then
     echo ">> VERDICT: timing PASSES the mux tests, but this is FIELD-CODED (PAFF)"

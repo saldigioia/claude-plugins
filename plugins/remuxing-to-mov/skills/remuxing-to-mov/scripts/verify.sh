@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # verify.sh — prove a remux was lossless and the output timeline is clean,
 # at the lowest cost that is actually conclusive.
-# Usage: scripts/verify.sh SOURCE OUTPUT [--full] [--signaling] [--audio]
+# Usage: scripts/verify.sh SOURCE OUTPUT [--full] [--signaling] [--audio] [--silence]
 #
 # Default tier (NO full decode — I/O-bound, runs at many× realtime):
 #   (a) packet-hash identity: -c copy -f streamhash on both files (demux only,
@@ -41,6 +41,16 @@
 #   --audio     : dual-track fidelity — the preserved original track must be
 #                 bit-exact vs source (else FAIL) and the PCM access track must
 #                 equal the decoded original, aligned (else REVIEW).
+#   --silence   : silence content-parity for RE-TIMED audio (the resync path).
+#                 Duration parity cannot see injected silence — the 2008 backhaul
+#                 build shipped ~17 min of inserted silence (a filter-graph
+#                 rebuild on a mid-stream layout change re-padded from t=0) with
+#                 durations matching. This gate compares long-window silence
+#                 (>= RTM_SIL_MIN s at RTM_SIL_DB, defaults 5s / -50dB) source vs
+#                 output; output silence beyond the source total + the source's
+#                 legitimate gap-fill budget (disc_scan DISC_MISSING) + RTM_SIL_TOL
+#                 FAILs the file. Costs a full audio decode of both files —
+#                 opt-in, wired into resync.sh. Never waivable (content gate).
 #
 # Waiver sidecar (QTFF audit 5-4c): a FAIL from the count-signature gates
 # (d)/(e) whose named independent proofs all pass can be covered by an
@@ -49,12 +59,13 @@
 # a machine-readable VERIFY_SUMMARY field; ANY drift voids the waiver (FAIL
 # stands). Essence/identity failures ((b)/--full/--audio) are never waivable.
 set -euo pipefail
-SRC="${1:?usage: verify.sh SOURCE OUTPUT [--full] [--signaling] [--audio]}"; OUT="${2:?need OUTPUT}"; shift 2
-FULL=0; SIG=0; AUD=0
+SRC="${1:?usage: verify.sh SOURCE OUTPUT [--full] [--signaling] [--audio] [--silence]}"; OUT="${2:?need OUTPUT}"; shift 2
+FULL=0; SIG=0; AUD=0; SILP=0
 while [ $# -gt 0 ]; do case "$1" in
   --full) FULL=1; shift;;
   --signaling) SIG=1; shift;;          # color/HDR/caption preservation (source vs output)
   --audio) AUD=1; shift;;              # dual-track audio fidelity (PCM access + original)
+  --silence) SILP=1; shift;;           # silence content-parity (re-timed audio / resync path)
   "") shift;;                          # tolerate an empty arg from `verify.sh A B $FULL`
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
@@ -376,6 +387,40 @@ else
     echo "   >> mismatch ${worst}s exceeds tolerance ${SYNC_TOL}s — sync REVIEW."
   else
     echo "   max Δ ${worst}s within ${SYNC_TOL}s tolerance — A/V durations consistent."
+  fi
+fi
+
+if [ "$SILP" -eq 1 ]; then
+  echo "-- (--silence) silence content-parity (source vs output audio) --"
+  # The injected-silence signature: a re-timed build re-padded silence from t=0
+  # on a filter-graph rebuild (mid-stream layout change) — hundreds of seconds of
+  # silence with A/V durations still matching, so gate (f) passes it. Legitimate
+  # resync gap-fill silence is bounded by the source's forward gaps (DISC_MISSING).
+  nao=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | grep -c . || true)
+  if [ "${nao:-0}" -eq 0 ]; then
+    echo "   no audio in output — silence parity N/A."
+  else
+    SIL_DB="${RTM_SIL_DB:--50dB}"; SIL_MIN="${RTM_SIL_MIN:-5}"; SIL_TOL="${RTM_SIL_TOL:-2.0}"
+    sil_total () {  # $1 file -> summed seconds of long-window silence across all audio tracks
+      { ffmpeg -nostdin -nostats -v info -i "$1" -map '0:a?' -vn \
+          -af "silencedetect=n=${SIL_DB}:d=${SIL_MIN}" -f null - 2>&1 || true; } | \
+        awk '{for(i=1;i<NF;i++) if($i=="silence_duration:") s+=$(i+1)} END{printf "%.3f", s+0}'
+    }
+    ssil=$(sil_total "$SRC"); osil=$(sil_total "$OUT")
+    eval "$(disc_scan "$SRC")"     # DISC_MISSING = the legitimate gap-fill budget
+    excess=$(awk "BEGIN{printf \"%.3f\", ($osil) - ($ssil) - (${DISC_MISSING:-0}) - ($SIL_TOL)}")
+    echo "   long-window silence (>=${SIL_MIN}s @ ${SIL_DB}): source=${ssil}s  output=${osil}s"
+    echo "   allowed: source silence + gap-fill budget ${DISC_MISSING:-0}s + tolerance ${SIL_TOL}s"
+    if awk "BEGIN{exit !(($excess) > 0)}"; then
+      verdict=FAIL; other_failed=1
+      echo "   >> ${excess}s of silence in the output has NO counterpart in the source —"
+      echo "      the injected-silence signature (a re-timed build re-padded from t=0,"
+      echo "      e.g. an aresample first_pts=0 graph rebuild on a mid-stream layout"
+      echo "      change). All audio after the first injected block is out of sync."
+      note="${note:+$note }Output carries ${excess}s of long-window silence absent from the source (beyond the ${DISC_MISSING:-0}s gap-fill budget) — injected-silence signature; do not ship (resync.sh refuses layout-change sources; see timeline-repair.md)."
+    else
+      echo "   silence parity consistent (within the gap-fill budget)."
+    fi
   fi
 fi
 

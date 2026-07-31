@@ -78,6 +78,12 @@ ffprobe -v error -select_streams v:0 -read_intervals "%+#240" \
 | MKV mux fails: `Timestamps are unset in a packet` | Missing timestamps | MKV strict-mux test |
 | Flood of `error while decoding` / `concealing errors` | Damaged capture (dropped packets) — **not** fixable by remux | decode-to-null tally |
 | A few `mmco: unref short failure` only | Benign reference bookkeeping; carries through losslessly — but it explains ONLY itself: the same gates that show mmco noise also show timeline defects, and the noise MASKS them | replicate on the source with **matching counts**, then still prove the timeline independently |
+| mpegts/MPEG-2 with forward gaps AND mid-file non-monotonic DTS; every lossless build dies at the mux confession or verify gate (d) | **Backhaul timeline rot**: splice discontinuities from the broadcast chain plus duplicate/reordered DTS at the splice points — the windowed scan reads 0 because the rot sits mid-file | whole-file `disc_scan` (`DISC_BACK`/`DISC_DUP`); `mov.sh`/`diagnose.sh` refuse with routes (exit 11) — keep the `.ts` / lossless MKV / `rung4.sh`. Never `resync.sh` |
+| Bit-identical, verify-green MOV still **distorts in QuickTime** (IINA/VLC/mpv fine) | **Not a timeline defect at all**: MPEG-2 4:2:2 Profile (`yuv422p`) — AVFoundation has no decoder for it (controlled 2008-vs-2010 comparison, 2026-07-30) | `pix_fmt` (probe `PR_PIX_FMT`); `mov.sh` refuses (exit 11); QuickTime playback = `rung4.sh` only |
+| Resync output passes duration parity yet audio runs minutes late with long dead air | **Injected silence**: mid-stream channel-layout change (5.1→stereo→5.1) makes ffmpeg rebuild the filter graph, and `aresample first_pts=0` re-pads from t=0 on every rebuild | `resync.sh` layout scan refuses the class (exit 11); `verify.sh --silence` content-parity catches a shipped one |
+| One giant backward DTS jump of ~95,443 s (~2^33 ticks at 90 kHz) | **33-bit PTS wraparound** (~26.5 h rollover) — not rot; demuxers unwrap on read | `ts-health.sh` classifies wrap separately from backward-DTS; proof is the OUTPUT: verify gate (d) monotonic |
+| First seconds grey/garbage, then clean | **Mid-GOP capture start**: pre-roll frames reference a GOP that was never captured; players conceal | `ts-health.sh` pre-keyframe packet count → lossless trim at the first IDR (`cutting-concat.md`), no re-encode |
+| Conceal/artifact bursts at random spots; counts reproduce identically on the source | **Transport packet loss** (continuity-counter errors / TEI) — permanent, no remux restores it | `ts-health.sh` transport pass (CC/corrupt/PES counted); floods → re-capture |
 
 ## Diagnostic ladder (run in order; `diagnose.sh` automates this)
 
@@ -333,3 +339,14 @@ audio* (silence added) — video stays lossless, audio does not. If you also nee
 the bit-exact original audio, the only frame-accurate fix is a re-mux **from the
 still-existing source** with the same gap handling; a desynced copy can recover
 the gaps the picture timeline shows but a residual can remain at the tail.
+
+Two classes are **excluded from resync by design** (both exit 11 with routes):
+gaps **plus** non-monotonic DTS on mpegts/MPEG-2 (backhaul rot — the invented
+DTS leave near-zero `stts` durations verify gate (d) rightly fails), and
+sources whose audio **changes channel layout mid-stream** — each change
+rebuilds the filter graph and `aresample first_pts=0` re-pads silence from
+t=0 per rebuild (the ~17-minute injected-silence incident; duration parity is
+blind to it, `verify.sh --silence` is not). For a layout-change source with
+continuous audio, the `mov.sh` dual-track build (no resample in its path) is
+the correct deliverable: a sub-frame video gap costs milliseconds of offset,
+far under the sync tolerance.

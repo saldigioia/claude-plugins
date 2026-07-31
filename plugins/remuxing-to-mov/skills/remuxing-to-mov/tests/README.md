@@ -60,6 +60,25 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     mux log; `pairfill-paff.sh` refuses non-matching streams (exit 3), builds a
     fully-timestamped source end-to-end, and keeps the source presentation
     order; `probe.sh --kv` carries the routing profile (PF_HALF_TS/PF_REORDER).
+24. **Backhaul refusal gate (1.8.0)** — `disc_scan` counts whole-file DTS rot
+    (backward/duplicate) alongside forward gaps; `mov.sh` refuses MPEG-2 4:2:2
+    (`yuv422p`, the QT-undecodable profile) instantly and mpegts/MPEG-2
+    gap-plus-rot timelines after a demux-only scan (both exit 11, `MOV_REFUSED`
+    machine line, three routes printed, nothing written); gaps alone and H.264
+    sources pass through; `--force-backhaul` builds but never reports a 4:2:2
+    output "QuickTime-ready"; `diagnose.sh` prints the decodability banner and
+    the BACKHAUL TIMELINE ROT verdict; `resync.sh` refuses mid-stream
+    channel-layout changes (exit 11, the silence-injection class) while
+    single-layout sources still build; `verify.sh --silence` FAILs injected
+    silence that duration parity cannot see and passes a clean copy.
+25. **ts-health.sh** — the consolidated demux-only capture scan: a clean file
+    reads CLEAN (exit 0); injected packet tables prove missing-timestamp
+    routing (genpts/pairfill) with gap counts across the holes annotated
+    unreliable, 33-bit PTS wraparound classified as wrap (never backward-DTS
+    rot), and mid-GOP start routed to the lossless first-IDR trim; injected
+    transport logs prove small continuity loss reads FINDINGS (stated
+    permanent) while a flood reads DAMAGED (exit 1, re-capture); `--kv` emits
+    the machine block; the 4:2:2 profile is named QT-undecodable in passing.
 
 ## Synthesis limit (why some things aren't tested directly)
 

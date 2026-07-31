@@ -76,7 +76,7 @@
     {
       "name": "remuxing-to-mov",
       "source": "./plugins/remuxing-to-mov",
-      "description": "Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. Five-rung escalation ladder (pure copy → PCM audio → genpts → elementary-stream timeline rebuild → scoped re-encode) with probe/diagnose/verify scripts, dual-track PCM-access + bit-exact-original audio default, field-coded (PAFF) H.264 glitch repair, and decoded-pixel-identity verification of every output. Every codec/container fact verified empirically against a named ffmpeg version; the source file is never touched.",
+      "description": "Losslessly remux broadcast and web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. Five-rung escalation ladder (pure copy → PCM audio → genpts → elementary-stream timeline rebuild → scoped re-encode) with probe/diagnose/verify scripts, a backhaul refusal gate (MPEG-2 4:2:2 and timeline-rot sources refused before the mux with routed alternatives), dual-track PCM-access + bit-exact-original audio default, field-coded (PAFF) H.264 glitch repair, and decoded-pixel-identity plus silence content-parity verification of every output. Every codec/container fact verified empirically against a named ffmpeg version; the source file is never touched.",
       "category": "video-archival",
       "keywords": [
         "video",

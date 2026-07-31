@@ -137,7 +137,12 @@ pf_detect () {
 #
 # Usage:  eval "$(disc_scan INPUT)"
 #   -> DISC_COUNT (forward gaps) DISC_MISSING (s of dropped time) DISC_FIRST (s|na)
-#      DISC_FRAMEDUR (s)
+#      DISC_FRAMEDUR (s) DISC_BACK (backward DTS steps) DISC_DUP (duplicate DTS)
+# DISC_BACK/DISC_DUP are the WHOLE-FILE DTS-rot counters the backhaul gate needs:
+# the windowed 5000-packet scan read 0 on the 2009 and 2012 feeds whose defects
+# sat mid-file at splice points, and the decode-to-null nmono warnings come from
+# exactly these demux-visible DTS relations — so one demux pass answers both the
+# gap and the rot question without a decode.
 # Tunables: DISC_MULT (gap threshold in frame durations, default 1.5).
 # Test hook: DISC_DTS_FILE=<file of dts_time values> bypasses ffprobe;
 #            DISC_FRAMEDUR_IN=<s> supplies the frame duration for that injected list.
@@ -153,13 +158,13 @@ disc_scan () {
   fi
   printf '%s\n' "$dts" | awk -v fdur="${fdur:-0}" -v mult="$mult" '
     $1!="N/A" && $1!="" { t=$1+0
-      if(seen){ d=t-p; if(d>0){ nd++; dl[nd]=d; pos[nd]=p; sd+=d } }
+      if(seen){ d=t-p; if(d>0){ nd++; dl[nd]=d; pos[nd]=p; sd+=d } else if(d<0){ bk++ } else { du++ } }
       p=t; seen=1 }
     END{
-      if(nd<1){ print "DISC_COUNT=0\nDISC_MISSING=0.000\nDISC_FIRST=na"; printf "DISC_FRAMEDUR=%.6f\n", fdur+0; exit }
+      if(nd<1){ print "DISC_COUNT=0\nDISC_MISSING=0.000\nDISC_FIRST=na"; printf "DISC_FRAMEDUR=%.6f\nDISC_BACK=%d\nDISC_DUP=%d\n", fdur+0, bk+0, du+0; exit }
       fd=fdur+0; if(fd<=0) fd=sd/nd            # no fps -> mean delta is an excellent CFR proxy
       thr=mult*fd; cnt=0; miss=0; first="na"
       for(i=1;i<=nd;i++) if(dl[i]>thr){ cnt++; miss+=dl[i]-fd; if(first=="na") first=sprintf("%.3f",pos[i]) }
-      printf "DISC_COUNT=%d\nDISC_MISSING=%.3f\nDISC_FIRST=%s\nDISC_FRAMEDUR=%.6f\n", cnt, miss, first, fd
+      printf "DISC_COUNT=%d\nDISC_MISSING=%.3f\nDISC_FIRST=%s\nDISC_FRAMEDUR=%.6f\nDISC_BACK=%d\nDISC_DUP=%d\n", cnt, miss, first, fd, bk+0, du+0
     }'
 }

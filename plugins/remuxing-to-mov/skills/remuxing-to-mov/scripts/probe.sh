@@ -84,10 +84,11 @@ mp4_atom_scan () {  # $1 = container name, $2 = ffprobe codec_tag_string fallbac
 # happens reactively in auto.sh from the verify verdict.
 probe_struct () {
   local mode="$1" q="ffprobe -v error -select_streams"
-  local container vcodec vtag isavc acodec aaction rung cmd cp ct cs cr
+  local container vcodec vtag isavc acodec aaction rung cmd cp ct cs cr pixfmt
   container=$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vtag=$($q v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  pixfmt=$($q v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   isavc=$($q v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   acodec=$($q a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   cp=$($q v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
@@ -114,12 +115,12 @@ probe_struct () {
   elif [ "$aaction" = pcm ]; then rung=1; cmd="remux.sh IN OUT.mov --audio pcm"
   else                            rung=0; cmd="remux.sh IN OUT.mov"; fi
   if [ "$mode" = "--json" ]; then
-    printf '{"container":"%s","vcodec":"%s","vtag":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"}\n' \
-      "$container" "$vcodec" "$vtag" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"}\n' \
+      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
   else
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
-    printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
-      "$container" "$vcodec" "$vtag" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
+      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
     aud_manifest_kv                                                       # 5-2a
     printf 'PR_MS_TB=%s\nPR_TS_HINT=%s\n' "$MS_TB" "${TS_HINT:-none}"    # 5-4e
     printf 'PR_GAMA=%s\nPR_STSD_ENTRY=%s\nPR_STSD_DV=%s\n' \
@@ -148,6 +149,18 @@ if [ "${GAMA:-unknown}" = yes ]; then
   echo "   WARN legacy 'gama' atom present (pre-2010 QuickTime gamma era): modern"
   echo "        players may render this dark/washed vs an nclc-tagged copy. A -c copy"
   echo "        remux normalizes it; see color-hdr-subs.md (Pre-2010 exports)."
+fi
+# backhaul/contribution mastering profile (batch comparison 2026-07-30): QuickTime
+# has NO MPEG-2 4:2:2 decode path — a bit-identical, verify-green MOV still distorts.
+vcod_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+pix_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+if [ "$vcod_h" = mpeg2video ] && [ "$pix_h" = yuv422p ]; then
+  echo "   >> QT-UNDECODABLE: MPEG-2 4:2:2 Profile (yuv422p) — AVFoundation/QuickTime"
+  echo "      cannot decode this profile at all; even a verified lossless MOV plays"
+  echo "      distorted (FFmpeg players — IINA/VLC/mpv — decode it fine). No container"
+  echo "      surgery supplies a missing decoder: mov.sh refuses early (exit 11)."
+  echo "      Playback copy: lossless MKV mux. QuickTime-native: scripts/rung4.sh"
+  echo "      (operator-attested re-encode) — the only sanctioned path."
 fi
 
 echo "-- audio --"
@@ -204,6 +217,12 @@ if [ "${DISC_COUNT:-0}" -gt 0 ]; then
   echo "      these in raw PCM audio and desyncs it. Use scripts/resync.sh, then verify."
 else
   echo "   none (video DTS gap-free on the timing axis; safe to plain-copy)."
+fi
+if [ "${DISC_BACK:-0}" -gt 0 ] || [ "${DISC_DUP:-0}" -gt 0 ]; then
+  echo "   >> whole-file DTS rot: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0} (the windowed"
+  echo "      5000-packet scan can miss these mid-file). Combined with forward gaps on an"
+  echo "      mpegts/mpeg2video source this is the unbuildable BACKHAUL class — mov.sh"
+  echo "      refuses it early (exit 11); scripts/diagnose.sh prints the routes."
 fi
 
 # ms-timebase advisory (QTFF audit 5-4e, C68): conventionality, not repair.

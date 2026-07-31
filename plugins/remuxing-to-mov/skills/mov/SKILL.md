@@ -48,12 +48,24 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
 - A copy mux whose log confesses invented timing (`pts has no value` /
   `Timestamps are unset`) is a hard stop — the script refuses to bless the
   output and points at `diagnose.sh`. Relay that verbatim; never ship the file.
+- **Backhaul refusal gate (exit 11)** — two source classes are refused *before*
+  any build: MPEG-2 4:2:2 (`yuv422p`, the satellite-contribution mastering
+  profile — QuickTime has **no decoder** for it, so even a bit-perfect MOV
+  distorts), and mpegts/MPEG-2 sources with forward timestamp gaps **plus**
+  non-monotonic DTS (timeline rot — no lossless MOV of that class survives
+  verify). The refusal prints three honest routes: keep the source (it is the
+  archival master), a lossless MKV playback copy (IINA/VLC/mpv), or the
+  operator-attested `rung4.sh` re-encode. Gaps alone do **not** refuse.
 
 ## Report back
 
 Use the exit code: `0` = DONE (verified lossless), `10` = REVIEW (written, wants a
-closer look), `1` = FAIL (nothing trustworthy produced). On REVIEW/FAIL, relay the
-script's stated reason. **Never** re-encode to force a pass — a scoped re-encode
+closer look), `1` = FAIL (nothing trustworthy produced), `11` = REFUSED (backhaul
+profile — nothing was built, by design). On REVIEW/FAIL, relay the
+script's stated reason. On `11`, relay the refusal **and its three routes
+verbatim**; never ship anyway, never hand-roll an ffmpeg workaround, and never
+invoke `--force-backhaul` or `rung4.sh` unless the operator explicitly asks —
+the override and the re-encode are human decisions. **Never** re-encode to force a pass — a scoped re-encode
 (Rung 4) is a human decision, and its **sole sanctioned route** is
 `skills/remuxing-to-mov/scripts/rung4.sh`, which refuses to run without the
 operator's verbatim attestation. Never hand-roll a re-encode around it; the
