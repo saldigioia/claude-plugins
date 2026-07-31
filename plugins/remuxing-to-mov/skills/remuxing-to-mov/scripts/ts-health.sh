@@ -208,8 +208,8 @@ if awk "BEGIN{exit !(($worst_ad) > 0.5)}"; then
   finding audio "audio/video header durations differ by up to ${worst_ad}s" \
     "scripts/diagnose.sh (usually the gap-collapse class -> resync.sh); verify gate (f) owns the post-build proof"
 fi
-if [ "$vcodec" = mpeg2video ] && [ "$pixfmt" = yuv422p ]; then
-  finding codec "MPEG-2 4:2:2 (yuv422p) — QuickTime CANNOT decode this profile, however healthy the file" \
+if [ "$pixfmt" = yuv422p ] && { [ "$vcodec" = mpeg2video ] || [ "$vcodec" = h264 ]; }; then
+  finding codec "$vcodec 4:2:2 (yuv422p) — QuickTime CANNOT decode this profile, however healthy the file (MPEG-2 distorts, H.264 High 4:2:2 stalls; both verified vs 4:2:0 controls)" \
     "keep source / lossless MKV playback copy / rung4.sh attested re-encode (mov.sh refuses with the full routes, exit 11)"
 fi
 

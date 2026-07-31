@@ -798,10 +798,25 @@ has "$o" "MOV_REFUSED profile=timeline-rot" "rot refusal emits the machine-reada
 o=$(DISC_DTS_FILE="$WORK/bh_gaponly.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/mov.sh" "$M420" "$WORK/bhgap.mov" 2>&1); rc=$?
 { [ "$rc" -eq 0 ] && [ -f "$WORK/bhgap.mov" ]; } && ok "gap-only mpeg2 TS passes the gate and builds" || no "gap-only was refused/failed (rc=$rc)"
 has "$o" "backhaul scan clear" "gate announces the clear scan before continuing"
-# codec guard: an H.264 TS with the same injected rot never trips the gate
+# codec guard: an H.264 4:2:0 TS with the same injected rot never trips the gate
+# (the rot gate is mpeg2-scoped; H.264 timelines ride the PAFF/resync machinery)
 o=$(DISC_DTS_FILE="$WORK/rot.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/mov.sh" "$S" "$WORK/bh264.mov" 2>&1); rc=$?
 { [ "$rc" -eq 0 ] && case "$o" in *REFUSED*) false;; *) true;; esac; } \
-  && ok "H.264 TS with rot -> gate does not fire (codec guard)" || no "codec guard leaked (rc=$rc)"
+  && ok "H.264 4:2:0 TS with rot -> gate does not fire (codec guard)" || no "codec guard leaked (rc=$rc)"
+# H.264 High 4:2:2 (the 2017-feed class): QT-undecodable, refused like MPEG-2 4:2:2
+# (verified 2026-07-31: 4:2:2 slice stalls qlmanage, identical 4:2:0 control renders)
+H422="$WORK/bh_h264_422.ts"
+if ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v libx264 -g 25 -pix_fmt yuv422p -f mpegts "$H422" 2>/dev/null; then
+  o=$(bash "$SC/mov.sh" "$H422" "$WORK/bh422h.mov" 2>&1); rc=$?
+  { [ "$rc" -eq 11 ] && case "$o" in *"QT-UNDECODABLE"*"h264 4:2:2"*) true;; *) false;; esac; } \
+    && ok "mov.sh: H.264 High 4:2:2 -> REFUSED exit 11 (QT-undecodable, widened gate)" || no "h264-422 gate wrong (rc=$rc)"
+  { [ ! -f "$WORK/bh422h.mov" ] && [ ! -f "$WORK/bh422h.mov.part" ]; } && ok "h264-422 refusal writes nothing" || no "h264-422 refusal left an output"
+  o=$(bash "$SC/mov.sh" "$H422" "$WORK/bh422hf.mov" --force-backhaul 2>&1); rc=$?
+  { [ "$rc" -ne 11 ] && case "$o" in *"NOT QuickTime-playable"*) true;; *) false;; esac; } \
+    && ok "h264-422 --force-backhaul builds and states the honest deliverable class" || no "h264-422 force path wrong (rc=$rc)"
+else
+  echo "  (skip: this libx264 can't mint yuv422p — h264-422 gate untested here)"
+fi
 # probe --kv carries the field the primary gate reads
 kv=$(bash "$SC/probe.sh" "$M420" --kv 2>&1)
 has "$kv" "PR_PIX_FMT=yuv420p" "probe --kv exports PR_PIX_FMT"

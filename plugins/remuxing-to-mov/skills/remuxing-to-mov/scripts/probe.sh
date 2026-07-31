@@ -150,15 +150,17 @@ if [ "${GAMA:-unknown}" = yes ]; then
   echo "        players may render this dark/washed vs an nclc-tagged copy. A -c copy"
   echo "        remux normalizes it; see color-hdr-subs.md (Pre-2010 exports)."
 fi
-# backhaul/contribution mastering profile (batch comparison 2026-07-30): QuickTime
-# has NO MPEG-2 4:2:2 decode path — a bit-identical, verify-green MOV still distorts.
+# backhaul/contribution mastering profiles: QuickTime has NO 4:2:2 decode path
+# for MPEG-2 (verify-green MOV distorts, 2026-07-30) OR H.264 High 4:2:2
+# (decoder stalls, 2026-07-31) — both proven against 4:2:0 controls.
 vcod_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 pix_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-if [ "$vcod_h" = mpeg2video ] && [ "$pix_h" = yuv422p ]; then
-  echo "   >> QT-UNDECODABLE: MPEG-2 4:2:2 Profile (yuv422p) — AVFoundation/QuickTime"
-  echo "      cannot decode this profile at all; even a verified lossless MOV plays"
-  echo "      distorted (FFmpeg players — IINA/VLC/mpv — decode it fine). No container"
-  echo "      surgery supplies a missing decoder: mov.sh refuses early (exit 11)."
+if [ "$pix_h" = yuv422p ] && { [ "$vcod_h" = mpeg2video ] || [ "$vcod_h" = h264 ]; }; then
+  echo "   >> QT-UNDECODABLE: $vcod_h 4:2:2 (yuv422p) — AVFoundation/QuickTime cannot"
+  echo "      decode this profile at all; even a verified lossless MOV will not play"
+  echo "      (MPEG-2 4:2:2 distorts, H.264 High 4:2:2 stalls the decoder; FFmpeg"
+  echo "      players — IINA/VLC/mpv — decode it fine). No container surgery supplies"
+  echo "      a missing decoder: mov.sh refuses early (exit 11)."
   echo "      Playback copy: lossless MKV mux. QuickTime-native: scripts/rung4.sh"
   echo "      (operator-attested re-encode) — the only sanctioned path."
 fi

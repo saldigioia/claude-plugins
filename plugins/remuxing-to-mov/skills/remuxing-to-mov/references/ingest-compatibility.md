@@ -27,9 +27,9 @@ Detect: `ffprobe -v error -select_streams v:0 -show_entries stream=is_avc,nal_le
 
 | Codec | Copies into MOV? | Tag / note |
 |-------|------------------|------------|
-| H.264/AVC | Yes | `avc1` (default); Annex-B→avcC handled automatically on copy |
+| H.264/AVC | Yes | `avc1` (default); Annex-B→avcC handled automatically on copy. 4:2:0 profiles play; **High 4:2:2 (`yuv422p`) does NOT — AVFoundation stalls on it** (verified 2026-07-31, macOS 26.5.2: 4:2:2 slice hangs qlmanage, identical 4:2:0 control renders; same undecodable class as MPEG-2 4:2:2) |
 | HEVC/H.265 | Yes | **`-tag:v hvc1`** — default `hev1` won't play in QuickTime (verified: default mux tag is `hev1`) |
-| MPEG-2 | Yes | Container OK. 4:2:0 plays in QuickTime; **4:2:2 (422@HL) generally does not** (verify on target macOS) |
+| MPEG-2 | Yes | Container OK. 4:2:0 plays in QuickTime; **4:2:2 (422@HL) does not — distorts even bit-accurate** (verified 2026-07-30: controlled Main/4:2:0 vs 4:2:2 pair; `mov.sh` refuses the profile, exit 11) |
 | ProRes | Yes | `apcn/apch/apcs/apco/ap4h/ap4x` — editorial/master |
 | DV/DVCPRO | Yes | Legacy; QuickTime yes, iOS no |
 | Dolby Vision HEVC | Yes (ffmpeg ≥5.0, single-layer) | ffmpeg ≥5.0 preserves single-layer DV (P5/P8) on `-c copy` with `-tag:v hvc1`; **dual-layer P7 (FEL)** needs conversion to P8.1 or keep MKV. Sample-entry family (5-5e/C61): `dvh1`/`dvhe` (DV-dedicated) and cross-compat `hvc2`/`hev2`/`hvc3`/`hev3` — the testable split is **`dvh1` plays where the `hev1`-family fails** (same hvc1-vs-hev1 rule extended to DV entries; still blocked on real DV artifacts). `probe.sh` reports the stsd entry (e.g. `hevc (dvh1)`). See `color-hdr-subs.md`. |

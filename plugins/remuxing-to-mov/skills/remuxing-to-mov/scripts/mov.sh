@@ -95,11 +95,16 @@ echo "   video=$PR_VCODEC  audio=$PR_ACODEC  paff=$PF_PAFF"
 
 # --- backhaul refusal gate (exit 11): move the verdict the old pipeline reached
 # after a full mux + resync + failed verify to the cheapest possible moment.
-#   PRIMARY — QT-UNDECODABLE: mpeg2video + yuv422p. AVFoundation has NO working
-#   MPEG-2 4:2:2 decode path (controlled comparison 2026-07-30: a 4:2:2 MOV with
-#   a pristine, fully-verified timeline distorts in QuickTime exactly like the
-#   failed builds, while the Main/4:2:0 sibling plays perfectly). No container
-#   surgery can supply a missing decoder — one instant ffprobe field decides.
+#   PRIMARY — QT-UNDECODABLE: yuv422p on MPEG-2 OR H.264. AVFoundation has NO
+#   working 4:2:2 decode path for either contribution mastering profile:
+#   * MPEG-2 4:2:2 — controlled comparison 2026-07-30: a 4:2:2 MOV with a
+#     pristine, fully-verified timeline distorts in QuickTime exactly like the
+#     failed builds, while the Main/4:2:0 sibling plays perfectly.
+#   * H.264 High 4:2:2 — controlled slice test 2026-07-31 (2017 feed, macOS
+#     26.5.2): the 4:2:2 slice STALLS qlmanage (the undecodable-variant hang
+#     signature), the identical content re-encoded 4:2:0 renders instantly.
+#   No container surgery can supply a missing decoder — one instant ffprobe
+#   field decides, before the PAFF ladder can spend a multi-GB build.
 #   SECONDARY — TIMELINE ROT (buildability): mpegts + mpeg2video + forward gaps
 #   + non-monotonic DTS, whole-file and demux-only (~1 min on a 12 GB capture).
 #   On that class the copy mux invents DTS (confession hard stop) and a resync
@@ -116,20 +121,24 @@ backhaul_routes () {
   echo "              sanctioned path to a true QuickTime-native deliverable"
   echo "   Override (run the build + verify anyway): --force-backhaul"
 }
-if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "$PR_VCODEC" = mpeg2video ]; then
-  if [ "${PR_PIX_FMT:-}" = yuv422p ]; then
-    echo ">> REFUSED: QT-UNDECODABLE PROFILE — MPEG-2 4:2:2 (pix_fmt yuv422p)."
-    echo "   AVFoundation/QuickTime has no MPEG-2 4:2:2 decode path: even a bit-identical,"
-    echo "   verify-green MOV of this source plays DISTORTED in QuickTime (FFmpeg players"
-    echo "   — IINA/VLC/mpv — decode it fine). No lossless remux can keep the"
-    echo "   QuickTime-ready promise here."
+if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "${PR_PIX_FMT:-}" = yuv422p ]; then
+  case "$PR_VCODEC" in mpeg2video|h264)
+    echo ">> REFUSED: QT-UNDECODABLE PROFILE — $PR_VCODEC 4:2:2 (pix_fmt yuv422p)."
+    echo "   AVFoundation/QuickTime has no 4:2:2 decode path for this codec: a"
+    echo "   bit-identical, verify-green MOV of this source will not play in QuickTime"
+    echo "   (MPEG-2 4:2:2 distorts; H.264 High 4:2:2 stalls the decoder — both verified"
+    echo "   against 4:2:0 controls). FFmpeg players — IINA/VLC/mpv — decode it fine."
+    echo "   No lossless remux can keep the QuickTime-ready promise here."
     backhaul_routes
     echo "   (--force-backhaul runs the normal build + verify: when the timeline is"
     echo "    clean the result is a legitimate verified lossless NLE/archival master —"
     echo "    it just will not play in QuickTime.)"
     echo "MOV_REFUSED profile=qt-undecodable vcodec=$PR_VCODEC pix_fmt=${PR_PIX_FMT:-?}"   # machine-readable
     exit 11
-  fi
+    ;;
+  esac
+fi
+if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "$PR_VCODEC" = mpeg2video ]; then
   case "${PR_CONTAINER:-}" in *mpegts*)
     echo "   mpegts/mpeg2video -> backhaul timeline scan (whole file, demux-only)..."
     . "$SELF_DIR/lib-paff.sh"
@@ -152,10 +161,13 @@ fi
 # a FORCED build of the QT-undecodable profile must never be reported as
 # "QuickTime-ready" — the verify gates prove losslessness, not decodability
 READY_TAG="QuickTime-ready"
-if [ "$FORCE_BACKHAUL" -eq 1 ] && [ "$PR_VCODEC" = mpeg2video ] && [ "${PR_PIX_FMT:-}" = yuv422p ]; then
-  echo "   NOTE: --force-backhaul on a QT-undecodable profile (MPEG-2 4:2:2) — building"
-  echo "   a lossless MASTER; QuickTime will NOT play it (IINA/VLC/mpv and NLEs will)."
-  READY_TAG="NOT QuickTime-playable (MPEG-2 4:2:2) — lossless master"
+if [ "$FORCE_BACKHAUL" -eq 1 ] && [ "${PR_PIX_FMT:-}" = yuv422p ]; then
+  case "$PR_VCODEC" in mpeg2video|h264)
+    echo "   NOTE: --force-backhaul on a QT-undecodable profile ($PR_VCODEC 4:2:2) — building"
+    echo "   a lossless MASTER; QuickTime will NOT play it (IINA/VLC/mpv and NLEs will)."
+    READY_TAG="NOT QuickTime-playable ($PR_VCODEC 4:2:2) — lossless master"
+    ;;
+  esac
 fi
 
 # --- field-coded: hand the timeline repair to the tested ladder driver ---

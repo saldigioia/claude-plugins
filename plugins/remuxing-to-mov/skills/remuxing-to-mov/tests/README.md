@@ -60,9 +60,10 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     mux log; `pairfill-paff.sh` refuses non-matching streams (exit 3), builds a
     fully-timestamped source end-to-end, and keeps the source presentation
     order; `probe.sh --kv` carries the routing profile (PF_HALF_TS/PF_REORDER).
-24. **Backhaul refusal gate (1.8.0)** — `disc_scan` counts whole-file DTS rot
-    (backward/duplicate) alongside forward gaps; `mov.sh` refuses MPEG-2 4:2:2
-    (`yuv422p`, the QT-undecodable profile) instantly and mpegts/MPEG-2
+24. **Backhaul refusal gate (1.8.0; widened 1.9.0)** — `disc_scan` counts
+    whole-file DTS rot (backward/duplicate) alongside forward gaps; `mov.sh`
+    refuses QT-undecodable 4:2:2 (`yuv422p` on MPEG-2 **and** H.264 High
+    4:2:2 — the 2017-feed class) instantly and mpegts/MPEG-2
     gap-plus-rot timelines after a demux-only scan (both exit 11, `MOV_REFUSED`
     machine line, three routes printed, nothing written); gaps alone and H.264
     sources pass through; `--force-backhaul` builds but never reports a 4:2:2

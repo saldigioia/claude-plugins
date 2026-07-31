@@ -169,7 +169,7 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 | Video plays, audio silent in QuickTime | Audio QT can't play (AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm`. **E-AC-3 (Dolby Digital Plus) plays natively — just copy it** |
 | Glitches/tears only on scrub | Timestamps, not the video → `scripts/diagnose.sh` |
 | Audio drifts out of sync over a long capture (leads/lags the picture) | Discontinuous source: dropped frames the video keeps but raw PCM collapses on copy. `scripts/diagnose.sh` finds the forward gaps → `scripts/resync.sh IN OUT.mov` (video bit-identical, audio gap-filled) → `verify.sh` parity gate confirms. resync **refuses** (exit 11) sources whose audio changes channel layout mid-stream — the filter-graph-rebuild silence-injection class — and its verify pass adds `--silence` content parity |
-| Backhaul/contribution TS (MPEG-2 4:2:2 `yuv422p`, ~35 Mb/s, splice gaps) | **QuickTime cannot decode MPEG-2 4:2:2 at all** — a bit-perfect, verify-green MOV still distorts (AVFoundation has no decode path; IINA/VLC/mpv are fine). `mov.sh` refuses early (exit 11) with the routes: keep the `.ts` (archival master) / lossless MKV playback copy / `rung4.sh` attested re-encode. Separately, gaps **plus** non-monotonic DTS (timeline rot, whole-file scan) refuse any lossless MOV build; gaps ALONE rebuild fine (the 2008 recovery) |
+| Backhaul/contribution TS (4:2:2 `yuv422p` — MPEG-2 **or** H.264 High 4:2:2 — ~35 Mb/s, splice gaps) | **QuickTime cannot decode 4:2:2 in either codec** — a bit-perfect, verify-green MOV distorts (MPEG-2) or stalls the decoder (H.264 Hi422); both proven against 4:2:0 controls. AVFoundation has no decode path; IINA/VLC/mpv are fine. `mov.sh` refuses early (exit 11) with the routes: keep the `.ts` (archival master) / lossless MKV playback copy / `rung4.sh` attested re-encode. Separately, on MPEG-2 TS, gaps **plus** non-monotonic DTS (timeline rot, whole-file scan) refuse any lossless MOV build; gaps ALONE rebuild fine (the 2008 recovery) |
 | Field-coded (PAFF) H.264 (coded-pic rate ≈ 2× frame rate — the rate counts ALL packets, untimestamped included) | genpts is guilty-until-proven → pair-timestamped/reordered: `scripts/pairfill-paff.sh` (keeps real PTS); no reorder: `scripts/rebuild-paff.sh`; confirm with `scripts/verify.sh` (timeline + scrub gates) |
 | Mux log says `pts has no value` / `Timestamps are unset` / `Non-monotonic DTS` on a copy mux | **HARD STOP — the muxer invented the timeline.** Never ship it, whatever verify says about the essence. remux.sh/dual-track.sh refuse automatically; run `scripts/diagnose.sh` for the repair |
 | Repair looks fine but motion is subtly shuffled | Constant-rate restamp flattened a reorder pyramid (PTS=DTS = decode order). `verify.sh --full` compares framemd5 presentation ORDER; repair with `pairfill-paff.sh`, never `rebuild-paff.sh` |
@@ -277,13 +277,17 @@ referenced files.
   first `I` in display order); `seam-check.sh` catches the flash. Fix: restart on
   a closed-GOP keyframe, or smart-cut (the one edit that re-encodes).
   → `references/cutting-concat.md`
-- **MPEG-2 4:2:2 Profile is QuickTime-UNDECODABLE (backhaul batch, 2026-07-30).**
-  A controlled pair isolated the variable: the 2008 Main/`yuv420p` MOV plays
-  perfectly in QuickTime; the 2010 4:2:2/`yuv422p` MOV — pristine timeline,
-  every verify gate green, uniform sample table — distorts identically to the
-  failed builds. AVFoundation has no working MPEG-2 4:2:2 decode path; no
-  container surgery supplies a missing decoder, which is why *bit-accurate*
-  remuxes of contribution feeds (~35 Mb/s 4:2:2 mastering) still distort.
+- **4:2:2 video is QuickTime-UNDECODABLE — MPEG-2 AND H.264 (backhaul batches,
+  2026-07-30/31).** Two controlled pairs isolated the variable. MPEG-2: the
+  2008 Main/`yuv420p` MOV plays perfectly; the 2010 4:2:2/`yuv422p` MOV —
+  pristine timeline, every verify gate green, uniform sample table — distorts
+  identically to the failed builds. H.264: a lossless slice of the 2017 feed
+  (High 4:2:2, timeline CLEAN per ts-health) **stalls qlmanage** (the
+  undecodable-variant hang signature, macOS 26.5.2) while the identical
+  content re-encoded 4:2:0 renders instantly. AVFoundation has no working
+  4:2:2 decode path in either codec; no container surgery supplies a missing
+  decoder, which is why *bit-accurate* remuxes of contribution feeds
+  (~35 Mb/s 4:2:2 mastering) still fail in QuickTime.
   Timeline defects are the **orthogonal** axis (buildability, not decodability):
   forward gaps + non-monotonic DTS = backhaul timeline rot, refused (exit 11,
   whole-file demux scan — the windowed scan missed mid-file splice defects);

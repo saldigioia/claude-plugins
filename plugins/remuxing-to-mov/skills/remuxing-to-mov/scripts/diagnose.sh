@@ -48,13 +48,14 @@ echo "** reorder pyramid: $PF_REORDER (pts!=dts on $PF_PTSNEDTS pkt(s), $PF_BACK
 CONT=$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 PIX=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 IS_TS=no; case "$CONT" in *mpegts*) IS_TS=yes;; esac
-if [ "$PF_CODEC" = mpeg2video ] && [ "$PIX" = yuv422p ]; then
-  echo "** QT-UNDECODABLE PROFILE: MPEG-2 4:2:2 (yuv422p). AVFoundation/QuickTime has no"
-  echo "** working decode path for this profile (controlled comparison 2026-07-30: a"
-  echo "** flawless-timeline, fully-verified 4:2:2 MOV still distorts; Main/4:2:0 plays)."
-  echo "** Every verdict below governs whether a verified lossless MASTER can be built —"
-  echo "** NOT QuickTime playability. QuickTime playback = scripts/rung4.sh (attested"
-  echo "** re-encode), the only sanctioned path. mov.sh refuses this profile early (exit 11)."
+if [ "$PIX" = yuv422p ] && { [ "$PF_CODEC" = mpeg2video ] || [ "$PF_CODEC" = h264 ]; }; then
+  echo "** QT-UNDECODABLE PROFILE: $PF_CODEC 4:2:2 (yuv422p). AVFoundation/QuickTime has"
+  echo "** no 4:2:2 decode path for this codec — both verified against 4:2:0 controls:"
+  echo "** MPEG-2 4:2:2 distorts (2026-07-30); H.264 High 4:2:2 stalls the decoder"
+  echo "** (2026-07-31, qlmanage hang vs instant 4:2:0 render). Every verdict below"
+  echo "** governs whether a verified lossless MASTER can be built — NOT QuickTime"
+  echo "** playability. QuickTime playback = scripts/rung4.sh (attested re-encode),"
+  echo "** the only sanctioned path. mov.sh refuses this profile early (exit 11)."
 fi
 
 # (1) decode-to-null: separates real decode damage from timestamp defects.

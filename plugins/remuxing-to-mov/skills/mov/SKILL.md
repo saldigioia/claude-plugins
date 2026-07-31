@@ -49,11 +49,11 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
   `Timestamps are unset`) is a hard stop — the script refuses to bless the
   output and points at `diagnose.sh`. Relay that verbatim; never ship the file.
 - **Backhaul refusal gate (exit 11)** — two source classes are refused *before*
-  any build: MPEG-2 4:2:2 (`yuv422p`, the satellite-contribution mastering
-  profile — QuickTime has **no decoder** for it, so even a bit-perfect MOV
-  distorts), and mpegts/MPEG-2 sources with forward timestamp gaps **plus**
-  non-monotonic DTS (timeline rot — no lossless MOV of that class survives
-  verify). The refusal prints three honest routes: keep the source (it is the
+  any build: 4:2:2 video (`yuv422p` on **MPEG-2 or H.264 High 4:2:2**, the
+  contribution mastering profiles — QuickTime has **no decoder** for either, so
+  even a bit-perfect MOV distorts or stalls), and mpegts/MPEG-2 sources with
+  forward timestamp gaps **plus** non-monotonic DTS (timeline rot — no lossless
+  MOV of that class survives verify). The refusal prints three honest routes: keep the source (it is the
   archival master), a lossless MKV playback copy (IINA/VLC/mpv), or the
   operator-attested `rung4.sh` re-encode. Gaps alone do **not** refuse.
 
