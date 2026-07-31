@@ -54,8 +54,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
   even a bit-perfect MOV distorts or stalls), and mpegts/MPEG-2 sources with
   forward timestamp gaps **plus** non-monotonic DTS (timeline rot — no lossless
   MOV of that class survives verify). The refusal prints three honest routes: keep the source (it is the
-  archival master), a lossless MKV playback copy (IINA/VLC/mpv), or the
-  operator-attested `rung4.sh` re-encode. Gaps alone do **not** refuse.
+  archival master — prove its health with `ts-health.sh`), a lossless MKV
+  playback copy (IINA/VLC/mpv; health-check the copy too), or the
+  operator-attested `rung4.sh` re-encode. Gaps alone do **not** refuse. The gate
+  holds at **every** entry point that writes a `.mov` (`mov.sh`, `auto.sh`,
+  `batch.sh`, `remux.sh`, `dual-track.sh`, the PAFF builders) — there is no side door that
+  builds the refused deliverable.
 
 ## Report back
 

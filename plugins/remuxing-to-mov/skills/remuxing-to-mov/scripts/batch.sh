@@ -22,7 +22,8 @@
 # then relocated). On multi-GB masters over external SSDs that second pass
 # dominates batch wall time; faststart is an access-copy need, not a
 # shelved-master need (see container-internals.md, "faststart's cost").
-# Exit: 0 if nothing FAILed, 1 otherwise.
+# Exit: 0 if nothing FAILed, 1 otherwise. A backhaul-gate REFUSED (auto.sh exit
+# 11) is the gate doing its job — reported for attention, never a batch failure.
 set -eu
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 OUTDIR=""; AUTO_OPTS=(); INPUTS=()
@@ -53,7 +54,7 @@ src_id () { local f="$1" sz mt
   printf '%s:%s' "$sz" "$mt"; }
 kvget () { grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2- || true; }
 
-okc=0; revc=0; failc=0; skipc=0; attention=()
+okc=0; revc=0; refc=0; failc=0; skipc=0; attention=()
 for src in "${files[@]}"; do
   base=$(basename "$src"); stem=${base%.*}
   if [ -n "$OUTDIR" ]; then out="$OUTDIR/$stem.mov"; else out="$(dirname "$src")/$stem.mov"; fi
@@ -67,9 +68,12 @@ for src in "${files[@]}"; do
   echo "==== $src -> $out ===="
   set +e; o=$(bash "$SELF_DIR/auto.sh" "$src" "$out" ${AUTO_OPTS[@]+"${AUTO_OPTS[@]}"} </dev/null 2>&1); arc=$?; set -e
   echo "$o" | sed 's/^/  /'
-  # Verdict is auto.sh's EXIT CODE (the contract: 0=OK, 10=REVIEW, else FAIL) — not
-  # a fragile text grep. AUTO_SUMMARY is parsed only for the cosmetic rung.
-  case "$arc" in 0) verd=OK;; 10) verd=REVIEW;; *) verd=FAIL;; esac
+  # Verdict is auto.sh's EXIT CODE (the contract: 0=OK, 10=REVIEW, 11=REFUSED,
+  # else FAIL) — not a fragile text grep. AUTO_SUMMARY is parsed only for the
+  # cosmetic rung. REFUSED is the backhaul gate doing its job (the source cannot
+  # honestly become a QuickTime .mov — it stays TS/MKV, health-checked); it is
+  # listed for attention but does not fail the batch.
+  case "$arc" in 0) verd=OK;; 10) verd=REVIEW;; 11) verd=REFUSED;; *) verd=FAIL;; esac
   summ=$(printf '%s\n' "$o" | grep -E '^AUTO_SUMMARY ' | tail -1 || true)
   rung=$(printf '%s' "$summ" | sed -n 's/.*rung=\([a-z0-9]*\).*/\1/p'); rung=${rung:-none}
   vhash=$(ffmpeg -nostdin -v error -i "$src" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1 || true)
@@ -78,14 +82,15 @@ for src in "${files[@]}"; do
     echo "PROV_FFMPEG=$ffver"; echo "PROV_WHEN=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   } > "$side.part" && mv -f "$side.part" "$side"
   case "$verd" in
-    OK)     okc=$((okc+1));;
-    REVIEW) revc=$((revc+1)); attention+=("REVIEW  $src");;
-    *)      failc=$((failc+1)); attention+=("FAIL    $src");;
+    OK)      okc=$((okc+1));;
+    REVIEW)  revc=$((revc+1)); attention+=("REVIEW  $src");;
+    REFUSED) refc=$((refc+1)); attention+=("REFUSED $src  (stays TS/MKV — run scripts/ts-health.sh on it)");;
+    *)       failc=$((failc+1)); attention+=("FAIL    $src");;
   esac
 done
 
 echo
 echo "==== batch report ===="
-echo "  OK=$okc  REVIEW=$revc  FAIL=$failc  skipped=$skipc  (ffmpeg $ffver)"
+echo "  OK=$okc  REVIEW=$revc  REFUSED=$refc  FAIL=$failc  skipped=$skipc  (ffmpeg $ffver)"
 [ "${#attention[@]}" -eq 0 ] || { echo "  needs attention:"; printf '   %s\n' "${attention[@]}"; }
 [ "$failc" -eq 0 ]

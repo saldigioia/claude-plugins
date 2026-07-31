@@ -23,7 +23,8 @@
 #
 # Safety: set -e gates every step; intermediates go in a temp dir and are kept on
 # failure for inspection; output is written atomically. The SOURCE is never touched.
-# Exit: 0 ok; 2 usage; 3 refused (reordered stream — wrong repair for this class).
+# Exit: 0 ok; 2 usage; 3 refused (reordered stream — wrong repair for this class);
+#       11 refused by the backhaul gate (QT-undecodable profile — no .mov route).
 set -euo pipefail
 IN="${1:?usage: rebuild-paff.sh INPUT OUTPUT.mov FIELD_RATE [TIMESCALE] [--force]}"
 OUT="${2:?need OUTPUT.mov}"; RATE="${3:?need FIELD_RATE e.g. 60000/1001}"; shift 3
@@ -37,6 +38,11 @@ esac; done
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-paff.sh"
+
+# backhaul refusal gate (exit 11, nothing written) — this script writes a .mov,
+# so the QT-undecodability criteria hold even on a direct call; a gated caller
+# (mov.sh/auto.sh) exports RTM_BACKHAUL_GATED=1 and skips it.
+backhaul_gate "$IN" || exit $?
 
 # --- pre-flight: does the source carry presentation reordering this restamp would flatten? ---
 eval "$(pf_reorder_scan "$IN")"

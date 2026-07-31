@@ -46,7 +46,8 @@
 # Requires the setts bitstream filter with PREV_OUTPTS/PREV_OUTDTS expression
 # variables (ffmpeg >= 5.x; scripts/doctor.sh reports setts availability).
 # Exit: 0 verified-clean; 1 built but timeline gates failed; 2 usage; 3 stream
-# does not match the pairfill signature (use diagnose.sh to pick the right rung).
+# does not match the pairfill signature (use diagnose.sh to pick the right rung);
+# 11 refused by the backhaul gate (QT-undecodable profile — no .mov route).
 set -euo pipefail
 IN="${1:?usage: pairfill-paff.sh INPUT OUTPUT.mov [--rate FRAC] [--preroll TICKS]}"
 OUT="${2:?need OUTPUT.mov}"; shift 2
@@ -61,6 +62,11 @@ esac; done
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-paff.sh"
+
+# backhaul refusal gate (exit 11, nothing written) — this script writes a .mov,
+# so the QT-undecodability criteria hold even on a direct call; a gated caller
+# (mov.sh/auto.sh) exports RTM_BACKHAUL_GATED=1 and skips it.
+backhaul_gate "$IN" || exit $?
 
 echo "== pairfill: $IN -> $OUT =="
 eval "$(pf_detect "$IN")"

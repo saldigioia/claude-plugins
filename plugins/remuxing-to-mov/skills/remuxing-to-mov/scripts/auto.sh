@@ -12,7 +12,9 @@
 #
 # Guarantees: NEVER re-encodes (Rung 4 is a human decision); NEVER touches or
 # deletes the source; output is written atomically by the sub-scripts.
-# Exit: 0 = verified OK; 10 = REVIEW (written, needs a human look); 1 = FAIL.
+# Exit: 0 = verified OK; 10 = REVIEW (written, needs a human look); 1 = FAIL;
+#       11 = REFUSED by the backhaul gate (nothing written — same criteria as
+#       mov.sh; RTM_FORCE_BACKHAUL=1 is the sanctioned override).
 set -euo pipefail
 IN="${1:?usage: auto.sh INPUT OUTPUT.mov [--dry-run] [--all-audio] [--full] [--audio MODE]}"
 OUT="${2:?need OUTPUT.mov}"; shift 2
@@ -37,6 +39,12 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"   # PR_* + PF_*
 echo "== auto: $IN -> $OUT =="
 echo "   probe: vcodec=$PR_VCODEC audio=$PR_ACODEC($PR_AUDIO_ACTION) paff=$PF_PAFF half_ts=${PF_HALF_TS:-no} reorder=${PF_REORDER:-no} -> first rung $PR_REC_RUNG"
+
+# backhaul refusal gate — the same criteria mov.sh enforces at the front door,
+# enforced here so batch.sh and direct auto.sh runs can never build a refused
+# deliverable (exit 11, nothing written; RTM_FORCE_BACKHAUL=1 is the override).
+backhaul_gate "$IN" "$PR_VCODEC" "${PR_PIX_FMT:-}" "${PR_CONTAINER:-}" || exit $?
+export RTM_BACKHAUL_GATED=1   # children (remux/rebuild/pairfill) skip the re-check
 
 # For a non-PAFF broken timeline, the Rung-3 rebuild rate comes from the measured
 # coded-picture rate; fall back to a clean mapping.

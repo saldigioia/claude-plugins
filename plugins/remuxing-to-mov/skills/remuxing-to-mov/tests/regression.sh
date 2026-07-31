@@ -206,7 +206,7 @@ BD="$WORK/bin"; BO="$WORK/bout"; mkdir -p "$BD" "$BO"
 ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v libx264 -g 25 -pix_fmt yuv420p -f mpegts "$BD/c1.ts"
 ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=1000 -t 2 -c:v libx264 -g 25 -c:a mp2 -pix_fmt yuv420p -f mpegts "$BD/c2.ts"
 o=$(bash "$SC/batch.sh" "$BD" --out "$BO" 2>&1); rc=$?
-has "$o" "OK=2  REVIEW=0  FAIL=0" "batch processes both -> OK"
+has "$o" "OK=2  REVIEW=0  REFUSED=0  FAIL=0" "batch processes both -> OK"
 [ "$rc" -eq 0 ] && ok "batch exit 0 when nothing fails" || no "batch exit $rc"
 { [ -f "$BO/c1.mov" ] && [ -f "$BO/c2.mov" ]; } && ok "batch wrote both outputs" || no "missing batch outputs"
 { [ -f "$BO/c1.mov.provenance.kv" ] && grep -q 'PROV_VERDICT=OK' "$BO/c1.mov.provenance.kv"; } && ok "provenance sidecar written + verdict recorded" || no "sidecar missing/incomplete"
@@ -901,6 +901,41 @@ if [ -f "$M422" ]; then
   has "$o" "QuickTime CANNOT decode this profile" "ts-health names the QT-undecodable 4:2:2 profile"
 else
   echo "  (skip: 4:2:2 fixture unavailable — codec finding untested here)"
+fi
+
+echo
+echo "== 26. Backhaul gate at EVERY entry point (1.10.0): no route builds a refused deliverable =="
+# The 2017-feed bypass: mov.sh gated, but auto.sh/batch.sh/remux.sh and the two
+# repair builders did not — a direct or batch call on a 4:2:2 source built the
+# doomed MOV anyway. backhaul_gate (lib-paff.sh) now runs wherever a .mov is
+# written; RTM_FORCE_BACKHAUL=1 is the one sanctioned override and
+# RTM_BACKHAUL_GATED=1 lets a gated caller clear its children.
+if [ -f "${H422:-}" ]; then
+  o=$(bash "$SC/auto.sh" "$H422" "$WORK/gp_auto.mov" 2>&1); rc=$?
+  { [ "$rc" -eq 11 ] && case "$o" in *"MOV_REFUSED profile=qt-undecodable"*) true;; *) false;; esac; } \
+    && ok "auto.sh refuses 4:2:2 (exit 11, MOV_REFUSED)" || no "auto.sh gate missing (rc=$rc)"
+  [ ! -f "$WORK/gp_auto.mov" ] && ok "auto.sh refusal writes nothing" || no "auto.sh refusal left an output"
+  o=$(bash "$SC/remux.sh" "$H422" "$WORK/gp_remux.mov" 2>&1); rc=$?
+  { [ "$rc" -eq 11 ] && [ ! -f "$WORK/gp_remux.mov" ]; } \
+    && ok "remux.sh refuses 4:2:2 on a direct call (exit 11, nothing written)" || no "remux.sh gate missing (rc=$rc)"
+  o=$(bash "$SC/pairfill-paff.sh" "$H422" "$WORK/gp_pf.mov" 2>&1); rc=$?
+  [ "$rc" -eq 11 ] && ok "pairfill-paff.sh refuses 4:2:2 (exit 11)" || no "pairfill gate missing (rc=$rc)"
+  o=$(bash "$SC/rebuild-paff.sh" "$H422" "$WORK/gp_rb.mov" 50 2>&1); rc=$?
+  [ "$rc" -eq 11 ] && ok "rebuild-paff.sh refuses 4:2:2 (exit 11)" || no "rebuild gate missing (rc=$rc)"
+  o=$(bash "$SC/dual-track.sh" "$H422" "$WORK/gp_dt.mov" 2>&1); rc=$?
+  [ "$rc" -eq 11 ] && ok "dual-track.sh refuses 4:2:2 (exit 11 — it bypasses remux.sh)" || no "dual-track gate missing (rc=$rc)"
+  has "$o" "ts-health.sh" "refusal routes point at the health scan (TS/MKV custody is checked, not assumed)"
+  # the sanctioned override reaches children: forced env builds where the gate refused
+  RTM_FORCE_BACKHAUL=1 bash "$SC/remux.sh" "$H422" "$WORK/gp_forced.mov" >/dev/null 2>&1; rc=$?
+  { [ "$rc" -eq 0 ] && [ -f "$WORK/gp_forced.mov" ]; } \
+    && ok "RTM_FORCE_BACKHAUL=1 overrides the choke-point gate (forced build lands)" || no "forced override broken (rc=$rc)"
+  # batch: a refusal is the gate working — REFUSED verdict, no .mov, batch still exits 0
+  o=$(bash "$SC/batch.sh" "$H422" --out "$WORK/gp_batch" 2>&1); rc=$?
+  { [ "$rc" -eq 0 ] && case "$o" in *"REFUSED=1"*) true;; *) false;; esac && [ ! -f "$WORK/gp_batch/$(basename "${H422%.ts}").mov" ]; } \
+    && ok "batch.sh classifies the refusal REFUSED (no .mov, batch exit 0)" || no "batch refusal handling wrong (rc=$rc)"
+  has "$o" "stays TS/MKV" "batch attention line routes the source to TS/MKV custody"
+else
+  echo "  (skip: h264 4:2:2 fixture unavailable — entry-point gate untested here)"
 fi
 
 echo

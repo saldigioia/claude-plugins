@@ -112,11 +112,13 @@ echo "   video=$PR_VCODEC  audio=$PR_ACODEC  paff=$PF_PAFF"
 #   Forward gaps ALONE do not refuse — that class rebuilds (the 2008 recovery);
 #   and an H.264 TS with gaps still rides the existing PAFF/resync machinery.
 backhaul_routes () {
-  echo "   Honest routes out:"
-  echo "     keep     the source as-is — it is already the archival master"
+  echo "   Honest routes out (the source stays TS/MKV — health-checked, never doomed):"
+  echo "     keep     the source as-is — it is already the archival master; prove its"
+  echo "              health: scripts/ts-health.sh IN  (transport, timestamps, seek)"
   echo "     playback ffmpeg -i IN -map 0:v:0 -map '0:a?' -c copy OUT.mkv"
   echo "              (lossless; Matroska stores per-block timestamps, so the timeline"
-  echo "               survives honestly; plays in IINA/VLC/mpv)"
+  echo "               survives honestly; plays in IINA/VLC/mpv) — then"
+  echo "              scripts/ts-health.sh OUT.mkv to prove the copy's timeline intact"
   echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the ONLY"
   echo "              sanctioned path to a true QuickTime-native deliverable"
   echo "   Override (run the build + verify anyway): --force-backhaul"
@@ -169,6 +171,13 @@ if [ "$FORCE_BACKHAUL" -eq 1 ] && [ "${PR_PIX_FMT:-}" = yuv422p ]; then
     ;;
   esac
 fi
+
+# gate verdict propagates: every child that writes a .mov (auto/remux/rebuild/
+# pairfill) carries its own backhaul_gate, so a cleared or force-approved front
+# door must say so — otherwise the child would re-refuse (or re-scan) a source
+# this gate already decided.
+[ "$FORCE_BACKHAUL" -eq 1 ] && export RTM_FORCE_BACKHAUL=1
+export RTM_BACKHAUL_GATED=1
 
 # --- field-coded: hand the timeline repair to the tested ladder driver ---
 if [ "$PF_PAFF" = yes ]; then

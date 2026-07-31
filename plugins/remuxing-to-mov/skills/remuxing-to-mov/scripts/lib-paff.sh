@@ -168,3 +168,73 @@ disc_scan () {
       printf "DISC_COUNT=%d\nDISC_MISSING=%.3f\nDISC_FIRST=%s\nDISC_FRAMEDUR=%.6f\nDISC_BACK=%d\nDISC_DUP=%d\n", cnt, miss, first, fd, bk+0, du+0
     }'
 }
+
+# --- backhaul_gate — the refusal criteria enforced at EVERY .mov entry point --
+# backhaul_gate INPUT [VCODEC] [PIX_FMT] [CONTAINER]
+# mov.sh runs the verbose front-door gate; this is the SAME verdict at the choke
+# points that actually write a .mov (auto.sh, remux.sh, rebuild-paff.sh,
+# pairfill-paff.sh), so no route — batch.sh and direct script calls included —
+# can build a QuickTime deliverable the criteria refuse (the pre-gate 2017-feed
+# build proved the bypass was real). Missing args are probed here (instant
+# single-field ffprobe; the rot scan only ever runs for mpegts/mpeg2video).
+#
+# Protocol: a caller that already passed the gate exports RTM_BACKHAUL_GATED=1
+# so children skip the re-check; a sanctioned forced build exports
+# RTM_FORCE_BACKHAUL=1 (mov.sh --force-backhaul sets both — the env skips only
+# the refusal, never mov.sh's honest not-QuickTime-playable labelling).
+# Returns 0 clear / 11 refused (prints the MOV_REFUSED machine line + routes;
+# nothing is ever written on a refusal).
+backhaul_gate_routes () {
+  echo "   Honest routes out (the source stays TS/MKV — health-checked, never doomed):"
+  echo "     keep     the source as-is — it is already the archival master; prove its"
+  echo "              health: scripts/ts-health.sh SOURCE  (transport, timestamps, seek)"
+  echo "     playback ffmpeg -i SOURCE -map 0:v:0 -map '0:a?' -c copy OUT.mkv  (lossless;"
+  echo "              plays in IINA/VLC/mpv) — then scripts/ts-health.sh OUT.mkv to prove"
+  echo "              the copy's timeline survived intact"
+  echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the ONLY sanctioned"
+  echo "              path to a true QuickTime-native deliverable"
+  echo "   Sanctioned override: mov.sh --force-backhaul (sets RTM_FORCE_BACKHAUL=1)"
+}
+backhaul_gate () {
+  local in="${1:?backhaul_gate needs INPUT}" vc="${2:-}" pix="${3:-}" cont="${4:-}"
+  [ "${RTM_BACKHAUL_GATED:-0}" = 1 ] && return 0
+  [ "${RTM_FORCE_BACKHAUL:-0}" = 1 ] && return 0
+  if [ -z "$vc" ]; then
+    vc=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$in" 2>/dev/null | head -1)
+  fi
+  if [ -z "$pix" ]; then
+    pix=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$in" 2>/dev/null | head -1)
+  fi
+  if [ "$pix" = yuv422p ]; then
+    case "$vc" in mpeg2video|h264)
+      echo ">> REFUSED: QT-UNDECODABLE PROFILE — $vc 4:2:2 (pix_fmt yuv422p)."
+      echo "   AVFoundation/QuickTime cannot decode $vc 4:2:2 (both verified against 4:2:0"
+      echo "   controls, 2026-07-30/31): a verify-green MOV of this source will not play in"
+      echo "   QuickTime. This entry point refuses for the same reason mov.sh does — no"
+      echo "   build route may produce a deliverable the criteria refuse."
+      backhaul_gate_routes
+      echo "MOV_REFUSED profile=qt-undecodable vcodec=$vc pix_fmt=$pix"   # machine-readable
+      return 11
+      ;;
+    esac
+  fi
+  if [ "$vc" = mpeg2video ]; then
+    if [ -z "$cont" ]; then
+      cont=$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$in" 2>/dev/null | head -1)
+    fi
+    case "$cont" in *mpegts*)
+      eval "$(disc_scan "$in")"
+      if [ "${DISC_COUNT:-0}" -ge 1 ] && [ $(( ${DISC_BACK:-0} + ${DISC_DUP:-0} )) -ge 1 ]; then
+        echo ">> REFUSED: BACKHAUL TIMELINE ROT — ${DISC_COUNT} forward gap(s) PLUS non-monotonic"
+        echo "   DTS (whole-file: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0}). A copy mux invents timing"
+        echo "   (confession hard stop) and a resync build fails verify gate (d) — knowable"
+        echo "   now, before a multi-gigabyte build. Full read: scripts/diagnose.sh SOURCE."
+        backhaul_gate_routes
+        echo "MOV_REFUSED profile=timeline-rot vcodec=$vc disc=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}"   # machine-readable
+        return 11
+      fi
+      ;;
+    esac
+  fi
+  return 0
+}

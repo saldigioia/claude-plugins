@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # remux.sh — Rung 0/1 lossless remux into MOV.
+# Exit 11 = refused by the backhaul gate (QT-undecodable profile / timeline rot;
+# nothing written). RTM_FORCE_BACKHAUL=1 is the sanctioned override (mov.sh
+# --force-backhaul sets it); RTM_BACKHAUL_GATED=1 marks an already-gated caller.
 # Usage: scripts/remux.sh INPUT OUTPUT.mov [--audio auto|copy|pcm] [--genpts]
 #                         [--audio-keep all|first|layouts|IDX[,IDX...]]
 #                         [--all-audio] [--print-plan] [--timescale N]
@@ -44,7 +47,12 @@ esac; done
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-. "$SELF_DIR/lib-paff.sh"   # mux_confessions
+. "$SELF_DIR/lib-paff.sh"   # mux_confessions, backhaul_gate
+
+# backhaul refusal gate (exit 11, nothing written) — remux.sh is the muxer every
+# rung-0/1/2 route funnels through, so the criteria hold even on a direct call.
+# A gated caller (mov.sh/auto.sh) exports RTM_BACKHAUL_GATED=1 and skips this.
+backhaul_gate "$IN" || exit $?
 
 # --- per-track audio manifest -> KEEP/DROP plan (QTFF audit 5-2b) ---
 # One awk pass computes the whole selection so the policy lives in ONE place

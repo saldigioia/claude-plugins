@@ -43,7 +43,12 @@ esac; done
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-. "$SELF_DIR/lib-paff.sh"   # mux_confessions
+. "$SELF_DIR/lib-paff.sh"   # mux_confessions, backhaul_gate
+
+# backhaul refusal gate (exit 11, nothing written) — this script writes a .mov
+# directly (it bypasses remux.sh), so the criteria hold here too; a gated caller
+# (mov.sh) exports RTM_BACKHAUL_GATED=1 and skips it.
+backhaul_gate "$IN" || exit $?
 
 # --- probe source (never guess) ---
 # SCOPE (QTFF audit 5-2d): this tool builds ONE access+original pair from a:0,

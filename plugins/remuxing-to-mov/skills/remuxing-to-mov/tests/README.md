@@ -80,6 +80,16 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     transport logs prove small continuity loss reads FINDINGS (stated
     permanent) while a flood reads DAMAGED (exit 1, re-capture); `--kv` emits
     the machine block; the 4:2:2 profile is named QT-undecodable in passing.
+26. **Gate at every entry point (1.10.0)** — the refusal criteria hold on EVERY
+    route that writes a `.mov`, not just the `mov.sh` front door (the 2017-feed
+    bypass: a direct/batch build produced a doomed 4:2:2 MOV the front door
+    would have refused): `auto.sh`, `remux.sh`, `rebuild-paff.sh`, `dual-track.sh`, and
+    `pairfill-paff.sh` each refuse a 4:2:2 source (exit 11, `MOV_REFUSED`,
+    nothing written) via the shared `backhaul_gate`; refusal routes name
+    `ts-health.sh` (TS/MKV custody is health-checked, not assumed);
+    `RTM_FORCE_BACKHAUL=1` is the one sanctioned override and reaches children;
+    `batch.sh` classifies a refusal `REFUSED` (its own verdict class and
+    counter — the gate working is not a batch failure).
 
 ## Synthesis limit (why some things aren't tested directly)
 
