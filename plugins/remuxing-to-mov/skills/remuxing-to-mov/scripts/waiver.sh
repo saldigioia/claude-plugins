@@ -28,6 +28,8 @@
 #   - Refuses to overwrite an existing sidecar: deleting a recorded waiver is
 #     the operator's deliberate act, never a side effect.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 SRC="${1:?usage: waiver.sh SOURCE OUTPUT --attest \"...\" --coverage \"...\" --proof \"...\" [--proof ...]}"
 OUT="${2:?need OUTPUT}"; shift 2
 ATT=""; COV=""; PROOFS=""
@@ -47,7 +49,6 @@ for f in "$SRC" "$OUT"; do [ -f "$f" ] || { echo "waiver.sh: no such file: $f" >
 txt_ok "$COV" || { echo "waiver.sh: quotes, backslashes and newlines are not allowed in --coverage text" >&2; exit 2; }
 [ -n "$COV" ]    || { echo "waiver.sh: --coverage is required — state plainly what the proofs cover and what they do not." >&2; exit 2; }
 [ -n "$PROOFS" ] || { echo "waiver.sh: at least one --proof is required — a waiver without recorded evidence is not a waiver." >&2; exit 2; }
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-attest.sh"
 if [ "$ATT" != "$RTM_WAIVER_ATTEST" ]; then
   echo "waiver.sh: attestation mismatch — the exact string must come from the operator, verbatim." >&2

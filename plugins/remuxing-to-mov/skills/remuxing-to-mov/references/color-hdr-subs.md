@@ -53,8 +53,15 @@ C71):
 
 CC data lives **inside the video** — MPEG-2 user data (A/53) or H.264 SEI
 (SCTE-128). It is carried automatically on any video stream copy with **no
-mapping**, and stays frame-aligned through trims. Nothing to do; just don't strip
-it by re-encoding.
+mapping**, and stays frame-aligned through trims; `verify.sh --signaling`
+proves the `closed_captions` flag parity source↔output. Don't strip it by
+re-encoding. Two honesty notes (measured 2026-08-14, ffmpeg 9.0.1 — detail in
+`known-limits.md`): preservation ≠ display — QuickTime Player's caption UI
+reads CLCP caption *tracks*, and whether it also renders embedded-only CC is
+unverified on this bench; and a **standalone `eia_608` stream** (demuxed CC,
+`.scc`) is mapped by NO plugin route (drops silently) — the manual carry
+`-map 0:s -c:s copy` into **MOV** works (native `c608` CLCP track,
+round-trips), while **MP4 refuses** (`Could not find tag for codec eia_608`).
 
 ## Subtitle tracks (SubRip etc.)
 
@@ -87,5 +94,5 @@ ffmpeg -nostdin -i IN.mkv -map 0:s:0 -c:s srt subs.eng.srt
 | Full/limited range | Preserved (bitstream + nclx) | Carry as-is |
 | HDR10 `mdcv`/`clli` | In HEVC SEI only; no container box on copy | SEI-reading players still get HDR10 |
 | Dolby Vision RPU | Preserved on ffmpeg ≥5.0 (single-layer) | Dual-layer P7 needs conversion |
-| Embedded 608/708 CC | Preserved automatically | No mapping needed |
+| Embedded 608/708 CC | Preserved automatically (in-video) | No mapping needed; QT display of embedded-only CC unverified. Standalone `eia_608` stream: manual `-c:s copy` → MOV `c608` only (no route maps it; MP4 refuses) — see `known-limits.md` |
 | SubRip subtitle | Needs `mov_text` conversion | Sidecar `.srt` is safer |

@@ -34,6 +34,8 @@
 # Exit: 0 encoded + provenance round-tripped; 1 encode/round-trip failure;
 #       2 usage / attestation / refusal.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: rung4.sh INPUT [OUTPUT] --profile h264|hevc|prores --attest \"...\"}"
 shift
 OUT=""
@@ -49,7 +51,7 @@ esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 case "$PROFILE" in h264|hevc|prores) : ;; *) echo "rung4.sh: --profile must be h264, hevc, or prores (see references/delivery-encode.md)" >&2; exit 2;; esac
 
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-attest.sh"
 if [ "$ATT" != "$RTM_RUNG4_ATTEST" ]; then
   echo "rung4.sh: REFUSED — no valid attestation." >&2
@@ -94,7 +96,7 @@ PROV=(-metadata "com.apple.quicktime.rung4.source=$(basename "$IN")"
 # .part hides the extension from ffmpeg — pick the muxer from OUT explicitly
 case "$OUT" in *.mov|*.MOV) FMT=mov;; *.mp4|*.m4v|*.MP4) FMT=mp4;; *) FMT=$([ "$DEXT" = mov ] && echo mov || echo mp4);; esac
 PART="${OUT}.part"
-if ! ffmpeg -nostdin -y -v error -i "$IN" \
+if ! ffmpeg -nostdin -y -v error "${FF_INPUT_OPTS[@]}" -i "$IN" \
     "${VARGS[@]}" ${AARGS[@]+"${AARGS[@]}"} \
     "${PROV[@]}" -movflags use_metadata_tags+faststart -f "$FMT" "$PART"; then
   echo ">> encode FAILED; partial output kept at $PART for inspection." >&2
@@ -106,7 +108,7 @@ echo "wrote: $OUT"
 # Provenance round-trip (proves the mdta write took — a derivative that cannot
 # be identified as one later is the failure mode this exists to prevent).
 echo "-- provenance round-trip --"
-tags=$(ffprobe -v error -show_entries format_tags -of default=noprint_wrappers=1 "$OUT" 2>/dev/null)
+tags=$(ffp -v error -show_entries format_tags -of default=noprint_wrappers=1 "$OUT" 2>/dev/null)
 miss=0
 for k in "rung4.source=$(basename "$IN")" "rung4.date=$TODAY" "rung4.profile=$PROFILE" "rung4.reencoded-with-attestation=yes"; do
   key="com.apple.quicktime.${k%%=*}"; want="${k#*=}"

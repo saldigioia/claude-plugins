@@ -36,6 +36,8 @@
 # Exit: 0 = resynced + sync-verified; 10 = REVIEW; 1 = FAIL; 2 = usage;
 #       11 = REFUSED (mid-stream audio layout change — resync would inject silence).
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: resync.sh INPUT OUTPUT.mov [--all-audio] [--audio a:N] [--pcm 16|24|32]}"
 OUT="${2:?need OUTPUT.mov}"; shift 2
 AMAP="-map 0:a:0?"; PCM=pcm_s24le
@@ -48,11 +50,11 @@ esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 
-vcodec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
-cp=$(ffprobe -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+cp=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 
 echo "== resync: $IN -> $OUT =="
@@ -62,13 +64,13 @@ echo "   video=$vcodec -> -c:v copy (bit-identical); audio -> $PCM, gaps filled 
 # Test hook: RTM_LAYOUTS_FILE=<file of "channels,layout" lines> bypasses ffprobe.
 lay_profile () {  # $1 = stream spec (a:N) -> distinct channels/layout combos seen
   { if [ -n "${RTM_LAYOUTS_FILE:-}" ]; then cat "$RTM_LAYOUTS_FILE"; else
-      ffprobe -v error -select_streams "$1" -show_entries frame=channels,channel_layout \
+      ffp -v error -select_streams "$1" -show_entries frame=channels,channel_layout \
         -of csv=p=0 "$IN" 2>/dev/null; fi; } | grep -v '^$' | sort -u
 }
 ASPECS=""
 case "$AMAP" in
   "-map 0:a?")
-    na=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -un | grep -c . || true)
+    na=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -un | grep -c . || true)
     i=0; while [ "$i" -lt "${na:-0}" ]; do ASPECS="$ASPECS a:$i"; i=$((i+1)); done ;;
   *) ASPECS=$(printf '%s' "$AMAP" | sed 's/^-map 0://; s/?$//') ;;
 esac
@@ -95,7 +97,7 @@ done
 
 PART="${OUT}.part"
 # shellcheck disable=SC2086
-ffmpeg -nostdin -v error -fflags +genpts -i "$IN" \
+ffmpeg -nostdin -v error -fflags +genpts "${FF_INPUT_OPTS[@]}" -i "$IN" \
   -map 0:v:0 -c:v copy $VTAG \
   $AMAP -af "aresample=async=1:first_pts=0" -c:a "$PCM" \
   -movflags "$MOVFLAGS" -f mov "$PART"

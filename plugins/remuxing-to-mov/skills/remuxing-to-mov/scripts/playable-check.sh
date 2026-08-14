@@ -22,6 +22,9 @@
 #
 # NOTE: the macOS path cannot be exercised on Linux/CI; validate on a real Mac.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
+RTM_EXIT_OK="0 1 2 3 10 11" # + this script's documented 3 (SKIP: not macOS / no qlmanage; suite-pinned)
 OUT="${1:?usage: playable-check.sh OUTPUT.mov}"
 [ -f "$OUT" ] || { echo "no such file: $OUT" >&2; exit 2; }
 
@@ -36,7 +39,27 @@ command -v qlmanage >/dev/null 2>&1 || { echo "playable-check: SKIP — qlmanage
 OSV=$(sw_vers -productVersion 2>/dev/null || echo '?')
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
-qlmanage -t -s 480 -o "$TMP" "$OUT" >/dev/null 2>&1 || true
+# BOUNDED probe (WO 1.4, measured): qlmanage -t can hang FOREVER on input the
+# thumbnail extension cannot parse (a garbage payload stalled it indefinitely —
+# no verdict, no exit code, a wedged pipeline). A hung probe is not a verdict,
+# so the render gets a deadline (RTM_QL_TIMEOUT seconds, default 60 — a healthy
+# file thumbnails in single-digit seconds). macOS ships no `timeout` binary:
+# background the render and poll with the deadline; on expiry the kill leaves
+# no PNG, and the normal no-frame path below reports FAIL honestly.
+qlmanage -t -s 480 -o "$TMP" "$OUT" >/dev/null 2>&1 &
+QLPID=$!
+QLLIMIT="${RTM_QL_TIMEOUT:-60}"
+QLDEADLINE=$(( $(date +%s) + QLLIMIT ))
+while kill -0 "$QLPID" 2>/dev/null; do
+  if [ "$(date +%s)" -ge "$QLDEADLINE" ]; then
+    kill -9 "$QLPID" 2>/dev/null || true
+    echo "playable-check: qlmanage produced nothing in ${QLLIMIT}s — killed (a hang here means"
+    echo "  the decode stack cannot handle this input; counted as no frame rendered)."
+    break
+  fi
+  sleep 1
+done
+wait "$QLPID" 2>/dev/null || true
 if ls "$TMP"/*.png >/dev/null 2>&1; then
   echo "playable-check: OK on macOS $OSV — AVFoundation rendered a frame; QuickTime can open the video."
   echo "  (audio playability for AC-3/E-AC-3/DTS is NOT proven by a thumbnail — listen if it matters.)"

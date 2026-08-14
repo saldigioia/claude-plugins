@@ -16,8 +16,11 @@
 #                 recommend the nearest SAFE (closed) keyframe at or after it.
 # Exit: 0 = safe (closed) / summary; 10 = the cut lands on an OPEN-GOP boundary.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: gop-probe.sh INPUT [CUT_TIME]}"; T="${2:-}"
 [ -n "${GOP_PROBE_CSV:-}" ] || [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 
 # Per-keyframe open/closed table -> "ts open|closed", one line per video keyframe.
 # A keyframe is OPEN if a frame decoded just after it DISPLAYS earlier AND is a
@@ -29,7 +32,7 @@ kf_table () {
   # (key_frame,best_effort_timestamp_time,pict_type) without real open-GOP media,
   # which libx264/x265 won't synthesize on demand.
   { if [ -n "${GOP_PROBE_CSV:-}" ]; then cat "$GOP_PROBE_CSV"
-    else ffprobe -v error -select_streams v:0 \
+    else ffp -v error -select_streams v:0 \
            -show_entries frame=key_frame,best_effort_timestamp_time,pict_type -of csv=p=0 "$1" 2>/dev/null
     fi; } \
   | awk -F, '{

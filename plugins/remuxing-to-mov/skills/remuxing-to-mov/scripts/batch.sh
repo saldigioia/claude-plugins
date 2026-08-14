@@ -22,10 +22,14 @@
 # then relocated). On multi-GB masters over external SSDs that second pass
 # dominates batch wall time; faststart is an access-copy need, not a
 # shelved-master need (see container-internals.md, "faststart's cost").
-# Exit: 0 if nothing FAILed, 1 otherwise. A backhaul-gate REFUSED (auto.sh exit
-# 11) is the gate doing its job — reported for attention, never a batch failure.
+# Exit: 0 if nothing FAILed, 1 otherwise. A REFUSED (auto.sh exit 11: the
+# unroutable-codec pre-flight — VC-1/VP9/AV1/Dolby E, shared gate since the
+# 1.11 fix round — or a child's own refusal like resync's layout guard) is the
+# gate doing its job — reported for attention, never a batch failure.
 set -eu
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
+. "$SELF_DIR/lib-probe.sh"  # FF_INPUT_OPTS: raised probe window on the provenance hash read
 OUTDIR=""; AUTO_OPTS=(); INPUTS=()
 while [ $# -gt 0 ]; do case "$1" in
   --out) OUTDIR="${2:?--out needs a dir}"; shift 2;;
@@ -70,13 +74,19 @@ for src in "${files[@]}"; do
   echo "$o" | sed 's/^/  /'
   # Verdict is auto.sh's EXIT CODE (the contract: 0=OK, 10=REVIEW, 11=REFUSED,
   # else FAIL) — not a fragile text grep. AUTO_SUMMARY is parsed only for the
-  # cosmetic rung. REFUSED is the backhaul gate doing its job (the source cannot
-  # honestly become a QuickTime .mov — it stays TS/MKV, health-checked); it is
-  # listed for attention but does not fail the batch.
+  # cosmetic rung. REFUSED is a pre-flight gate doing its job (1.11: the
+  # unroutable-codec refusal, or a child's own — e.g. resync's layout guard;
+  # the backhaul gate advises/warns, never refuses) — the source is unchanged,
+  # listed for attention but never a batch failure.
   case "$arc" in 0) verd=OK;; 10) verd=REVIEW;; 11) verd=REFUSED;; *) verd=FAIL;; esac
   summ=$(printf '%s\n' "$o" | grep -E '^AUTO_SUMMARY ' | tail -1 || true)
-  rung=$(printf '%s' "$summ" | sed -n 's/.*rung=\([a-z0-9]*\).*/\1/p'); rung=${rung:-none}
-  vhash=$(ffmpeg -nostdin -v error -i "$src" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1 || true)
+  # [A-Za-z0-9] is load-bearing (1.11 fix round): the repair rungs are UPPERCASE
+  # (P pair-fill, S resync) and a lowercase-only class matched neither — the
+  # capture came back empty and the sidecar recorded PROV_RUNG=none for exactly
+  # the two rungs whose provenance matters most. The greedy '.*rung=' correctly
+  # targets the LAST rung= field (best_rung= sits before it by contract).
+  rung=$(printf '%s' "$summ" | sed -n 's/.*rung=\([A-Za-z0-9]*\).*/\1/p'); rung=${rung:-none}
+  vhash=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$src" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1 || true)
   { echo "PROV_SOURCE=$src"; echo "PROV_OUTPUT=$out"; echo "PROV_SRC_ID=$id"
     echo "PROV_SRC_VHASH=${vhash:-na}"; echo "PROV_RUNG=$rung"; echo "PROV_VERDICT=$verd"
     echo "PROV_FFMPEG=$ffver"; echo "PROV_WHEN=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -84,7 +94,7 @@ for src in "${files[@]}"; do
   case "$verd" in
     OK)      okc=$((okc+1));;
     REVIEW)  revc=$((revc+1)); attention+=("REVIEW  $src");;
-    REFUSED) refc=$((refc+1)); attention+=("REFUSED $src  (stays TS/MKV — run scripts/ts-health.sh on it)");;
+    REFUSED) refc=$((refc+1)); attention+=("REFUSED $src  (nothing built, source unchanged — the refusal above names the routes)");;
     *)       failc=$((failc+1)); attention+=("FAIL    $src");;
   esac
 done

@@ -7,6 +7,8 @@
 # Exit: 0 if all REQUIRED capabilities are present, 1 otherwise. Missing
 #       RECOMMENDED capabilities only degrade specific checks (never silently).
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 KV=0; [ "${1:-}" = "--kv" ] && KV=1
 
 have_bin () { command -v "$1" >/dev/null 2>&1 && echo yes || echo no; }

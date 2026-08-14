@@ -33,12 +33,36 @@ convention 2112 samples ≈ **44 ms @ 48 kHz** (QTFF Appendix G), represented vi
 edit lists / sample groups. That sits an order of magnitude under the 0.25 s
 gate, while gap-collapse desync grows past it on any real capture — so the
 tolerance passes every legitimate file and still catches the defect class.
+**Source-aware since 1.11 (WO 2.4):** a source with *measured* transport loss
+legitimately reads short by exactly the dropped time, so when the base 0.25 s
+is exceeded, gate (f) widens by the source's measured forward-gap seconds
+(`disc_scan` on SOURCE, or the caller-supplied `RTM_SOURCE_GAP_BUDGET`
+override — e.g. a ts-health measurement of the original capture when SOURCE is
+a trimmed intermediate). Never widened without a measured budget; a mismatch
+beyond budget+base still flags, and an explained residual is printed, never
+silent.
 
 ## Verifying a lossless remux (run before trusting output)
 
 `scripts/verify.sh SOURCE OUTPUT` runs the cheap tier; add `--full` for the
 exhaustive one. **Do not default to whole-file decoding** — two full decodes
 cost roughly the video's runtime in CPU and are almost never needed.
+
+**verify.sh's exit contract (accepted legacy — read before writing a
+caller):** the verdict is the printed **text** — `>> OK` and `>> REVIEW`
+**both exit 0** (verify.sh never emits the house code 10 itself); `>> FAIL`
+exits 1; usage/env exits 2; an exact-match waiver exits 0 with the `WAIVED`
+line. Every in-repo caller maps the text to the house contract
+(`mov.sh`/`auto.sh`/`resync.sh`/`qt-groups.sh`: `>> REVIEW` → their own exit
+10). A caller switched on the exit code alone reads REVIEW as green — the
+qt-groups.sh defect the 1.11 fix round repaired; this paragraph and
+verify.sh's header now state the contract so it cannot mislead again.
+
+**Container scope:** verify.sh's gate (d) demands zero N/A DTS on the OUTPUT —
+correct for QTFF, but a **matroska cross-check output legitimately reports
+N/A DTS on B-frame head packets** (measured 2026-08-14: a lossless
+`-c copy` MKV of a clean source FAILs gate (d) with `N/A-DTS=2`). Verify MKV
+cross-check copies with `ts-health.sh`, not verify.sh (known-limits.md).
 
 **Cheap tier (demux + ~30 s of decode, regardless of file length):**
 
@@ -206,7 +230,7 @@ The acceptance discipline that failed in the 2026-07-25 incident, now doctrine:
 | MKV strict-mux of the OUTPUT | PASS (even when the source itself fails it) |
 | Scrub gate (verify.sh e) | 0 decode errors, or deterministic (`-threads 1`) per-class counts matching the source under identical seeks, with (d) clean |
 | A/V duration parity (verify.sh f) | Δ within 0.25 s, or the same Δ measured in the source |
-| Dual-track audio (verify.sh --audio) | original track md5 == source elementary; PCM access == decoded original |
+| Dual-track audio (verify.sh --audio) | original track md5 == source elementary (for a TS/ADTS AAC source the compare is repeated after `aac_adtstoasc` reframing of the source side — the mux reframes ADTS→ASC automatically, payload identical; 1.11 fix round); PCM access == decoded original |
 | playable-check.sh | OK — necessary, NOT sufficient (thumbnail only) |
 
 ### Recorded waivers (`OUTPUT.waiver.json`) — evidence instead of memory
@@ -225,7 +249,9 @@ is refused, never corrected).
 `verify.sh` consults the sidecar on FAIL. An **exact** match — same gate set,
 same counts, same file size and video streamhash, verbatim attestation — exits
 **0** with a loud `WAIVED(<gate>)` line plus a machine-readable
-`VERIFY_SUMMARY` field (house exit codes 0/10/1/2 untouched). Any drift — a
+`VERIFY_SUMMARY` field (verify.sh's own exit contract is untouched: text
+verdict `>> OK`/`>> REVIEW` both exit 0, `>> FAIL` 1, usage 2 — code 10 is
+never emitted by verify.sh itself; callers map the text). Any drift — a
 new signature, a changed count, a changed file — **voids the waiver** and the
 FAIL stands: changed evidence is new evidence, and a waiver never transfers.
 

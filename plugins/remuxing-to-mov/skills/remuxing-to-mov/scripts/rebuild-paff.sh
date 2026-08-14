@@ -26,6 +26,9 @@
 # Exit: 0 ok; 2 usage; 3 refused (reordered stream — wrong repair for this class);
 #       11 refused by the backhaul gate (QT-undecodable profile — no .mov route).
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
+RTM_EXIT_OK="0 1 2 3 10 11" # + this script's documented pre-contract 3 (reorder REFUSED; suite-pinned)
 IN="${1:?usage: rebuild-paff.sh INPUT OUTPUT.mov FIELD_RATE [TIMESCALE] [--force]}"
 OUT="${2:?need OUTPUT.mov}"; RATE="${3:?need FIELD_RATE e.g. 60000/1001}"; shift 3
 TS=""; FORCE=0
@@ -36,11 +39,12 @@ esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"
 
-# backhaul refusal gate (exit 11, nothing written) — this script writes a .mov,
-# so the QT-undecodability criteria hold even on a direct call; a gated caller
+# backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
+# defers to the post-build proof, rot WARNs and builds) — this script writes a
+# .mov, so the advisory fires even on a direct call; a gated caller
 # (mov.sh/auto.sh) exports RTM_BACKHAUL_GATED=1 and skips it.
 backhaul_gate "$IN" || exit $?
 
@@ -81,24 +85,24 @@ WORK="$(mktemp -d)"   # NOT auto-deleted, so a failed run leaves intermediates t
 echo "work dir (inspect on failure): $WORK"
 
 # 1) video -> raw Annex-B H.264. TS/PS already Annex-B; AVCC (MKV/MOV) needs the bsf.
-isavc=$(ffprobe -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+isavc=$(ffp -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 BSF=""; [ "$isavc" = true ] && BSF="-bsf:v h264_mp4toannexb"
 # shellcheck disable=SC2086
-ffmpeg -nostdin -y -i "$IN" -map 0:v:0 -c:v copy $BSF -f h264 "$WORK/v.h264"
+ffmpeg -nostdin -y "${FF_INPUT_OPTS[@]}" -i "$IN" -map 0:v:0 -c:v copy $BSF -f h264 "$WORK/v.h264"
 
 # 2) audio -> PCM/WAV per track (starts at sample 0, stays aligned; a single-track
 #    rebuild would silently drop SAP/secondary audio)
 # sort -u: TS program duplication can list the same stream twice (see ingest-compatibility.md)
 # grep -c + || true: a NO-audio source must yield 0, not a pipefail abort
-NA=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
+NA=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
 AIN=(); AMAP=(); AMETA=()
 i=0
 while [ "$i" -lt "$NA" ]; do
-  ffmpeg -nostdin -y -i "$IN" -map "0:a:$i" -c:a pcm_s16le "$WORK/a$i.wav"
+  ffmpeg -nostdin -y "${FF_INPUT_OPTS[@]}" -i "$IN" -map "0:a:$i" -c:a pcm_s16le "$WORK/a$i.wav"
   AIN+=(-i "$WORK/a$i.wav"); AMAP+=(-map "$((i+1)):0")
   # PRESERVE the real per-track language; default to eng only if the source has
   # none (PS/.mpg carry none). Hard-coding eng would silently relabel FR/ES/commentary.
-  lang=$(ffprobe -v error -select_streams "a:$i" -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  lang=$(ffp -v error -select_streams "a:$i" -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   case "$lang" in ""|und|unknown) lang=eng;; esac
   AMETA+=("-metadata:s:a:$i" "language=$lang")
   i=$((i+1))
@@ -106,11 +110,11 @@ done
 [ "$NA" -gt 0 ] || echo "note: no audio streams found; rebuilding video only"
 
 # 3) rebuild from zero at the field rate
-cp=$(ffprobe -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+cp=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 PART="${OUT}.part"; MUXLOG="$WORK/mux.log"
 # ${arr[@]+...} expansions keep bash 3.2 (macOS default) happy under set -u with empty arrays
-if ! ffmpeg -nostdin -y -hide_banner -nostats -fflags +genpts -r "$RATE" -i "$WORK/v.h264" ${AIN[@]+"${AIN[@]}"} \
+if ! ffmpeg -nostdin -y -hide_banner -nostats -fflags +genpts -r "$RATE" "${FF_INPUT_OPTS[@]}" -i "$WORK/v.h264" ${AIN[@]+"${AIN[@]}"} \
     -map 0:0 ${AMAP[@]+"${AMAP[@]}"} -c:v copy -c:a pcm_s16le \
     ${AMETA[@]+"${AMETA[@]}"} \
     -video_track_timescale "$TS" \
@@ -127,7 +131,7 @@ fi
 # preserving source timing is the contract. For a deliberate restamp the proof
 # is the OUTPUT timeline itself — gate it before blessing (post-mortem 2026-07-25):
 EXPDUR=$(awk "BEGIN{n=split(\"$RATE\",r,\"/\"); rd=(n>1)?r[2]:1; printf \"%d\", $TS*rd/r[1]}")
-eval "$(ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 "$PART" 2>/dev/null | \
+eval "$(ffp -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 "$PART" 2>/dev/null | \
   awk -F, -v e="$EXPDUR" 'NF{
       n++
       if($1=="N/A"||$1=="") nap++

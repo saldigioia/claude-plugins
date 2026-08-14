@@ -49,6 +49,9 @@
 # does not match the pairfill signature (use diagnose.sh to pick the right rung);
 # 11 refused by the backhaul gate (QT-undecodable profile — no .mov route).
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
+RTM_EXIT_OK="0 1 2 3 10 11" # + this script's documented pre-contract 3 (signature REFUSED; suite-pinned)
 IN="${1:?usage: pairfill-paff.sh INPUT OUTPUT.mov [--rate FRAC] [--preroll TICKS]}"
 OUT="${2:?need OUTPUT.mov}"; shift 2
 RATE=""; PREROLL=""
@@ -60,11 +63,12 @@ esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"
 
-# backhaul refusal gate (exit 11, nothing written) — this script writes a .mov,
-# so the QT-undecodability criteria hold even on a direct call; a gated caller
+# backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
+# defers to the post-build proof, rot WARNs and builds) — this script writes a
+# .mov, so the advisory fires even on a direct call; a gated caller
 # (mov.sh/auto.sh) exports RTM_BACKHAUL_GATED=1 and skips it.
 backhaul_gate "$IN" || exit $?
 
@@ -79,7 +83,7 @@ echo "   coded-pic rate=${PF_CODED_RATE}/s  untimestamped fraction=${PF_NOPTS_FR
 if [ "$RATE" = unknown ] || [ -z "$RATE" ]; then
   echo "cannot map a field rate (measured ${PF_CODED_RATE}/s); pass --rate, e.g. 60000/1001" >&2; exit 3
 fi
-TB=$(ffprobe -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+TB=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 TBDEN=${TB##*/}; case "$TBDEN" in ''|*[!0-9]*) echo "unusable stream time_base '$TB'" >&2; exit 3;; esac
 RN=${RATE%%/*}; RD=${RATE##*/}; [ "$RN" = "$RATE" ] && RD=1   # "50" -> 50/1
 read -r PAIR A B <<EOF
@@ -98,7 +102,7 @@ echo "   timebase=1/$TBDEN  field rate=$RATE  pair=${PAIR} ticks (fields ${A}/${
 #     measures how far the reorder pyramid pushes presentation ahead of the
 #     cadence — the exact amount the output's PTS-DTS offsets will exceed the
 #     pre-roll by (the filled DTS ramp is uniform; the kept real PTS are not) ---
-eval "$(ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts -of csv=p=0 "$IN" 2>/dev/null | \
+eval "$(ffp -v error -select_streams v:0 -show_entries packet=pts,dts -of csv=p=0 "$IN" 2>/dev/null | \
   awk -F, -v pair="$PAIR" 'NF{
       n++; p=$1; d=$2
       unset=(p=="N/A"||p=="")
@@ -145,15 +149,15 @@ echo "   DTS pre-roll=$PREROLL ticks; derived max(PTS-DTS) bound=$MAXOFF_LIMIT (
 # --- audio: preserve the original where QuickTime needs help (dual-track) ---
 # a:0 only. A source with MORE audio tracks (SAP/secondary/commentary) loses
 # them here — say so LOUDLY instead of dropping them silently (QTFF audit 5a).
-NAUD=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
+NAUD=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
 if [ "${NAUD:-0}" -gt 1 ]; then
   echo "** WARNING: source has $NAUD audio tracks; pairfill carries ONLY a:0."
   echo "**          Secondary/SAP tracks are NOT in the output. Extract and remux"
   echo "**          them separately, or run the manual pairfill mux with extra"
   echo "**          -map 0:a:N entries (references/timeline-repair.md, Rung 3-PAIR)."
 fi
-acodec=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
-alang=$(ffprobe -v error -select_streams a:0 -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+acodec=$(ffp -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+alang=$(ffp -v error -select_streams a:0 -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 case "$alang" in ""|und|unknown) alang=eng;; esac
 DRC=(); case "$acodec" in ac3|eac3) DRC=(-drc_scale 0);; esac
 AARGS=()
@@ -173,7 +177,7 @@ case "$acodec" in
     AARGS=(-map 0:a:0 -c:a pcm_s24le -metadata:s:a:0 language="$alang");;
 esac
 
-cprim=$(ffprobe -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+cprim=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 MOVFLAGS="+faststart"; { [ -n "$cprim" ] && [ "$cprim" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 
 # The repair itself. lt(x,-8e18) is the unset test (INT64_MIN, not NaN); the DTS
@@ -181,13 +185,28 @@ MOVFLAGS="+faststart"; { [ -n "$cprim" ] && [ "$cprim" != unknown ]; } && MOVFLA
 SETTS="setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+${A}\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS-${PREROLL}\,PREV_OUTDTS+${A}+${AB}*mod(N\,2))"
 PART="${OUT}.part"; MUXLOG="$(mktemp)"
 echo "-- muxing (video bits copied untouched; timeline pair-filled) --"
-if ! ffmpeg -nostdin -y -hide_banner -nostats ${DRC[@]+"${DRC[@]}"} -i "$IN" \
+pf_mux () {  # pf_mux INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
+  ffmpeg -nostdin -y -hide_banner -nostats ${DRC[@]+"${DRC[@]}"} "$@" -i "$IN" \
     -map 0:v:0 ${AARGS[@]+"${AARGS[@]}"} \
     -c:v copy -bsf:v "$SETTS" \
-    -movflags "$MOVFLAGS" -f mov "$PART" 2>"$MUXLOG"; then
-  echo ">> mux FAILED:"; sed 's/^/   /' "$MUXLOG" | tail -8
+    -movflags "$MOVFLAGS" -f mov "$PART" 2>"$MUXLOG"
+}
+pf_mux_fail () {  # pf_mux_fail [LABEL] — report + exit 1 (contract), keeping the log
+  echo ">> mux FAILED${1:+ ($1)}:"; sed 's/^/   /' "$MUXLOG" | tail -8
   grep -qi 'setts' "$MUXLOG" && echo "   (setts rejected the expression — this ffmpeg may lack the PREV_OUT* vars; pairfill needs ffmpeg >= 5.x)"
   echo "   partial output kept at $PART; mux log: $MUXLOG"; exit 1
+}
+if ! pf_mux "${FF_INPUT_OPTS[@]}"; then
+  # probe-shaped failure = window undershot, not a mux defect -> retry ONCE at
+  # 1G (lib-paff.sh, WO 1.2); anything else fails now, and so does a second
+  # miss — the retry never masks a genuinely different error, and the output
+  # timeline gates below run unchanged on whatever the retry writes
+  if probe_shaped_failure "$MUXLOG"; then
+    probe_retry_notice
+    pf_mux "${FF_RETRY_OPTS[@]}" || pf_mux_fail "after 1G retry"
+  else
+    pf_mux_fail
+  fi
 fi
 conf=$(mux_confessions "$MUXLOG")
 if [ "${conf:-0}" -gt 0 ]; then
@@ -212,7 +231,7 @@ fi
 #   * the decode span (last DTS - first DTS) must equal the presentation span
 #     (max PTS - min PTS) within 2 pairs.
 echo "-- output timeline gates (want: 0 N/A, strictly monotonic DTS, only ${A}/${B}-tick durations, bounded PTS-DTS) --"
-eval "$(ffprobe -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 "$PART" 2>/dev/null | \
+eval "$(ffp -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 "$PART" 2>/dev/null | \
   awk -F, -v a="$A" -v b="$B" 'NF{
       n++
       if($1=="N/A"||$1==""){ nap++ } else { p=$1+0; if(!havp){mnp=mxp=p; havp=1} else {if(p<mnp)mnp=p; if(p>mxp)mxp=p} }

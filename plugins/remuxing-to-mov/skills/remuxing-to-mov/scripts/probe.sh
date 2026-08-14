@@ -8,9 +8,11 @@
 # structure, Annex-B vs AVCC, color tags, a timestamp sanity flag, ms-timebase
 # advisory, and ffmpeg-version-dependent warnings.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: probe.sh INPUT [--kv|--json]}"; MODE="${2:-human}"
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # shared PAFF detection (coded-picture-rate test)
 
 # --- per-track audio manifest (QTFF audit 5-2a) ---------------------------------
@@ -19,7 +21,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # dropped track 2. Emitted as PR_AUD_COUNT + PR_AUD_<n>_{CODEC,CHANNELS,LAYOUT,
 # LANG}; layouts are single-quoted (parens) — keys satisfy ^(PR|PF)_[A-Z0-9_]+=.
 aud_manifest_kv () {
-  ffprobe -v error -select_streams a \
+  ffp -v error -select_streams a \
       -show_entries stream=index,codec_name,channels,channel_layout:stream_tags=language \
       -of compact=p=0:nk=0 "$IN" 2>/dev/null | \
   awk -F'|' 'NF{
@@ -45,12 +47,12 @@ aud_manifest_kv () {
 ms_tb_scan () {
   MS_TB=no; TS_HINT=""; MS_ALT=""
   local tb fr num den
-  tb=$(ffprobe -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  tb=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   [ "$tb" = 1/1000 ] || return 0
   MS_TB=yes
-  MS_ALT=$(ffprobe -v error -select_streams v:0 -read_intervals '%+#120' -show_entries packet=duration -of csv=p=0 "$IN" 2>/dev/null | \
+  MS_ALT=$(ffp -v error -select_streams v:0 -read_intervals '%+#120' -show_entries packet=duration -of csv=p=0 "$IN" 2>/dev/null | \
     grep -v -e N/A -e '^$' | sort | uniq -c | sort -rn | head -2 | awk '{printf "%s%sx%sms", sep, $1, $2; sep=" "}')
-  fr=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  fr=$(ffp -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   num=${fr%%/*}; den=${fr##*/}
   case "$den" in
     1001) TS_HINT=$num;;                                   # 30000/1001 -> 30000
@@ -79,13 +81,40 @@ mp4_atom_scan () {  # $1 = container name, $2 = ffprobe codec_tag_string fallbac
   [ -n "$STSD_ENTRY" ] || STSD_ENTRY="${2:-}"
 }
 
+# --- measured QT-native video matrix (WO 5.1) -----------------------------------
+# vnative CODEC PIX_FMT -> yes|variant|no|na. "Native" means: the codec muxes
+# -c copy into MOV AND AVFoundation fully decodes it, MEASURED — never assumed
+# from a spec. Ground Rule 6 applies: decode support is a property of the macOS
+# it was measured on (C63: Tahoe 26.4 DROPPED MJPEG variants/AIC; C72: 26.6.1
+# RESTORED 4:2:2 — the drift runs both ways), so the advisories that consume
+# this self-date their bench and playable-check.sh stays the per-file judge.
+#   yes     h264 / hevc(needs hvc1) / mpeg2video — the long-standing remux
+#           classes — plus the F8 matrix measured 2026-08-14 (macOS 26.6.1,
+#           ffmpeg 9.0.1): mpeg4(tag mp4v), MJPEG 4:2:0(jpeg), dvvideo(dvcp),
+#           prores(apcn) each mux -c copy and fully decode. 4:2:2 pix_fmts on
+#           any of these still get the WO 4.1 post-build empirical proof.
+#   variant MJPEG in a non-4:2:0 pix_fmt — the C63 measured-drop class
+#           (yuvj422p rendered NO frame and hung qlmanage on macOS 26.5.2):
+#           the copy is lossless, playability must be proven on the output.
+#   no      outside the measured matrix (vp9/ffv1/legacy cvid...): MOV may
+#           carry it, QuickTime playability is unproven here.
+#   na      no video stream.
+vnative () {
+  case "${1:-}" in
+    "")    echo na;;
+    mjpeg) case "${2:-}" in yuv420p|yuvj420p) echo yes;; *) echo variant;; esac;;
+    h264|hevc|mpeg2video|mpeg4|dvvideo|prores) echo yes;;
+    *)     echo no;;
+  esac
+}
+
 # Structured output for auto.sh / batch.sh. The recommended rung is a FIRST guess
 # from codec/PAFF/audio only; timestamp-driven escalation (Rung 2/3 on non-PAFF)
 # happens reactively in auto.sh from the verify verdict.
 probe_struct () {
-  local mode="$1" q="ffprobe -v error -select_streams"
-  local container vcodec vtag isavc acodec aaction rung cmd cp ct cs cr pixfmt
-  container=$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  local mode="$1" q="ffp -v error -select_streams"
+  local container vcodec vtag isavc acodec aaction rung cmd cp ct cs cr pixfmt vnat
+  container=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vtag=$($q v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   pixfmt=$($q v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
@@ -99,11 +128,31 @@ probe_struct () {
   eval "$(pf_reorder_scan "$IN")"
   ms_tb_scan
   mp4_atom_scan "$container" "$vtag"
-  case "$acodec" in                              # mirrors remux.sh --audio auto
-    mp2|mp1|mp3|dts|dca)         aaction=pcm;;   # QuickTime-unplayable
+  vnat=$(vnative "$vcodec" "$pixfmt")
+  # a:0 advisory + first-rung pick. aaction=pcm forces Rung 1 (remux --audio
+  # pcm) where a plain a:0 copy would be worthless; aaction=copy rides Rung 0,
+  # whose default is remux.sh --audio auto — the per-track WO 3.2 whitelist —
+  # so ac3 stays copy-class HERE (rung 0 already lands it as announced PCM
+  # access per track, and a forced --audio pcm would decode co-present
+  # QT-native tracks for nothing).
+  case "$acodec" in
+    # WO 5.1 addendum: container-framed LPCM outranks everything — mov.sh/
+    # remux.sh route it to PCM access (the HDMV-tagged MOV "copy" muxes but NO
+    # decoder claims it, WO 3.1); a copy-class advisory here put probe/auto
+    # consumers at odds with that fixed routing.
+    pcm_bluray|pcm_dvd)          aaction=pcm;;
+    mp2|mp1|dts|dca)             aaction=pcm;;   # QuickTime-unplayable
     flac|opus|vorbis|truehd|mlp) aaction=pcm;;   # not MOV-copyable (5-2b alignment)
+    dolby_e)                     aaction=specialist;;  # WO 5.2: broadcast
+                                                 # mezzanine — PCM-treating it
+                                                 # is full-scale noise; mov.sh
+                                                 # refuses (exit 11) and names
+                                                 # the operator-invoked decode
     "")                          aaction=none;;
-    *)                           aaction=copy;;
+    *)                           aaction=copy;;  # QT-native (aac/alac/mp3/raw
+                                                 # PCM/eac3 — mp3 plays, C33;
+                                                 # pre-5.1 it was misfiled pcm)
+                                                 # + ac3 (see WHY above)
   esac
   # PAFF repair routed by timestamp profile (post-mortem 2026-07-25): a pair-
   # timestamped or reordered stream must KEEP its real PTS (pairfill); the
@@ -115,12 +164,12 @@ probe_struct () {
   elif [ "$aaction" = pcm ]; then rung=1; cmd="remux.sh IN OUT.mov --audio pcm"
   else                            rung=0; cmd="remux.sh IN OUT.mov"; fi
   if [ "$mode" = "--json" ]; then
-    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"}\n' \
-      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","vnative":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"}\n' \
+      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
   else
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
-    printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
-      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_VNATIVE=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
+      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
     aud_manifest_kv                                                       # 5-2a
     printf 'PR_MS_TB=%s\nPR_TS_HINT=%s\n' "$MS_TB" "${TS_HINT:-none}"    # 5-4e
     printf 'PR_GAMA=%s\nPR_STSD_ENTRY=%s\nPR_STSD_DV=%s\n' \
@@ -130,17 +179,37 @@ probe_struct () {
 case "$MODE" in --kv|--json) probe_struct "$MODE"; exit 0;; esac
 
 echo "== source: $IN =="
-container=$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN")
+container=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN")
 echo "container : $container"
+# --- named-limit advisories (WO 5.4; detail + measurements: known-limits.md) ----
+# multi-program TS: every route maps -map 0:v:0 = the FIRST video stream in
+# PAT/PMT order — the other programs' VIDEO is never mapped (and that drop is
+# silent: the KEEP/DROP manifest covers audio only), while audio from EVERY
+# program survives --audio-keep all. Measured 2026-08-14 on constructed
+# 2-program fixtures in both PAT orders; the advisory exists so the session
+# knows the mux is choosing a program, not taking "the" video.
+nprog=$(ffp -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+case "$nprog" in ''|*[!0-9]*) nprog=0;; esac
+if [ "$nprog" -gt 1 ]; then
+  echo "   NOTE $nprog programs in this mux: v:0 = the FIRST video in PAT/PMT order wins; other programs' video is NOT mapped (their audio survives keep-all). Another program: -map 0:p:N intermediate — references/known-limits.md"
+fi
+# 33-bit PTS wraparound horizon: MPEG-TS PTS is 33 bits @ 90 kHz -> wraps every
+# ~26.5 h. ffmpeg unwraps ONE rollover on read (ts-health.sh counts observed
+# wraps); >=2 wraps (~53 h) is the NAMED LIMITATION — ambiguous epochs, no
+# route repairs it. Advisory fires at >24 h, approaching the horizon.
+dur=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+if awk -v d="${dur:-0}" 'BEGIN{exit !(d+0>86400)}' 2>/dev/null; then
+  echo "   NOTE duration $(awk -v d="$dur" 'BEGIN{printf "%.1f", d/3600}') h (>24 h): 33-bit PTS wraps at ~26.5 h — ffmpeg unwraps ONE rollover; >=2 wraps (~53 h) break. Prove the output timeline: verify.sh gate (d) — references/known-limits.md"
+fi
 
 echo "-- video --"
-ffprobe -v error -select_streams v:0 -show_entries \
+ffp -v error -select_streams v:0 -show_entries \
   stream=codec_name,codec_tag_string,profile,width,height,field_order,pix_fmt,color_primaries,color_transfer,color_space,color_range,is_avc,nal_length_size \
   -of default=nw=1 "$IN" || true
 # stsd sample entry + Dolby Vision config visibility (QTFF audit 5-5e): the DV
 # playability split rides the sample-entry fourcc (dvh1 plays where the hev1
 # family fails); ffprobe's codec_tag_string alone can miss the dvcC/dvvC box.
-vtag_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vtag_h=$(ffp -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 mp4_atom_scan "$container" "$vtag_h"
 if [ -n "${STSD_ENTRY:-}" ] && [ "$STSD_ENTRY" != "[0][0][0][0]" ]; then
   echo "stsd sample entry: $STSD_ENTRY${STSD_DV:+ (+Dolby Vision dvcC/dvvC config box)}"
@@ -150,28 +219,80 @@ if [ "${GAMA:-unknown}" = yes ]; then
   echo "        players may render this dark/washed vs an nclc-tagged copy. A -c copy"
   echo "        remux normalizes it; see color-hdr-subs.md (Pre-2010 exports)."
 fi
-# backhaul/contribution mastering profiles: QuickTime has NO 4:2:2 decode path
-# for MPEG-2 (verify-green MOV distorts, 2026-07-30) OR H.264 High 4:2:2
-# (decoder stalls, 2026-07-31) — both proven against 4:2:0 controls.
-vcod_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-pix_h=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-if [ "$pix_h" = yuv422p ] && { [ "$vcod_h" = mpeg2video ] || [ "$vcod_h" = h264 ]; }; then
-  echo "   >> QT-UNDECODABLE: $vcod_h 4:2:2 (yuv422p) — AVFoundation/QuickTime cannot"
-  echo "      decode this profile at all; even a verified lossless MOV will not play"
-  echo "      (MPEG-2 4:2:2 distorts, H.264 High 4:2:2 stalls the decoder; FFmpeg"
-  echo "      players — IINA/VLC/mpv — decode it fine). No container surgery supplies"
-  echo "      a missing decoder: mov.sh refuses early (exit 11)."
-  echo "      Playback copy: lossless MKV mux. QuickTime-native: scripts/rung4.sh"
-  echo "      (operator-attested re-encode) — the only sanctioned path."
+# measured QT-native matrix + contribution profile (WO 5.1 / WO 4.1): codec
+# decode verdicts are bench measurements that DRIFT with macOS (C63/C72), so
+# every advisory self-dates and playable-check.sh on the finished build stays
+# the empirical judge. The pre-1.11 block here still promised a refusal
+# ("mov.sh refuses early, exit 11") — the categorical 4:2:2 verdict was
+# falsified on the bench 2026-08-13 and demoted to the shared post-build
+# proof (lib-paff contribution_advisory, so probe and the builders never
+# diverge on the announcement).
+vcod_h=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+pix_h=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+case "$(vnative "$vcod_h" "$pix_h")" in
+  yes) case "$vcod_h" in mpeg4|mjpeg|dvvideo|prores)
+    echo "   QT-native, measured (bench 2026-08-14, macOS 26.6.1/ffmpeg 9.0.1): $vcod_h"
+    echo "   muxes -c copy into MOV and AVFoundation fully decodes it -> route: lossless"
+    echo "   copy (scripts/mov.sh), never a conversion. Decode support drifts by macOS"
+    echo "   (C63) — re-prove on a new bench: scripts/playable-check.sh OUT.mov"
+    ;; esac;;
+  variant)
+    echo "   WARN mjpeg $pix_h: MJPEG 4:2:0 is measured QT-native, but non-4:2:0"
+    echo "        variants are the C63 measured-DROP class (Tahoe 26.4; yuvj422p"
+    echo "        rendered no frame and hung qlmanage on macOS 26.5.2). The copy is"
+    echo "        still lossless — build, then prove the output:"
+    echo "        scripts/playable-check.sh OUT.mov (bounded probe; a stall = FAIL)"
+    ;;
+  no)
+    case "$vcod_h" in
+      # WO 5.2: the unroutable classes are NOT "MOV may carry it" — the mux
+      # itself is impossible (VC-1 has no MOV sample entry; VP9/AV1 the muxer
+      # rejects as MP4-only, bench-verified ffmpeg 9.0.1 2026-08-14), so the
+      # pre-1.11 generic note here was an overclaim on exactly these codecs.
+      vc1|vp9|av1)
+        echo "   REFUSED-class: $vcod_h cannot be muxed into MOV at all — no lossless"
+        echo "        .mov of this source exists. mov.sh refuses pre-flight with the"
+        echo "        routes (exit 11, MOV_REFUSED profile=unroutable-vcodec): keep the"
+        echo "        source / lossless -c copy to MP4 (VP9/AV1) or MKV (VC-1) for"
+        echo "        playback / scripts/rung4.sh (operator-attested re-encode) for a"
+        echo "        QuickTime-native .mov."
+        ;;
+      *)
+        echo "   NOTE ${vcod_h:-?} is outside the measured QT-native matrix: MOV may carry"
+        echo "        it, but QuickTime playability is unproven here — prove the finished"
+        echo "        build with scripts/playable-check.sh (QuickTime-native fallback:"
+        echo "        scripts/rung4.sh, the operator-attested re-encode)"
+        ;;
+    esac
+    ;;
+esac
+if qt_contribution_profile "$pix_h"; then
+  contribution_advisory "$vcod_h" "$pix_h"
 fi
 
 echo "-- audio --"
-ffprobe -v error -select_streams a -show_entries \
+ffp -v error -select_streams a -show_entries \
   stream=index,codec_name,codec_tag_string,channels,sample_rate,channel_layout:stream_tags=language \
   -of default=nw=1 "$IN" || true
+# Dolby E detection (WO 5.2) — codec-tagged form only (codec_name dolby_e, any
+# track). The PCM-wrapped AES3 form (SMPTE 337M inside a pcm_s16le/s24le
+# track) is deliberately NOT sniffed here — payload sync-word inspection is
+# the deep-inspection rabbit hole — so that named limitation lives in SKILL.md
+# troubleshooting: a broadcast "PCM" track that plays as steady full-scale
+# noise is the signature. grep -c consumes to EOF (grep -q would SIGPIPE ffp
+# under pipefail — the verify.sh herestring lesson); ||true guards the
+# no-match rc under set -e.
+dbe_n=$(ffp -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$IN" 2>/dev/null | grep -c '^dolby_e' || true)
+if [ "${dbe_n:-0}" -gt 0 ]; then
+  echo "   WARN Dolby E ($dbe_n track(s)): broadcast mezzanine, up to 8 programs per"
+  echo "        AES3 pair. NOT MOV-carriable, and PCM-treating it yields full-scale"
+  echo "        noise. mov.sh refuses with the routes (exit 11); the specialist decode"
+  echo "        (ffmpeg's dolby_e decoder -> WAV) is a named, operator-invoked step —"
+  echo "        program/channel assignment is editorial, never automatic."
+fi
 
 echo "-- bitstream format --"
-isavc=$(ffprobe -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+isavc=$(ffp -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 case "$isavc" in
   true)  echo "AVCC (MP4/MKV/MOV) -> add -bsf:v h264_mp4toannexb when EXTRACTING to raw .h264" ;;
   false) echo "Annex-B (TS/PS)    -> NO bitstream filter needed when extracting to raw .h264" ;;
@@ -221,10 +342,16 @@ else
   echo "   none (video DTS gap-free on the timing axis; safe to plain-copy)."
 fi
 if [ "${DISC_BACK:-0}" -gt 0 ] || [ "${DISC_DUP:-0}" -gt 0 ]; then
+  # 1.11 (WO 4.2 demotion; wording fixed in the WO 5.2 messaging pass): the
+  # pre-1.11 text called this "the unbuildable BACKHAUL class — mov.sh refuses
+  # it early (exit 11)". The refusal is gone; the verdict belongs to the
+  # measured gates on the actual build.
   echo "   >> whole-file DTS rot: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0} (the windowed"
   echo "      5000-packet scan can miss these mid-file). Combined with forward gaps on an"
-  echo "      mpegts/mpeg2video source this is the unbuildable BACKHAUL class — mov.sh"
-  echo "      refuses it early (exit 11); scripts/diagnose.sh prints the routes."
+  echo "      mpegts/mpeg2video source this is the BACKHAUL rot class — since 1.11 mov.sh"
+  echo "      WARNS and builds it (MOV_ROT_WARN + the three routes): the mux-confession"
+  echo "      gate hard-stops invented timing and verify.sh judges the finished timeline."
+  echo "      Full read + routes: scripts/diagnose.sh."
 fi
 
 # ms-timebase advisory (QTFF audit 5-4e, C68): conventionality, not repair.

@@ -13,6 +13,12 @@
 #
 #   --ss/--to  : optional lossless cut (keyframe-bound). START/END accept seconds
 #                or HH:MM:SS.mmm. Omit for a full-file build.
+#                ORIGIN (WO 1.3, measured): --ss/--to are relative to the
+#                container's start_time, NOT absolute stream PTS. On a
+#                start_time=1372.69 capture, the keyframe observed at PTS
+#                1374.27 is cut with --ss 1.58 — passing 1374.27 itself seeks
+#                past EOF. Pre-1.3 that wrote an EMPTY file with exit 0; a
+#                guard after the copy-cut pass now FAILs it instead.
 #   --pcm auto : pick PCM depth from the decoder's native sample format
 #                (s16->16, flt/fltp->24, s32->32). Override with 16|24|32.
 #   --drc auto : disable AC-3/E-AC-3 dynamic-range compression (full dynamic
@@ -28,6 +34,8 @@
 # we (1) lossless-copy-cut first, then (2) decode+copy from that cut with NO -ss,
 # which guarantees both audio tracks share identical frames and stay aligned.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): the measured 234 leak dies here
 
 IN="${1:?usage: dual-track.sh INPUT OUTPUT.mov [--ss START] [--to END] [--pcm auto|16|24|32] [--drc auto|off|on]}"
 OUT="${2:?need OUTPUT.mov}"; shift 2
@@ -42,12 +50,13 @@ esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # mux_confessions, backhaul_gate
 
-# backhaul refusal gate (exit 11, nothing written) — this script writes a .mov
-# directly (it bypasses remux.sh), so the criteria hold here too; a gated caller
-# (mov.sh) exports RTM_BACKHAUL_GATED=1 and skips it.
+# backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
+# defers to the post-build proof, rot WARNs and builds; lib-paff.sh) — this
+# script writes a .mov directly (it bypasses remux.sh), so the advisory fires
+# here too; a gated caller (mov.sh) exports RTM_BACKHAUL_GATED=1 and skips it.
 backhaul_gate "$IN" || exit $?
 
 # --- probe source (never guess) ---
@@ -57,7 +66,7 @@ backhaul_gate "$IN" || exit $?
 # assume the single-pair layout. A multi-track source loses its other tracks
 # HERE, so say it loudly (mov.sh's layouts policy is the multi-layout route;
 # it keeps every distinct layout as an access track, without originals).
-NAUD=$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
+NAUD=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
 if [ "${NAUD:-0}" -gt 1 ]; then
   echo "** WARNING: source has $NAUD audio tracks; dual-track.sh builds the a:0"
   echo "**          access+original pair ONLY. The other tracks are NOT in this"
@@ -65,10 +74,10 @@ if [ "${NAUD:-0}" -gt 1 ]; then
   echo "**          policy; PCM access per layout, no originals), or run the"
   echo "**          manual mux with extra -map 0:a:N entries."
 fi
-acodec=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
-afmt=$(  ffprobe -v error -select_streams a:0 -show_entries stream=sample_fmt   -of default=nw=1:nk=1 "$IN" | head -1)
-vcodec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
-cp=$(    ffprobe -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" | head -1)
+acodec=$(ffp -v error -select_streams a:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
+afmt=$(  ffp -v error -select_streams a:0 -show_entries stream=sample_fmt   -of default=nw=1:nk=1 "$IN" | head -1)
+vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
+cp=$(    ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" | head -1)
 [ -n "$acodec" ] || { echo "no audio stream found in $IN" >&2; exit 2; }
 # the preserved-original contract needs a MOV-copyable codec; FLAC/Opus/Vorbis/
 # TrueHD are hard-rejected by the MOV muxer — refuse early with the route,
@@ -116,15 +125,26 @@ echo "source: video=$vcodec  audio=$acodec ($afmt)  -> track1=$PCMC  track2=copy
 
 build_from () {  # build_from SRC  -- decode a:0 to PCM (track1, default) + copy a:0 (track2)
   local SRC="$1" MUXLOG conf; MUXLOG="$(mktemp)"
-  # shellcheck disable=SC2086
-  if ! ffmpeg -nostdin -y -hide_banner -nostats $DRC -i "$SRC" \
+  bf_mux () {  # bf_mux INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
+    # shellcheck disable=SC2086
+    ffmpeg -nostdin -y -hide_banner -nostats $DRC "$@" -i "$SRC" \
       -map 0:v:0 -map 0:a:0 -map 0:a:0 \
       -c:v copy $VTAG -c:a:0 $PCMC -c:a:1 copy \
       -disposition:a:0 default -disposition:a:1 0 \
       -metadata:s:a:0 title="$T1" -metadata:s:a:0 language=eng \
       -metadata:s:a:1 title="$T2" -metadata:s:a:1 language=eng \
-      -movflags "$MOVFLAGS" -f mov "$PART" 2>"$MUXLOG"; then
-    echo ">> mux FAILED:"; sed 's/^/   /' "$MUXLOG" | tail -8; exit 1
+      -movflags "$MOVFLAGS" -f mov "$PART" 2>"$MUXLOG"
+  }
+  if ! bf_mux "${FF_INPUT_OPTS[@]}"; then
+    # probe-shaped failure = window undershot, not a mux defect -> retry ONCE at
+    # 1G (lib-paff.sh, WO 1.2); anything else fails now, and so does a second
+    # miss — the retry never masks a genuinely different error (contract: 1 FAIL)
+    if probe_shaped_failure "$MUXLOG"; then
+      probe_retry_notice
+      bf_mux "${FF_RETRY_OPTS[@]}" || { echo ">> mux FAILED (after 1G retry):"; sed 's/^/   /' "$MUXLOG" | tail -8; exit 1; }
+    else
+      echo ">> mux FAILED:"; sed 's/^/   /' "$MUXLOG" | tail -8; exit 1
+    fi
   fi
   [ -s "$MUXLOG" ] && sed 's/^/   mux: /' "$MUXLOG" | tail -6
   # HARD STOP: mux-log timeline confessions mean the muxer invented timing —
@@ -143,10 +163,41 @@ if [ -n "$SS" ] || [ -n "$TO" ]; then
   # TWO PASS: lossless copy-cut, then decode+copy from the cut (no -ss) => aligned tracks
   TMP="${OUT%.*}.dtcut.tmp.mov"
   echo "pass 1/2: lossless copy-cut${SS:+ from $SS}${TO:+ to $TO}"
-  # shellcheck disable=SC2086
-  ffmpeg -nostdin -y ${SS:+-ss "$SS"} ${TO:+-to "$TO"} -i "$IN" \
-    -map 0:v:0 -map 0:a:0 -c copy \
-    -avoid_negative_ts make_zero -movflags +faststart -f mov "$TMP"
+  # pass 1 is the mux that opens the RAW SOURCE on a cut run (pass 2 reads the
+  # cut MOV, whose header carries the parameter sets) — so the probe-shaped
+  # retry lives here too, or the --ss/--to path would keep the old hard FAIL
+  CUTLOG="$(mktemp)"
+  cut_mux () {  # cut_mux INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
+    # shellcheck disable=SC2086
+    ffmpeg -nostdin -y -hide_banner -nostats ${SS:+-ss "$SS"} ${TO:+-to "$TO"} "$@" -i "$IN" \
+      -map 0:v:0 -map 0:a:0 -c copy \
+      -avoid_negative_ts make_zero -movflags +faststart -f mov "$TMP" 2>"$CUTLOG"
+  }
+  if ! cut_mux "${FF_INPUT_OPTS[@]}"; then
+    if probe_shaped_failure "$CUTLOG"; then
+      probe_retry_notice
+      cut_mux "${FF_RETRY_OPTS[@]}" || { echo ">> copy-cut FAILED (after 1G retry):"; sed 's/^/   /' "$CUTLOG" | tail -8; exit 1; }
+    else
+      echo ">> copy-cut FAILED:"; sed 's/^/   /' "$CUTLOG" | tail -8; exit 1
+    fi
+  fi
+  rm -f "$CUTLOG"
+  # GUARD (WO 1.3, measured): --ss is relative to the container's start_time,
+  # NOT absolute PTS — on a start_time=1372.69 file, --ss 1374.27 (the observed
+  # keyframe PTS) seeks past EOF, and ffmpeg exits 0 on the empty cut. Left
+  # unguarded that becomes either an empty "success" or a baffling pass-2
+  # "Stream map '' matches no streams" death, with the cut temp littered behind.
+  # So: the cut must be non-empty AND carry >= 1 video packet, or we FAIL here
+  # with the origin spelled out, and the partial cut does not survive (atomic).
+  npkt=$(ffp -v error -select_streams v:0 -show_entries packet=dts -of csv=p=0 \
+           -read_intervals '%+#1' "$TMP" 2>/dev/null | grep -c . || true)
+  if [ ! -s "$TMP" ] || [ "${npkt:-0}" -eq 0 ]; then
+    st=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+    { [ -n "$st" ] && [ "$st" != "N/A" ]; } || st=unknown
+    rm -f "$TMP"
+    echo ">> cut produced no video: -ss beyond end of file? (--ss is relative to start_time=$st, not absolute PTS)" >&2
+    exit 1
+  fi
   echo "pass 2/2: decode PCM access track + copy original"
   build_from "$TMP"
   rm -f "$TMP"

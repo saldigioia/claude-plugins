@@ -16,7 +16,8 @@
 #                                     invents timing — the hard-stop class)
 #             backward/duplicate DTS (rot) -> pairfill/rebuild by profile;
 #                                     mpegts/mpeg2video + forward gaps = the
-#                                     refused backhaul class (mov.sh exit 11)
+#                                     backhaul rot class (mov.sh WARNs + builds,
+#                                     MOV_ROT_WARN; verify judges the result)
 #             forward gaps         -> resync.sh when raw PCM rides along
 #                                     (gap-collapse desync); plain copy is safe
 #                                     for compressed-audio-only shapes
@@ -25,7 +26,8 @@
 #                                     the OUTPUT timeline (gate d) proves it
 #             mid-GOP start        -> pre-roll packets before the first keyframe
 #                                     decode as garbage/conceal; lossless trim at
-#                                     the first IDR (cutting-concat.md), no recode
+#                                     the first IDR (scripts/trim-to-idr.sh,
+#                                     cutting-concat.md), no recode
 #             keyframe spacing     -> a single-GOP capture is unseekable (the
 #                                     scrub-gate class); nothing fixes that
 #                                     losslessly, know it before shipping
@@ -42,23 +44,25 @@
 #   in integer ticks> bypasses the packet probe (with TSH_FDUR_TICKS, and the
 #   video stream is index 0); TSH_LOG_FILE appends to the transport-pass log.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: ts-health.sh INPUT [--kv]}"; MODE="${2:-human}"
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never the source
 
 say () { [ "$MODE" != --kv ] && echo "$@"; return 0; }
 
 # --- cheap header facts ---------------------------------------------------------
-container=$(ffprobe -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-fdur_fmt=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+container=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+fdur_fmt=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 case "$fdur_fmt" in ''|N/A) fdur_fmt=0;; esac
-vcodec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-pixfmt=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-vidx=$(ffprobe -v error -select_streams v:0 -show_entries stream=index -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-tb=$(ffprobe -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-rfr=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+pixfmt=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vidx=$(ffp -v error -select_streams v:0 -show_entries stream=index -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+tb=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+rfr=$(ffp -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 tickrate=${tb##*/}; case "$tickrate" in ''|*[!0-9]*) tickrate=90000;; esac
 fps=$(pf_eval_fps "${rfr:-0}")
 fdur_ticks="${TSH_FDUR_TICKS:-}"
@@ -70,7 +74,7 @@ say "   container=$container  video=$vcodec/${pixfmt:-?}  tickrate=$tickrate  fr
 
 # --- pass 1: transport (full demux to null, log counted) ------------------------
 say "-- transport (whole-file -c copy demux) --"
-ffmpeg -nostdin -v warning -i "$IN" -map 0 -c copy -f null - 2>"$TMP/t.log" || true
+ffmpeg -nostdin -v warning "${FF_INPUT_OPTS[@]}" -i "$IN" -map 0 -c copy -f null - 2>"$TMP/t.log" || true
 [ -n "${TSH_LOG_FILE:-}" ] && cat "$TSH_LOG_FILE" >> "$TMP/t.log"
 cc=$(grep -ci 'continuity check failed' "$TMP/t.log" || true)
 crp=$(grep -ci 'packet corrupt' "$TMP/t.log" || true)
@@ -82,7 +86,7 @@ say "   continuity errors=$cc  corrupt(TEI) packets=$crp  PES size mismatches=$p
 # --- pass 2: whole-file packet scan, all streams, integer ticks -----------------
 say "-- timeline (whole-file packet scan, demux only) --"
 { if [ -n "${TSH_PKT_FILE:-}" ]; then cat "$TSH_PKT_FILE"; else
-    ffprobe -v error -show_entries packet=stream_index,pts,dts,duration,flags \
+    ffp -v error -show_entries packet=stream_index,pts,dts,duration,flags \
       -of csv=p=0 "$IN" 2>/dev/null; fi; } | \
 awk -F, -v vidx="${vidx:-0}" -v fdur="${fdur_ticks:-0}" -v mult="${DISC_MULT:-1.5}" '
   NF{
@@ -130,14 +134,14 @@ fi
 
 # audio header-duration parity vs video (cheap; TS often reports only format
 # duration — then parity is N/A here and verify.sh gate (f) owns it post-build)
-vdur=$(ffprobe -v error -select_streams v:0 -show_entries stream=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vdur=$(ffp -v error -select_streams v:0 -show_entries stream=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 worst_ad=0
 if [ -n "$vdur" ] && [ "$vdur" != N/A ]; then
   while IFS=, read -r _aidx adur; do
     [ -n "$adur" ] && [ "$adur" != N/A ] || continue
     d=$(awk "BEGIN{x=($vdur)-($adur); if(x<0)x=-x; printf \"%.3f\", x}")
     awk "BEGIN{exit !(($d) > ($worst_ad))}" && worst_ad=$d
-  done < <(ffprobe -v error -select_streams a -show_entries stream=index,duration -of csv=p=0 "$IN" 2>/dev/null | sort -u)
+  done < <(ffp -v error -select_streams a -show_entries stream=index,duration -of csv=p=0 "$IN" 2>/dev/null | sort -u)
 fi
 
 # --- findings + routes ----------------------------------------------------------
@@ -173,7 +177,7 @@ if [ "${V_BACK:-0}" -gt 0 ] || [ "${V_DUP:-0}" -gt 0 ]; then
   if [ "$vcodec" = mpeg2video ] && [ "${V_GAPS:-0}" -gt 0 ]; then
     case "$container" in *mpegts*)
       finding timeline "DTS rot (backward=$V_BACK duplicate=$V_DUP) + $V_GAPS forward gap(s) on mpegts/mpeg2video" \
-        "the REFUSED backhaul class — no lossless MOV survives verify; keep the .ts / lossless MKV / rung4.sh (mov.sh explains, exit 11)";;
+        "the backhaul rot class — mov.sh WARNs and builds (MOV_ROT_WARN); the verdict is measured (mux-confession hard stop + verify.sh), expect REVIEW/FAIL. Honest routes stay: keep the .ts / lossless MKV / rung4.sh";;
       *) finding timeline "DTS rot (backward=$V_BACK duplicate=$V_DUP)" "scripts/diagnose.sh routes the repair by timestamp profile";;
     esac
   else
@@ -198,7 +202,7 @@ if [ "${V_WRAP:-0}" -gt 0 ]; then
 fi
 if [ "${V_PREKEY:-0}" -gt 0 ]; then
   finding timeline "capture starts mid-GOP: $V_PREKEY packet(s) before the first keyframe" \
-    "lossless trim at the first IDR (keyframe-bound copy cut, references/cutting-concat.md; gop-probe.sh checks the boundary) — no re-encode; players otherwise conceal the pre-roll"
+    "lossless trim at the first IDR: scripts/trim-to-idr.sh (keyframe-bound copy cut, references/cutting-concat.md; gop-probe.sh checks the boundary) — no re-encode; players otherwise conceal the pre-roll"
 fi
 if [ "${V_KEYS:-0}" -lt 2 ] && [ -z "${TSH_PKT_FILE:-}" ] && awk "BEGIN{exit !(${fdur_fmt:-0} > 30)}" 2>/dev/null; then
   finding timeline "single-GOP capture (${V_KEYS:-0} keyframe(s) over ${fdur_fmt}s) — effectively unseekable" \
@@ -208,9 +212,14 @@ if awk "BEGIN{exit !(($worst_ad) > 0.5)}"; then
   finding audio "audio/video header durations differ by up to ${worst_ad}s" \
     "scripts/diagnose.sh (usually the gap-collapse class -> resync.sh); verify gate (f) owns the post-build proof"
 fi
+# 1.11 (WO 4.1 demotion; wording fixed in the WO 5.2 messaging pass): the
+# pre-1.11 finding asserted "QuickTime CANNOT decode this profile ... mov.sh
+# refuses (exit 11)" after that categorical verdict was falsified on the bench
+# (macOS 26.6.1, 2026-08-13) and the refusal demoted — decode support drifts
+# by macOS version, so the honest claim is the per-file post-build proof.
 if [ "$pixfmt" = yuv422p ] && { [ "$vcodec" = mpeg2video ] || [ "$vcodec" = h264 ]; }; then
-  finding codec "$vcodec 4:2:2 (yuv422p) — QuickTime CANNOT decode this profile, however healthy the file (MPEG-2 distorts, H.264 High 4:2:2 stalls; both verified vs 4:2:0 controls)" \
-    "keep source / lossless MKV playback copy / rung4.sh attested re-encode (mov.sh refuses with the full routes, exit 11)"
+  finding codec "$vcodec 4:2:2 (yuv422p) — contribution/backhaul profile: QuickTime decode is a per-OS empirical fact, proven on the finished build, never assumed (the categorical refusal was falsified on macOS 26.6.1, 2026-08-13)" \
+    "build losslessly — scripts/mov.sh announces the profile and proves playability post-build (playable-check.sh; fail/unverified -> REVIEW with rung4.sh named); the source stays the master either way"
 fi
 
 # --- verdict --------------------------------------------------------------------

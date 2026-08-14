@@ -18,11 +18,14 @@
 #
 # Exit: 0 = embedded + round-trip confirmed; 1 = a key didn't round-trip; 2 = usage.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: metadata.sh IN OUT.mov --title ... [--description ...] ...}"
 OUT="${2:?need OUT.mov}"; shift 2
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
+. "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 
 MD=(); KV=(); CHAP=(-map_chapters -1)   # default: strip chapters (the "menu")
 add () { MD+=(-metadata "com.apple.quicktime.$1=$2"); KV+=("com.apple.quicktime.$1=$2"); }
@@ -44,7 +47,7 @@ while [ $# -gt 0 ]; do case "$1" in
 esac; done
 [ "${#MD[@]}" -gt 0 ] || { echo "no metadata fields given — metadata.sh embeds nothing on its own" >&2; exit 2; }
 
-vcodec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 VTAG=(); [ "$vcodec" = hevc ] && VTAG=(-tag:v hvc1)
 PART="${OUT}.part"
 # -map 0 -map -0:d? keeps every real stream (video, all audio, subtitles) but drops
@@ -52,7 +55,7 @@ PART="${OUT}.part"
 # CHAP controls chapter metadata; +bitexact suppresses the generic encoder tag;
 # use_metadata_tags writes the proper QuickTime mdta keys.
 # ${arr[@]+...} keeps bash 3.2 (macOS default) happy under set -u with empty arrays
-ffmpeg -nostdin -y -v error -fflags +bitexact -i "$IN" \
+ffmpeg -nostdin -y -v error -fflags +bitexact "${FF_INPUT_OPTS[@]}" -i "$IN" \
   -map 0 -map -0:d? -map_metadata 0 ${CHAP[@]+"${CHAP[@]}"} \
   -c copy ${VTAG[@]+"${VTAG[@]}"} -movflags use_metadata_tags+faststart \
   ${MD[@]+"${MD[@]}"} -f mov "$PART"
@@ -61,7 +64,7 @@ echo "wrote: $OUT (proper QuickTime metadata; no chapter menu)"
 
 # confirm each requested key round-tripped (proves the proper-format write took)
 echo "-- metadata round-trip --"
-tags=$(ffprobe -v error -show_entries format_tags -of default=noprint_wrappers=1 "$OUT" 2>/dev/null)
+tags=$(ffp -v error -show_entries format_tags -of default=noprint_wrappers=1 "$OUT" 2>/dev/null)
 miss=0
 for kv in "${KV[@]}"; do
   k="${kv%%=*}"; v="${kv#*=}"

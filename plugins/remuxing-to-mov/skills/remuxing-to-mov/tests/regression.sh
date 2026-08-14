@@ -566,7 +566,7 @@ hasnt "$out" ">> FAIL" "reproduced noise no longer hard-FAILs (calibrated, not w
 [ "$rc" -eq 0 ] && ok "calibrated REVIEW exits 0 (house exit codes intact)" || no "calibrated REVIEW exit $rc"
 
 echo
-echo "== 21. QTFF audit 5-2: track-set audio policy (layouts default; drops announced; first == historical) =="
+echo "== 21. QTFF audit 5-2: track-set audio policy (all default; drops announced; layouts/first opt-in) =="   # 1.11: default --audio-keep=all
 LK5="$WORK/lay51.mkv"; LKD="$WORK/laydup.mkv"
 ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=440 -f lavfi -i sine=880 -t 2 \
    -map 0:v -map 1:a -map 2:a -c:v libx264 -g 25 -pix_fmt yuv420p \
@@ -574,12 +574,12 @@ ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=440 -f lavfi -i sine=880
 ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=440 -f lavfi -i sine=660 -f lavfi -i sine=880 -t 2 \
    -map 0:v -map 1:a -map 2:a -map 3:a -c:v libx264 -g 25 -pix_fmt yuv420p \
    -c:a:0 flac -ac:a:0 6 -c:a:1 aac -ac:a:1 2 -c:a:2 mp2 -ac:a:2 2 "$LKD"
-# (i) 5.1 + stereo -> BOTH survive under the default layouts policy (the
-# transcript-1 blind spot: the old a:0 classifier silently dropped track 2)
+# (i) 5.1 + stereo -> BOTH survive under the default (all since 1.11) policy
+# (the transcript-1 blind spot: the old a:0 classifier silently dropped track 2)
 o=$(bash "$SC/mov.sh" "$LK5" "$WORK/lay51.mov" 2>&1) || true
-case "$(acods "$WORK/lay51.mov")" in pcm_*,aac) ok "layouts: 5.1+stereo -> both layouts survive (pcm access + aac copy)";; *) no "layouts lost a layout: $(acods "$WORK/lay51.mov")";; esac
+case "$(acods "$WORK/lay51.mov")" in pcm_*,aac) ok "default (all): 5.1+stereo -> both tracks survive (pcm access + aac copy)";; *) no "default lost a track: $(acods "$WORK/lay51.mov")";; esac   # 1.11: default --audio-keep=all
 chs=$(ffprobe -v error -select_streams a -show_entries stream=channels -of csv=p=0 "$WORK/lay51.mov" 2>/dev/null | paste -sd, -)
-[ "$chs" = "6,2" ] && ok "layouts: channel counts preserved (6,2)" || no "channel counts wrong: $chs"
+[ "$chs" = "6,2" ] && ok "default (all): channel counts preserved (6,2)" || no "channel counts wrong: $chs"   # 1.11: default --audio-keep=all
 has "$o" "audio_kept=0:flac:5.1" "MOV_SUMMARY carries audio_kept"
 has "$o" "NOT preserved in this file" "multi shape announces non-native originals are not preserved"
 # (ii) duplicate stereo -> exactly the mp2 clone drops, announced with the rule
@@ -588,12 +588,12 @@ has "$o" "DROP a:2 mp2" "duplicate layout: the mp2 clone drops"
 has "$o" "loses to a:1 aac" "the drop states the deciding rule"
 has "$o" "KEEP a:1 aac" "the better stereo (aac) survives"
 [ "$(acods "$WORK/laydup.mov")" = "pcm_s16le,aac" ] && ok "dup fixture output shape pcm+aac" || no "dup output shape: $(acods "$WORK/laydup.mov")"
-# (iii) --audio-keep first == the default invocation, byte-for-byte
+# (iii) --audio-keep all == the default invocation, byte-for-byte   # 1.11: default --audio-keep=all
 bash "$SC/remux.sh" "$MP2" "$WORK/f_def.mov" >/dev/null 2>&1
-bash "$SC/remux.sh" "$MP2" "$WORK/f_first.mov" --audio-keep first >/dev/null 2>&1
-if cmp -s "$WORK/f_def.mov" "$WORK/f_first.mov"; then ok "default == --audio-keep first byte-for-byte"
-else no "default and --audio-keep first outputs differ"; fi
-[ "$(acods "$WORK/f_def.mov")" = pcm_s16le ] && ok "first: historical single-track shape (mp2 -> pcm)" || no "first shape wrong: $(acods "$WORK/f_def.mov")"
+bash "$SC/remux.sh" "$MP2" "$WORK/f_first.mov" --audio-keep all >/dev/null 2>&1   # 1.11: default --audio-keep=all
+if cmp -s "$WORK/f_def.mov" "$WORK/f_first.mov"; then ok "default == --audio-keep all byte-for-byte"
+else no "default and --audio-keep all outputs differ"; fi   # 1.11: default --audio-keep=all
+[ "$(acods "$WORK/f_def.mov")" = pcm_s16le ] && ok "single-audio source: default keeps the one track (mp2 -> pcm)" || no "default shape wrong: $(acods "$WORK/f_def.mov")"   # 1.11: default --audio-keep=all
 # 5-2d: dual-track single-pair scope — early refusal on not-MOV-copyable a:0,
 # loud warning on multi-track sources (a:0 pair still builds)
 bash "$SC/dual-track.sh" "$LK5" "$WORK/dtguard.mov" >/dev/null 2>&1; rc=$?
@@ -768,32 +768,41 @@ eval "$(DISC_DTS_FILE="$WORK/bh_gaponly.dts" DISC_FRAMEDUR_IN=0.04 disc_scan)"
 M422="$WORK/bh422.ts"; M420="$WORK/bh420.ts"
 ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v mpeg2video -pix_fmt yuv420p -f mpegts "$M420"
 if ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v mpeg2video -pix_fmt yuv422p -f mpegts "$M422" 2>/dev/null; then
-  # primary gate: QT-undecodable profile refuses instantly, writes nothing
+  # 1.11: 4:2:2 demoted to empirical post-build check — the profile BUILDS,
+  # announces itself, and the driver proves playability on the finished file
+  # (rc 0 on a bench that decodes it; rc 10 where the check fails/can't run)
   o=$(bash "$SC/mov.sh" "$M422" "$WORK/bh422.mov" 2>&1); rc=$?
-  { [ "$rc" -eq 11 ] && case "$o" in *"QT-UNDECODABLE"*) true;; *) false;; esac; } \
-    && ok "mov.sh: MPEG-2 4:2:2 -> REFUSED exit 11 (QT-undecodable)" || no "4:2:2 gate wrong (rc=$rc)"
-  has "$o" "MOV_REFUSED profile=qt-undecodable" "refusal emits the machine-readable MOV_REFUSED line"
-  has "$o" "rung4" "refusal names the attested re-encode route"
-  has "$o" "OUT.mkv" "refusal names the lossless MKV playback route"
-  { [ ! -f "$WORK/bh422.mov" ] && [ ! -f "$WORK/bh422.mov.part" ]; } && ok "4:2:2 refusal writes nothing" || no "refusal left an output/.part"
-  # --force-backhaul runs the build; the DONE line must NOT claim QuickTime-ready
+  { case "$rc" in 0|10) true;; *) false;; esac && [ -f "$WORK/bh422.mov" ]; } \
+    && ok "mov.sh: MPEG-2 4:2:2 builds (rc=$rc; refusal demoted 1.11)" || no "4:2:2 build wrong (rc=$rc)"
+  has "$o" "contribution profile mpeg2video/yuv422p" "advisory announces the contribution profile"
+  has "$o" "MOV_PLAYABILITY os=" "post-build empirical check emits the machine line"
+  hasnt "$o" "MOV_REFUSED profile=qt-undecodable" "no qt-undecodable refusal remains"
+  # 1.11: 4:2:2 demoted to empirical post-build check — --force-backhaul stays
+  # API but is a no-op for the pix_fmt arm (nothing left to skip)
   o=$(bash "$SC/mov.sh" "$M422" "$WORK/bh422f.mov" --force-backhaul 2>&1); rc=$?
-  { [ "$rc" -ne 11 ] && [ -f "$WORK/bh422f.mov" ]; } && ok "--force-backhaul proceeds past the gate (rc=$rc)" || no "--force-backhaul did not build (rc=$rc)"
-  hasnt "$o" "QuickTime-ready, verified lossless" "forced 4:2:2 build never reports itself QuickTime-ready"
-  has "$o" "NOT QuickTime-playable" "forced 4:2:2 build states the honest deliverable class"
-  # diagnose carries the decodability banner
+  { case "$rc" in 0|10) true;; *) false;; esac && [ -f "$WORK/bh422f.mov" ]; } \
+    && ok "--force-backhaul still accepted on 4:2:2 (kept-as-API no-op, rc=$rc)" || no "--force-backhaul broken (rc=$rc)"
+  # 1.11: diagnose now carries the SHARED contribution advisory (WO 5.2
+  # addendum — the stale "QT-UNDECODABLE ... refuses early (exit 11)" banner
+  # contradicted the demoted gate)
   o=$(bash "$SC/diagnose.sh" "$M422" 2>&1)
-  has "$o" "QT-UNDECODABLE PROFILE" "diagnose prints the 4:2:2 decodability banner"
+  has "$o" "contribution profile mpeg2video/yuv422p" "diagnose prints the shared contribution advisory"   # 1.11: stale refusal banner retired
+  hasnt "$o" "QT-UNDECODABLE" "diagnose no longer claims the falsified categorical verdict"   # 1.11: stale refusal banner retired
 else
   echo "  (skip: this ffmpeg's mpeg2video encoder can't mint yuv422p — 4:2:2 gate untested here)"
 fi
 
-# (c) secondary gate: mpegts/mpeg2video + gaps + rot -> refused before any build
+# (c) secondary gate — 1.11: rot refusal demoted to warn + verify: injected rot
+# on the CLEAN M420 now WARNS (same three routes + MOV_ROT_WARN) and BUILDS;
+# the underlying file is healthy, so verify signs it and the run stays DONE.
+# The real-rot end-to-end (artifact + evidence-bearing verdict) lives in
+# regression.d/42-rot-demoted.sh.
 o=$(DISC_DTS_FILE="$WORK/rot.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/mov.sh" "$M420" "$WORK/bhrot.mov" 2>&1); rc=$?
-{ [ "$rc" -eq 11 ] && case "$o" in *"BACKHAUL TIMELINE ROT"*) true;; *) false;; esac; } \
-  && ok "mov.sh: gaps + non-monotonic DTS -> REFUSED exit 11 (timeline rot)" || no "rot gate wrong (rc=$rc)"
-has "$o" "MOV_REFUSED profile=timeline-rot" "rot refusal emits the machine-readable line"
-{ [ ! -f "$WORK/bhrot.mov" ] && [ ! -f "$WORK/bhrot.mov.part" ]; } && ok "rot refusal writes nothing" || no "rot refusal left an output/.part"
+{ [ "$rc" -eq 0 ] && case "$o" in *"BACKHAUL TIMELINE ROT"*) true;; *) false;; esac && [ -f "$WORK/bhrot.mov" ]; } \
+  && ok "mov.sh: gaps + non-monotonic DTS -> WARN + build (rc=$rc; demoted 1.11)" || no "rot demotion wrong (rc=$rc)"   # 1.11: rot refusal demoted to warn + verify
+has "$o" "MOV_ROT_WARN profile=timeline-rot" "rot warn emits the additive machine-readable line"   # 1.11: rot refusal demoted to warn + verify
+hasnt "$o" "MOV_REFUSED" "no MOV_REFUSED from the demoted rot arm (nothing refuses, then builds)"   # 1.11: rot refusal demoted to warn + verify
+has "$o" "rung4    scripts/rung4.sh" "the demoted warn keeps the three honest routes"   # 1.11: rot refusal demoted to warn + verify
 # gaps ALONE do not refuse (the 2008 recovery class) — the build proceeds
 o=$(DISC_DTS_FILE="$WORK/bh_gaponly.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/mov.sh" "$M420" "$WORK/bhgap.mov" 2>&1); rc=$?
 { [ "$rc" -eq 0 ] && [ -f "$WORK/bhgap.mov" ]; } && ok "gap-only mpeg2 TS passes the gate and builds" || no "gap-only was refused/failed (rc=$rc)"
@@ -803,17 +812,16 @@ has "$o" "backhaul scan clear" "gate announces the clear scan before continuing"
 o=$(DISC_DTS_FILE="$WORK/rot.dts" DISC_FRAMEDUR_IN=0.04 bash "$SC/mov.sh" "$S" "$WORK/bh264.mov" 2>&1); rc=$?
 { [ "$rc" -eq 0 ] && case "$o" in *REFUSED*) false;; *) true;; esac; } \
   && ok "H.264 4:2:0 TS with rot -> gate does not fire (codec guard)" || no "codec guard leaked (rc=$rc)"
-# H.264 High 4:2:2 (the 2017-feed class): QT-undecodable, refused like MPEG-2 4:2:2
-# (verified 2026-07-31: 4:2:2 slice stalls qlmanage, identical 4:2:0 control renders)
+# H.264 High 4:2:2 (the 2017-feed class): 1.11: 4:2:2 demoted to empirical
+# post-build check — it builds and the driver proves playability on the output
 H422="$WORK/bh_h264_422.ts"
 if ff -f lavfi -i testsrc2=s=160x120:r=25 -t 2 -c:v libx264 -g 25 -pix_fmt yuv422p -f mpegts "$H422" 2>/dev/null; then
   o=$(bash "$SC/mov.sh" "$H422" "$WORK/bh422h.mov" 2>&1); rc=$?
-  { [ "$rc" -eq 11 ] && case "$o" in *"QT-UNDECODABLE"*"h264 4:2:2"*) true;; *) false;; esac; } \
-    && ok "mov.sh: H.264 High 4:2:2 -> REFUSED exit 11 (QT-undecodable, widened gate)" || no "h264-422 gate wrong (rc=$rc)"
-  { [ ! -f "$WORK/bh422h.mov" ] && [ ! -f "$WORK/bh422h.mov.part" ]; } && ok "h264-422 refusal writes nothing" || no "h264-422 refusal left an output"
-  o=$(bash "$SC/mov.sh" "$H422" "$WORK/bh422hf.mov" --force-backhaul 2>&1); rc=$?
-  { [ "$rc" -ne 11 ] && case "$o" in *"NOT QuickTime-playable"*) true;; *) false;; esac; } \
-    && ok "h264-422 --force-backhaul builds and states the honest deliverable class" || no "h264-422 force path wrong (rc=$rc)"
+  { case "$rc" in 0|10) true;; *) false;; esac && [ -f "$WORK/bh422h.mov" ]; } \
+    && ok "mov.sh: H.264 High 4:2:2 builds (rc=$rc; refusal demoted 1.11)" || no "h264-422 build wrong (rc=$rc)"
+  has "$o" "contribution profile h264/yuv422p" "h264-422 advisory present"
+  has "$o" "MOV_PLAYABILITY os=" "h264-422 gets the post-build empirical check"
+  hasnt "$o" "MOV_REFUSED profile=qt-undecodable" "no h264-422 qt-undecodable refusal remains"
 else
   echo "  (skip: this libx264 can't mint yuv422p — h264-422 gate untested here)"
 fi
@@ -898,45 +906,100 @@ o=$(TSH_LOG_FILE="$WORK/th_log200.txt" bash "$SC/ts-health.sh" "$THV" 2>&1); rc=
 # (f) codec routing rides along: the 4:2:2 fixture (if minted in section 24) is flagged
 if [ -f "$M422" ]; then
   o=$(bash "$SC/ts-health.sh" "$M422" 2>&1) || true
-  has "$o" "QuickTime CANNOT decode this profile" "ts-health names the QT-undecodable 4:2:2 profile"
+  has "$o" "contribution/backhaul profile" "ts-health names the 4:2:2 contribution profile"   # 1.11: stale "CANNOT decode" claim retired (WO 5.2 addendum)
+  has "$o" "proves playability post-build" "ts-health routes to the post-build empirical proof"   # 1.11: stale refusal route retired
+  hasnt "$o" "QuickTime CANNOT decode" "ts-health no longer asserts the falsified categorical verdict"   # 1.11: stale refusal banner retired
 else
   echo "  (skip: 4:2:2 fixture unavailable — codec finding untested here)"
 fi
 
 echo
-echo "== 26. Backhaul gate at EVERY entry point (1.10.0): no route builds a refused deliverable =="
-# The 2017-feed bypass: mov.sh gated, but auto.sh/batch.sh/remux.sh and the two
-# repair builders did not — a direct or batch call on a 4:2:2 source built the
-# doomed MOV anyway. backhaul_gate (lib-paff.sh) now runs wherever a .mov is
-# written; RTM_FORCE_BACKHAUL=1 is the one sanctioned override and
-# RTM_BACKHAUL_GATED=1 lets a gated caller clear its children.
+echo "== 26. Backhaul gate at EVERY entry point: neither arm refuses (1.11) — rot warns + builds, 4:2:2 proves post-build =="   # 1.11: rot refusal demoted to warn + verify
+# 1.11: 4:2:2 demoted to empirical post-build check — the 1.10.0 "no side door
+# builds it" property INVERTS for the pix_fmt arm: no .mov-writing route may
+# retain the refusal (no side door REFUSES either). The shared backhaul_gate
+# still runs at every entry point: it prints the contribution advisory, and
+# since WO 4.2 its timeline-rot arm WARNS (same routes + MOV_ROT_WARN) instead
+# of refusing — exercised in 24c and regression.d/42-rot-demoted.sh.   # 1.11: rot refusal demoted to warn + verify
 if [ -f "${H422:-}" ]; then
+  # 1.11: 4:2:2 demoted to empirical post-build check — auto builds + proves
   o=$(bash "$SC/auto.sh" "$H422" "$WORK/gp_auto.mov" 2>&1); rc=$?
-  { [ "$rc" -eq 11 ] && case "$o" in *"MOV_REFUSED profile=qt-undecodable"*) true;; *) false;; esac; } \
-    && ok "auto.sh refuses 4:2:2 (exit 11, MOV_REFUSED)" || no "auto.sh gate missing (rc=$rc)"
-  [ ! -f "$WORK/gp_auto.mov" ] && ok "auto.sh refusal writes nothing" || no "auto.sh refusal left an output"
+  { case "$rc" in 0|10) true;; *) false;; esac && [ -f "$WORK/gp_auto.mov" ]; } \
+    && ok "auto.sh builds 4:2:2 (rc=$rc) — no refusal" || no "auto.sh 4:2:2 route wrong (rc=$rc)"
+  has "$o" "MOV_PLAYABILITY os=" "auto.sh runs the post-build playability check"
+  hasnt "$o" "MOV_REFUSED profile=qt-undecodable" "no qt-undecodable MOV_REFUSED from auto.sh"
+  # 1.11: 4:2:2 demoted — a direct remux.sh call gets the advisory, then builds
   o=$(bash "$SC/remux.sh" "$H422" "$WORK/gp_remux.mov" 2>&1); rc=$?
-  { [ "$rc" -eq 11 ] && [ ! -f "$WORK/gp_remux.mov" ]; } \
-    && ok "remux.sh refuses 4:2:2 on a direct call (exit 11, nothing written)" || no "remux.sh gate missing (rc=$rc)"
-  o=$(bash "$SC/pairfill-paff.sh" "$H422" "$WORK/gp_pf.mov" 2>&1); rc=$?
-  [ "$rc" -eq 11 ] && ok "pairfill-paff.sh refuses 4:2:2 (exit 11)" || no "pairfill gate missing (rc=$rc)"
-  o=$(bash "$SC/rebuild-paff.sh" "$H422" "$WORK/gp_rb.mov" 50 2>&1); rc=$?
-  [ "$rc" -eq 11 ] && ok "rebuild-paff.sh refuses 4:2:2 (exit 11)" || no "rebuild gate missing (rc=$rc)"
-  o=$(bash "$SC/dual-track.sh" "$H422" "$WORK/gp_dt.mov" 2>&1); rc=$?
-  [ "$rc" -eq 11 ] && ok "dual-track.sh refuses 4:2:2 (exit 11 — it bypasses remux.sh)" || no "dual-track gate missing (rc=$rc)"
-  has "$o" "ts-health.sh" "refusal routes point at the health scan (TS/MKV custody is checked, not assumed)"
-  # the sanctioned override reaches children: forced env builds where the gate refused
+  { [ "$rc" -eq 0 ] && [ -f "$WORK/gp_remux.mov" ]; } \
+    && ok "remux.sh builds 4:2:2 on a direct call (advisory, not refusal)" || no "remux.sh 4:2:2 direct call wrong (rc=$rc)"
+  has "$o" "contribution profile" "direct remux.sh call prints the shared advisory"
+  # 1.11: 4:2:2 demoted — dual-track.sh (which bypasses remux.sh) builds too.
+  # H422 is video-only (dual-track's no-audio guard would fire first), so this
+  # probe mints the audio-carrying 4:2:2 shape the route actually serves.
+  H422A="$WORK/bh_h264_422a.ts"
+  ff -f lavfi -i testsrc2=s=160x120:r=25 -f lavfi -i sine=440 -t 2 \
+     -map 0:v -map 1:a -c:v libx264 -g 25 -pix_fmt yuv422p -c:a mp2 -f mpegts "$H422A"
+  o=$(bash "$SC/dual-track.sh" "$H422A" "$WORK/gp_dt.mov" 2>&1); rc=$?
+  { [ "$rc" -eq 0 ] && [ -f "$WORK/gp_dt.mov" ]; } \
+    && ok "dual-track.sh builds 4:2:2 (gate is advisory on its direct path)" || no "dual-track.sh 4:2:2 wrong (rc=$rc)"
+  # 1.11: 4:2:2 demoted — the PAFF builders share this exact gate function, so
+  # pin the function itself: clear (rc 0) + advisory on a 4:2:2 source. (The
+  # old per-builder exit-11 probes are meaningless now: H422 is not PAFF, and
+  # with the gate clear those builders proceed into their own machinery.)
+  go=$(backhaul_gate "$H422" 2>&1; echo "gate_rc=$?")
+  case "$go" in *"gate_rc=0"*) ok "shared backhaul_gate returns 0 (clear) on 4:2:2 — every builder inherits it";; \
+    *) no "backhaul_gate still refuses 4:2:2 [$go]";; esac
+  case "$go" in *"contribution profile"*) ok "shared gate prints the contribution advisory";; \
+    *) no "shared gate advisory missing";; esac
+  # 1.11: RTM_FORCE_BACKHAUL stays API (now a no-op for pix_fmt) — still builds
   RTM_FORCE_BACKHAUL=1 bash "$SC/remux.sh" "$H422" "$WORK/gp_forced.mov" >/dev/null 2>&1; rc=$?
   { [ "$rc" -eq 0 ] && [ -f "$WORK/gp_forced.mov" ]; } \
-    && ok "RTM_FORCE_BACKHAUL=1 overrides the choke-point gate (forced build lands)" || no "forced override broken (rc=$rc)"
-  # batch: a refusal is the gate working — REFUSED verdict, no .mov, batch still exits 0
+    && ok "RTM_FORCE_BACKHAUL=1 still builds (env is API; no-op for pix_fmt)" || no "forced env broken (rc=$rc)"
+  # 1.11: 4:2:2 demoted — batch classifies the build normally, never REFUSED
   o=$(bash "$SC/batch.sh" "$H422" --out "$WORK/gp_batch" 2>&1); rc=$?
-  { [ "$rc" -eq 0 ] && case "$o" in *"REFUSED=1"*) true;; *) false;; esac && [ ! -f "$WORK/gp_batch/$(basename "${H422%.ts}").mov" ]; } \
-    && ok "batch.sh classifies the refusal REFUSED (no .mov, batch exit 0)" || no "batch refusal handling wrong (rc=$rc)"
-  has "$o" "stays TS/MKV" "batch attention line routes the source to TS/MKV custody"
+  { [ "$rc" -eq 0 ] && case "$o" in *"REFUSED=1"*) false;; *) true;; esac && [ -f "$WORK/gp_batch/$(basename "${H422%.ts}").mov" ]; } \
+    && ok "batch.sh builds 4:2:2 (no REFUSED verdict, .mov lands)" || no "batch 4:2:2 handling wrong (rc=$rc)"
 else
-  echo "  (skip: h264 4:2:2 fixture unavailable — entry-point gate untested here)"
+  echo "  (skip: h264 4:2:2 fixture unavailable — entry-point audit untested here)"
 fi
+
+echo
+echo "== 27. tests/regression.d/: per-work-order suites, each one test of this run =="
+# Wiring (WO 1.4): every EXECUTABLE tests/regression.d/*.sh runs in sorted glob
+# order and counts as ONE test here — name printed, any failure a suite failure
+# (its own output shown indented for the diagnosis). Corpus discipline (6.3):
+# the shared corpus is healed ONCE up front — every member of make-fixtures.sh's
+# authoritative ALL list that is missing regenerates in a single call, so inside
+# a suite run the sub-suites' own self-heal blocks are no-ops (they exist for
+# standalone invocation) and regeneration happens exactly once per run however
+# partial the corpus, fresh checkout included (media never ships in git).
+# pcm_bluray.m2ts may stay legitimately absent after the heal — its encoder is
+# bench-dependent and make-fixtures SKIPs it out loud (the consumers then
+# announce their own skip).
+fixall=$(sed -n 's/^ALL="\(.*\)"$/\1/p' "$HERE/make-fixtures.sh" | head -1)
+if [ -z "$fixall" ]; then
+  no "could not read the ALL list from make-fixtures.sh (corpus heal is unwired)"
+else
+  fixmiss=""
+  for f in $fixall; do [ -f "$HERE/fixtures/$f" ] || fixmiss="$fixmiss $f"; done
+  if [ -n "$fixmiss" ]; then
+    echo "-- fixture corpus: healing missing member(s):$fixmiss --"
+    # shellcheck disable=SC2086  # word splitting is the point
+    if mkout=$(bash "$HERE/make-fixtures.sh" $fixmiss 2>&1); then ok "fixture corpus healed (one make-fixtures call)"
+    else no "make-fixtures.sh failed on:$fixmiss"; printf '%s\n' "$mkout" | tail -5 | sed 's/^/   /'; fi
+  fi
+fi
+for t in "$HERE"/regression.d/*.sh; do
+  [ -f "$t" ] || continue        # literal glob: empty dir
+  [ -x "$t" ] || { echo "  (skip: $(basename "$t") not executable — chmod +x to enroll it)"; continue; }
+  tn="regression.d/$(basename "$t")"
+  if out=$(bash "$t" 2>&1); then
+    ok "$tn — $(printf '%s\n' "$out" | tail -1)"
+  else
+    no "$tn"
+    printf '%s\n' "$out" | sed 's/^/   /'
+  fi
+done
 
 echo
 echo "===================================================================="

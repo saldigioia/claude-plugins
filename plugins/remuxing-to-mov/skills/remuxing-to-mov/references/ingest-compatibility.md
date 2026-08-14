@@ -27,9 +27,9 @@ Detect: `ffprobe -v error -select_streams v:0 -show_entries stream=is_avc,nal_le
 
 | Codec | Copies into MOV? | Tag / note |
 |-------|------------------|------------|
-| H.264/AVC | Yes | `avc1` (default); Annex-B→avcC handled automatically on copy. 4:2:0 profiles play; **High 4:2:2 (`yuv422p`) does NOT — AVFoundation stalls on it** (verified 2026-07-31, macOS 26.5.2: 4:2:2 slice hangs qlmanage, identical 4:2:0 control renders; same undecodable class as MPEG-2 4:2:2) |
+| H.264/AVC | Yes | `avc1` (default); Annex-B→avcC handled automatically on copy. 4:2:0 profiles play. **High 4:2:2 (`yuv422p*`, any bit depth) is a per-OS empirical fact, not a refusal (1.11, WO 4.1)**: it stalled qlmanage on macOS 26.5.2 (2026-07-31) but **fully decodes on 26.6.1** (re-measured 2026-08-13) — decode support drifts by macOS, so `mov.sh` announces the contribution profile, builds losslessly, and proves the finished output with `playable-check.sh` (fail/unverified → REVIEW with `rung4.sh` named) |
 | HEVC/H.265 | Yes | **`-tag:v hvc1`** — default `hev1` won't play in QuickTime (verified: default mux tag is `hev1`) |
-| MPEG-2 | Yes | Container OK. 4:2:0 plays in QuickTime; **4:2:2 (422@HL) does not — distorts even bit-accurate** (verified 2026-07-30: controlled Main/4:2:0 vs 4:2:2 pair; `mov.sh` refuses the profile, exit 11) |
+| MPEG-2 | Yes | Container OK. 4:2:0 plays in QuickTime. **4:2:2 (422@HL): same demoted-to-empirical verdict as H.264 Hi422 (1.11, WO 4.1)** — it distorted on macOS 26.5.2 (2026-07-30 controlled pair) but fully decodes on 26.6.1 (2026-08-13); announced + built + playability-proven post-build, never refused pre-flight |
 | ProRes | Yes | `apcn/apch/apcs/apco/ap4h/ap4x` — editorial/master |
 | DV/DVCPRO | Yes | Legacy; QuickTime yes, iOS no |
 | Dolby Vision HEVC | Yes (ffmpeg ≥5.0, single-layer) | ffmpeg ≥5.0 preserves single-layer DV (P5/P8) on `-c copy` with `-tag:v hvc1`; **dual-layer P7 (FEL)** needs conversion to P8.1 or keep MKV. Sample-entry family (5-5e/C61): `dvh1`/`dvhe` (DV-dedicated) and cross-compat `hvc2`/`hev2`/`hvc3`/`hev3` — the testable split is **`dvh1` plays where the `hev1`-family fails** (same hvc1-vs-hev1 rule extended to DV entries; still blocked on real DV artifacts). `probe.sh` reports the stsd entry (e.g. `hevc (dvh1)`). See `color-hdr-subs.md`. |
@@ -57,11 +57,11 @@ auto` applies this table automatically.
 
 | Codec | Muxes into MOV by copy? | QuickTime plays it? | Action |
 |-------|-------------------------|---------------------|--------|
-| AC-3 (Dolby Digital) | Yes (verified) | Yes on modern macOS; spotty on older | `-c:a copy` muxes & plays on current QuickTime; the plugin dual-tracks it for older targets |
+| AC-3 (Dolby Digital) | Yes (verified) | **No — TN2429**: desktop QuickTime has no AC-3 decoder (a modern macOS does not fix this; AVFoundation apps vary) | Copy muxes but is not the playback route: `remux.sh --audio auto` decodes AC-3 to a PCM access track (announced per track, `-drc_scale 0` under `--drc auto`); the dual-track route (`mov.sh` auto-dual / `dual-track.sh`) preserves the original bit-exact alongside the access track |
 | E-AC-3 / E-AC-3 JOC (DD+/Atmos) | Yes (verified) | **Yes — native** (modern QuickTime/macOS) | `-c:a copy`, single track — QuickTime plays Dolby Digital Plus natively. Atmos object metadata is in-band, preserved |
 | AAC | Yes | Yes | `-c:a copy` |
 | ALAC | Yes | Yes | `-c:a copy` |
-| PCM (`lpcm`) | Yes | Yes | `-c:a copy` |
+| PCM (`lpcm`) | Yes | Yes | `-c:a copy` — **except `pcm_bluray`/`pcm_dvd`** (HDMV/DVD **container-framed** LPCM, not raw samples): the "copy" muxes but yields an HDMV-tagged track no decoder claims — a dead track (WO 3.1), so since 1.11 the auto policy routes them to the PCM access decode (s32 sources trip the depth WARN; depth-true route: `dual-track.sh --pcm auto`) |
 | **MP2 / MP1** | **Yes, but non-standard** (tag `.mp2`, verified) | Not expected | **Decode to PCM** for a playable file. The mux succeeds — the reason to decode is QuickTime playability, not container incompatibility. |
 | DTS / DTS-HD MA | Yes (tag `dtsc`, verified) | **No** | Copy preserves it, but decode to PCM for a QuickTime-playable file; keep a copy-version too if archiving. DTS:X rides as an extension substream inside DTS-HD — survives copy, **lost on decode to PCM**. |
 | MP3 | Yes (tag `.mp3`, verified on 8.1.1) | Yes (native) | `-c:a copy` |

@@ -23,3 +23,8 @@ plugins/*.zip
 *.bak-*
 *.orig
 *.rej
+
+# remuxing-to-mov synthetic test corpus — regenerated on demand by
+# tests/make-fixtures.sh; media never ships in git (the plugin-level
+# .gitignore only covers *.mov, so ignore the whole directory here)
+plugins/remuxing-to-mov/skills/remuxing-to-mov/tests/fixtures/

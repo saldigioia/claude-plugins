@@ -10,8 +10,8 @@ whole video.
 ```bash
 scripts/doctor.sh                  # one-time: is this ffmpeg capable?
 scripts/mov.sh IN.ts               # the everyday one: QuickTime-ready, dual-track only if needed, verified
-scripts/auto.sh IN.ts OUT.mov      # the lossless ladder, hands-off (single-track audio)
-scripts/batch.sh DIR --out OUTDIR  # a whole folder, with provenance + resume (ladder policy: single-track)
+scripts/auto.sh IN.ts OUT.mov      # the lossless ladder, hands-off (copy rungs keep every audio track; PAFF repair rungs build a:0)
+scripts/batch.sh DIR --out OUTDIR  # a whole folder, with provenance + resume (ladder policy — no dual-track pair)
 ```
 
 In Claude Code these are also a slash command — **`/remuxing-to-mov:mov FILE`**
@@ -20,7 +20,8 @@ In Claude Code these are also a slash command — **`/remuxing-to-mov:mov FILE`*
 automatically **only when** the source audio (AC-3/E-AC-3/DTS/MP2) won't play in
 QuickTime. Output defaults to `<input>.mov` beside the source. Nothing here
 re-encodes video or touches the source; exit codes `0` = verified, `10` = REVIEW,
-`1` = FAIL.
+`1` = FAIL, `11` = REFUSED with routes (codecs no `.mov` can carry — VC-1/VP9/AV1
+video, Dolby E audio — or a child script's own refusal).
 
 ## What it does
 
@@ -64,10 +65,11 @@ re-encodes video or touches the source; exit codes `0` = verified, `10` = REVIEW
 ```
 skills/remuxing-to-mov/
   SKILL.md                 workflow, escalation ladder, instant-answer card
-  scripts/                 doctor, probe, diagnose, mov + auto (one-shot drivers),
-                           remux, pairfill-paff, rebuild-paff, resync, dual-track,
-                           metadata, verify, batch, gop-probe, seam-check,
-                           playable-check, rung4 (attested re-encode), waiver
+  scripts/                 doctor, probe, ts-health, diagnose, mov + auto (one-shot
+                           drivers), remux, trim-to-idr, pairfill-paff, rebuild-paff,
+                           resync, dual-track, metadata, verify, batch, gop-probe,
+                           seam-check, playable-check, qt-groups (opt-in post-pass),
+                           rung4 (attested re-encode), waiver
   references/              codec/container tables, timeline repair, color/HDR,
                            cutting/concat, dual-track QC, container internals
   examples/                worked driver scripts from a real broadcast job
@@ -75,7 +77,8 @@ skills/remuxing-to-mov/
 ```
 
 Every codec/container compatibility claim in the references is verified
-empirically against a named ffmpeg version (6.1.1 and 8.1.1), with the
+empirically against a named ffmpeg version (historically 6.1.1 and 8.1.1;
+currently ffmpeg 9.0.1 on macOS 26.6.1, re-validated 2026-08-14), with the
 verification date recorded.
 
 ## Requirements

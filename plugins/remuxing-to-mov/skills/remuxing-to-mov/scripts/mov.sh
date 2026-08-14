@@ -5,19 +5,39 @@
 # never touches or deletes the source.
 #
 # Usage: scripts/mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul]
-#                       [--audio-keep all|first|layouts|IDX[,IDX...]] [metadata flags]
+#                       [--no-idr-trim] [--audio-keep all|first|layouts|IDX[,IDX...]]
+#                       [metadata flags]
 #   OUTPUT         default: <input dir>/<input base>.mov
 #                  (<base>.qt.mov if the input is itself a .mov, so the source is safe)
 #   --always-dual  build the dual-track even when the source audio already plays in
 #                  QuickTime (the plugin's "always dual-track" default deliverable)
-#   --audio-keep   which audio tracks survive (QTFF audit 5-2c; default: layouts —
-#                  distinct channel layouts are distinct deliverables, duplicate
-#                  layouts curated lossless > lossy-high > lossy-low, every drop
-#                  announced; 'first' reproduces the historical a:0-only behavior)
+#   --no-idr-trim  keep a mid-GOP capture head as-is. DEFAULT is the announced
+#                  auto-trim: when the pre-flight sees video packets before the
+#                  first keyframe (the mid-GOP-start class ts-health.sh flags),
+#                  trim-to-idr.sh cuts BOTH tracks at the first IDR into a temp
+#                  intermediate the build then consumes (deleted after a verified
+#                  DONE, kept for the closer look otherwise). WHY: the pre-roll is
+#                  undecodable by any player (its parameter sets were never
+#                  captured) AND ffmpeg streamcopy silently drops the video half
+#                  of it while the audio half lands — the untrimmed build then
+#                  fails A/V duration parity as a phantom desync (measured:
+#                  102 video pkts dropped, REVIEW at 4.25 s mismatch).
+#   --audio-keep   which audio tracks survive (QTFF audit 5-2c; default: all —
+#                  WO 3.3: every track is content, and dropping buys NO
+#                  playability: movenc already enables exactly one audio track
+#                  (tkhd 0x0003/0x0002/..., parsed bench 2026-08-13), which is
+#                  precisely Apple TN3177's requirement. 'layouts' is the
+#                  OPT-IN curation flag — distinct layout+language pairs
+#                  survive, same-layout same-language duplicates curated
+#                  lossless > lossy-high > lossy-low, every drop announced;
+#                  'first' reproduces the historical a:0-only behavior)
 #   --full         archival sign-off: pass --full to verify.sh (whole-file decode)
-#   --force-backhaul  run the build even when the backhaul refusal gate fires
-#                  (exit 11 below) — e.g. to build a verified lossless master that
-#                  will not play in QuickTime, or to collect failure evidence
+#   --force-backhaul  skip the pre-build backhaul timeline scan + warning.
+#                  Since 1.11 NEITHER backhaul arm refuses — the 4:2:2/pix_fmt
+#                  arm builds and is playability-proven post-build (WO 4.1),
+#                  and the timeline-rot arm warns + builds + lets verify judge
+#                  (WO 4.2) — so this flag only silences the rot scan/warning
+#                  (kept as API; a no-op for the pix_fmt arm)
 #   metadata (OPT-IN — NOTHING is tagged unless you pass one of these explicitly):
 #     --title --description --author --date --copyright --comment --keywords
 #     --key NAME=VALUE  --keep-chapters
@@ -26,15 +46,18 @@
 #
 # AUDIO POLICY — dual-track only when needed (classified by QuickTime PLAYABILITY,
 # not by whether the codec merely muxes into MOV):
-#   QuickTime-native (AAC / ALAC / MP3 / PCM / E-AC-3) -> copied as-is, single track
-#                                                         (E-AC-3 = Dolby Digital Plus,
-#                                                          plays natively in modern QuickTime)
+#   QuickTime-native (AAC / ALAC / MP3 / raw PCM / E-AC-3) -> copied as-is, single
+#                                                         track (E-AC-3 = Dolby Digital
+#                                                         Plus, plays natively in modern
+#                                                         QuickTime; raw PCM only —
+#                                                         pcm_bluray/pcm_dvd are NOT this)
 #   not native but MOV-copyable (AC-3 / DTS / MP2)     -> DUAL-TRACK: PCM "access"
 #                                                         track 1 (always plays) +
 #                                                         original copied bit-exact track 2
-#   not native and not MOV-copyable (FLAC/Opus/TrueHD) -> single PCM access track;
-#                                                         original CANNOT be preserved in
-#                                                         MOV (keep MKV/MP4 if you need it)
+#   not native and not usefully MOV-copyable           -> single PCM access track;
+#   (FLAC/Opus/TrueHD; Blu-ray/DVD LPCM — pcm_bluray/     original CANNOT be preserved in
+#    pcm_dvd "copy" muxes into an HDMV-tagged track        MOV (keep MKV/MP4/m2ts if you
+#    that NO decoder claims, not even ffmpeg's)            need the original bitstream)
 #   none                                              -> video-only copy
 #
 # Field-coded (PAFF) H.264 is routed via auto.sh by timestamp profile:
@@ -44,19 +67,62 @@
 # audio to PCM (original not preserved — manual route via
 # references/timeline-repair.md + references/dual-track-quicktime.md if needed).
 #
-# Exit: 0 = verified OK; 10 = REVIEW (written, look closer); 1 = FAIL; 2 = usage;
-#       11 = REFUSED (backhaul profile — this source cannot honestly deliver a
-#            QuickTime-ready MOV; the refusal names the routes out).
+# Exit: 0 = verified OK; 10 = REVIEW (written, look closer — includes a build
+#            whose post-build playability check FAILed or could not run on this
+#            platform, WO 4.1); 1 = FAIL; 2 = usage;
+#       11 = REFUSED. Since 1.11 neither BACKHAUL arm refuses (the 4:2:2
+#            profile builds + is playability-proven, WO 4.1; timeline rot
+#            warns + builds + lets verify judge, WO 4.2) — the only refusals
+#            mov.sh itself issues are the UNROUTABLE codecs (WO 5.2: VC-1 /
+#            VP9 / AV1 video, Dolby E audio — no lossless MOV of these classes
+#            exists, so the honest answer is the routes out, pre-flight, never
+#            a raw muxer stack trace). An 11 can also propagate from a child's
+#            own refusal — e.g. resync.sh's mid-stream layout guard via
+#            auto.sh.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
+# lib-paff BEFORE the RTM_TEST guard: it now owns the shared unroutable_v/
+# unroutable_a classifiers (1.11 fix round — auto.sh/remux.sh dispatch the SAME
+# arms, so no entry point can diverge), and the suite unit-pins them by
+# sourcing THIS file under the guard.
+. "$SELF_DIR/lib-paff.sh"   # unroutable_* classifiers + refusal voice, backhaul machinery
 
-IN="${1:?usage: mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul] [--audio-keep POLICY] [metadata flags]}"; shift
-OUT=""; ALWAYS=0; FULL=""; MDARGS=(); AKEEP=layouts; FORCE_BACKHAUL=0
+# --- audio classifiers (top of file so the RTM_TEST harness can source them) ---
+# native_c: does QuickTime PLAY this codec as-is? The pcm_* glob means RAW PCM
+# only — pcm_bluray/pcm_dvd are excluded FIRST (WO 3.1): they are
+# container-framed LPCM, not raw PCM. The MOV muxer "successfully" copies them
+# into an HDMV-tagged track that NO decoder claims — even ffmpeg cannot decode
+# the file it just wrote (real 18.5 GB Blu-ray case: the driver reported
+# success on a silent output). A mux that succeeds is not a track that plays.
+native_c () { case "$1" in pcm_bluray|pcm_dvd) return 1;; aac|alac|mp3|pcm_*|eac3) return 0;; *) return 1;; esac; }
+# mode_for: single-kept-track codec -> build MODE. This is the decision table
+# the flow below consumes (--always-dual upgrades copy->dual at the call site).
+mode_for () { case "$1" in
+  pcm_bluray|pcm_dvd)      echo pcm  ;;  # container-framed LPCM: muxes, never decodes (see native_c) -> decode to raw PCM
+  aac|alac|mp3|pcm_*|eac3) echo copy ;;  # plays natively in QuickTime (eac3 = DD+; pcm_* = raw PCM here)
+  ac3|dts|dca|mp2|mp1)     echo dual ;;  # not native, but MOV-copyable -> keep original via dual-track
+  *)                       echo pcm  ;;  # flac/opus/truehd/...: original not MOV-copyable
+esac; }
+# unroutable_v / unroutable_a live in lib-paff.sh since the 1.11 fix round
+# (sourced above, BEFORE the RTM_TEST guard, so the suite's sourced-classifier
+# harness still finds them here): auto.sh and remux.sh dispatch the same arms,
+# closing the WO 5.2 parity gap (a direct auto/remux run used to die in the
+# raw muxer stack trace while only mov.sh refused honestly).
+# RTM_TEST sourcing guard: `RTM_TEST=1 . mov.sh` stops here so the regression
+# suite can unit-test the classifiers above without running the build flow.
+# An executed run (`bash mov.sh ...`) is not a source, so it never returns here.
+if [ "${RTM_TEST:-0}" = 1 ] && [ "${BASH_SOURCE[0]:-}" != "$0" ]; then return 0; fi
+
+IN="${1:?usage: mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul] [--no-idr-trim] [--audio-keep POLICY] [metadata flags]}"; shift
+OUT=""; ALWAYS=0; FULL=""; MDARGS=(); AKEEP=all; FORCE_BACKHAUL=0; NOIDRTRIM=0
 # optional positional OUTPUT (the next arg, only if it isn't a --flag)
 if [ "${1:-}" != "" ] && [ "${1#--}" = "${1:-}" ]; then OUT="$1"; shift; fi
 while [ $# -gt 0 ]; do case "$1" in
   --always-dual) ALWAYS=1; shift;;
   --full)        FULL="--full"; shift;;
   --force-backhaul) FORCE_BACKHAUL=1; shift;;
+  --no-idr-trim) NOIDRTRIM=1; shift;;
   --audio-keep)  AKEEP="${2:?--audio-keep needs a value}"; shift 2;;
   --audio-keep=*) AKEEP="${1#*=}"; shift;;
   # OPT-IN metadata: collected and passed verbatim to metadata.sh after the build
@@ -66,7 +132,6 @@ while [ $# -gt 0 ]; do case "$1" in
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # default output beside the source; never collide with the source name
 if [ -z "$OUT" ]; then
@@ -93,24 +158,97 @@ eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
 echo "== mov: $IN -> $OUT =="
 echo "   video=$PR_VCODEC  audio=$PR_ACODEC  paff=$PF_PAFF"
 
-# --- backhaul refusal gate (exit 11): move the verdict the old pipeline reached
-# after a full mux + resync + failed verify to the cheapest possible moment.
-#   PRIMARY — QT-UNDECODABLE: yuv422p on MPEG-2 OR H.264. AVFoundation has NO
-#   working 4:2:2 decode path for either contribution mastering profile:
-#   * MPEG-2 4:2:2 — controlled comparison 2026-07-30: a 4:2:2 MOV with a
-#     pristine, fully-verified timeline distorts in QuickTime exactly like the
-#     failed builds, while the Main/4:2:0 sibling plays perfectly.
-#   * H.264 High 4:2:2 — controlled slice test 2026-07-31 (2017 feed, macOS
-#     26.5.2): the 4:2:2 slice STALLS qlmanage (the undecodable-variant hang
-#     signature), the identical content re-encoded 4:2:0 renders instantly.
-#   No container surgery can supply a missing decoder — one instant ffprobe
-#   field decides, before the PAFF ladder can spend a multi-GB build.
-#   SECONDARY — TIMELINE ROT (buildability): mpegts + mpeg2video + forward gaps
-#   + non-monotonic DTS, whole-file and demux-only (~1 min on a 12 GB capture).
-#   On that class the copy mux invents DTS (confession hard stop) and a resync
-#   build leaves near-zero sample durations that verify gate (d) rightly fails.
-#   Forward gaps ALONE do not refuse — that class rebuilds (the 2008 recovery);
-#   and an H.264 TS with gaps still rides the existing PAFF/resync machinery.
+# --- unroutable codecs: one honest refusal each, never a raw muxer error ------
+# WO 5.2: the never-mentioned classes used to die mid-build as raw ffmpeg
+# errors (VP9 verified un-muxable on the bench) or misroute silently. They are
+# REFUSED-class outcomes — exit 11 with the routes, nothing written, source
+# untouched — because unlike every other gate in this file the failure is not
+# a playability question the post-build proof can answer: the MOV cannot exist.
+# The classifiers + the refusal voice are shared (lib-paff.sh, 1.11 fix round)
+# so auto.sh and remux.sh refuse identically — gate at every entry point.
+if unroutable_v "$PR_VCODEC"; then
+  unroutable_v_refuse "$PR_VCODEC"
+  exit 11
+fi
+# Dolby E scan honors --audio-keep: the whole per-track manifest is checked
+# (a:0-only was the transcript-1 blind-spot class), and an explicit keep-list
+# that excludes every Dolby E track is itself one of the refusal's named routes
+# — the exclusion is announced here and the drop WARNs again in the plan
+# (house rule 5). `layouts` could curate a Dolby E track IN, so it refuses
+# like `all`; only explicit indices (or `first` with Dolby E off a:0) pass.
+DBE_ORD=""; ua_i=0
+while [ "$ua_i" -lt "${PR_AUD_COUNT:-0}" ]; do
+  eval "ua_c=\${PR_AUD_${ua_i}_CODEC:-}"
+  if unroutable_a "$ua_c"; then
+    case "$AKEEP" in
+      all|layouts) DBE_ORD=$ua_i;;
+      first)       [ "$ua_i" -eq 0 ] && DBE_ORD=$ua_i;;
+      *)           case ",$AKEEP," in *,"$ua_i",*) DBE_ORD=$ua_i;; esac;;
+    esac
+    [ -n "$DBE_ORD" ] && break
+    echo "   note: Dolby E track a:$ua_i present but excluded by --audio-keep $AKEEP -> proceeding (the drop is announced in the plan)"
+  fi
+  ua_i=$((ua_i+1))
+done
+if [ -n "$DBE_ORD" ]; then
+  unroutable_a_refuse "$DBE_ORD"   # shared voice (lib-paff.sh) — same refusal at auto.sh/remux.sh
+  exit 11
+fi
+
+# --- measured-native video matrix (WO 5.1): recognition, never conversion ----
+# The F8 bench (2026-08-14, macOS 26.6.1/ffmpeg 9.0.1) measured mpeg4(mp4v),
+# MJPEG 4:2:0(jpeg), DV(dvcp) and ProRes(apcn) muxing -c copy into MOV and
+# fully decoding in AVFoundation — joining h264/hevc(hvc1)/mpeg2video as
+# plain-copy classes, so a DV/MJPEG/MPEG-4 capture is never talked toward a
+# needless conversion. Codec decode verdicts DRIFT with macOS (C63: Tahoe 26.4
+# dropped MJPEG variants; C72: 26.6.1 restored 4:2:2 — both directions), so
+# the recognition self-dates (Ground Rule 6) and the classes probe.sh could
+# NOT vouch for (PR_VNATIVE=variant/no) are announced and routed into the
+# WO 4.1 post-build playability proof instead of being silently branded
+# "QuickTime-ready". Video is stream-copied on every path here regardless
+# (Ground Rule 2) — this block decides messaging + the empirical check, only.
+case "${PR_VNATIVE:-na}" in
+  yes) case "$PR_VCODEC" in mpeg4|mjpeg|dvvideo|prores)
+         echo "   $PR_VCODEC: measured QT-native in MOV (bench 2026-08-14, macOS 26.6.1/ffmpeg 9.0.1) -> lossless copy";;
+       esac;;
+  variant)
+    echo "** WARN mjpeg ${PR_PIX_FMT:-?}: non-4:2:0 MJPEG is the C63 measured-DROP class"
+    echo "   (Tahoe 26.4; yuvj422p rendered no frame and hung qlmanage on 26.5.2)."
+    echo "   Building the lossless copy anyway — playability is proven post-build." ;;
+  no)
+    echo "   NOTE: $PR_VCODEC is outside the measured QT-native matrix — the copy is"
+    echo "   lossless either way; QuickTime playability is proven post-build, not assumed." ;;
+esac
+
+# --- backhaul verdicts: advisory + post-build proof for pix_fmt; warn for rot
+#   4:2:2 CONTRIBUTION PROFILE (WO 4.1 — demoted from refusal to empirical
+#   proof): the 1.8.0–1.10.0 gate refused yuv422p on MPEG-2/H.264 here,
+#   claiming AVFoundation cannot decode it (the 2026-07-30/31 controlled
+#   pairs). FALSIFIED on the bench 2026-08-13 (macOS 26.6.1): both refused
+#   classes fully decode (qlmanage thumbnail + avconvert whole-file, 50/50
+#   frames) — and the exact 8-bit match let the ACTUAL 10-bit contribution
+#   profiles (yuv422p10le, AVC-Intra class) bypass the gate unannounced.
+#   Decode support drifts by macOS version (C63: Tahoe 26.4 dropped MJPEG
+#   variants/AIC), so a hardcoded codec verdict rots; instead the profile is
+#   ANNOUNCED here (yuv422p*, all bit depths) and playability is PROVEN on
+#   the finished build below (playable-check.sh; FAIL or unverifiable
+#   platform -> 10 REVIEW with the Rung-4 route named, never a silent OK).
+#   --force-backhaul / RTM_FORCE_BACKHAUL stay API; they are no-ops for this
+#   arm now — there is no pix_fmt refusal left to skip.
+#   TIMELINE ROT (WO 4.2 — demoted from refusal to pre-build WARNING):
+#   mpegts + mpeg2video + forward gaps + non-monotonic DTS, whole-file and
+#   demux-only (~1 min on a 12 GB capture). The 1.8.0–1.10.0 refusal claimed
+#   "no lossless MOV of this class survives verify" — a PREDICTION, while the
+#   plugin already owns the measured judges: the mux-confession HARD STOP
+#   (invented timing — measured, KEPT) and verify.sh's post-build timeline
+#   gates. Bench 2026-08-14, constructed rot fixture: the demuxer's own
+#   discontinuity fixup muxed a monotonic timeline (no confession fired) and
+#   verify caught the REAL defect (dual-track access misalignment -> REVIEW)
+#   — an artifact plus evidence instead of exit 11. The warning keeps the
+#   refusal's three routes; nothing gets blessed that verify won't sign.
+#   Forward gaps ALONE never warned and still don't — that class rebuilds
+#   (the 2008 recovery); and an H.264 TS with gaps still rides the existing
+#   PAFF/resync machinery.
 backhaul_routes () {
   echo "   Honest routes out (the source stays TS/MKV — health-checked, never doomed):"
   echo "     keep     the source as-is — it is already the archival master; prove its"
@@ -121,23 +259,24 @@ backhaul_routes () {
   echo "              scripts/ts-health.sh OUT.mkv to prove the copy's timeline intact"
   echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the ONLY"
   echo "              sanctioned path to a true QuickTime-native deliverable"
-  echo "   Override (run the build + verify anyway): --force-backhaul"
+  echo "   Skip this scan+warning (the build runs either way): --force-backhaul"
 }
-if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "${PR_PIX_FMT:-}" = yuv422p ]; then
-  case "$PR_VCODEC" in mpeg2video|h264)
-    echo ">> REFUSED: QT-UNDECODABLE PROFILE — $PR_VCODEC 4:2:2 (pix_fmt yuv422p)."
-    echo "   AVFoundation/QuickTime has no 4:2:2 decode path for this codec: a"
-    echo "   bit-identical, verify-green MOV of this source will not play in QuickTime"
-    echo "   (MPEG-2 4:2:2 distorts; H.264 High 4:2:2 stalls the decoder — both verified"
-    echo "   against 4:2:0 controls). FFmpeg players — IINA/VLC/mpv — decode it fine."
-    echo "   No lossless remux can keep the QuickTime-ready promise here."
-    backhaul_routes
-    echo "   (--force-backhaul runs the normal build + verify: when the timeline is"
-    echo "    clean the result is a legitimate verified lossless NLE/archival master —"
-    echo "    it just will not play in QuickTime.)"
-    echo "MOV_REFUSED profile=qt-undecodable vcodec=$PR_VCODEC pix_fmt=${PR_PIX_FMT:-?}"   # machine-readable
-    exit 11
-    ;;
+# WO 4.1: the pix_fmt arm announces and defers to the post-build proof (the
+# shared advisory + predicate live in lib-paff.sh so no entry point diverges)
+. "$SELF_DIR/lib-paff.sh"   # qt_contribution_profile, contribution_advisory, playability_verdict, disc_scan
+PLAYCHECK_DUE=0; PLAYCHECK_WHY="contribution profile"
+if qt_contribution_profile "${PR_PIX_FMT:-}"; then
+  PLAYCHECK_DUE=1
+  contribution_advisory "$PR_VCODEC" "${PR_PIX_FMT:-}"
+fi
+# WO 5.1: the same empirical machinery (never a fork of it) judges the classes
+# probe.sh could not vouch for — a non-4:2:0 MJPEG variant (C63's measured
+# drop) and any codec outside the measured matrix. Ordinary measured-native
+# builds still pay nothing.
+if [ "$PLAYCHECK_DUE" -eq 0 ]; then
+  case "${PR_VNATIVE:-na}" in
+    variant) PLAYCHECK_DUE=1; PLAYCHECK_WHY="measured-drop MJPEG variant";;
+    no)      PLAYCHECK_DUE=1; PLAYCHECK_WHY="unmeasured codec $PR_VCODEC";;
   esac
 fi
 if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "$PR_VCODEC" = mpeg2video ]; then
@@ -146,31 +285,27 @@ if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "$PR_VCODEC" = mpeg2video ]; then
     . "$SELF_DIR/lib-paff.sh"
     eval "$(disc_scan "$IN")"
     if [ "${DISC_COUNT:-0}" -ge 1 ] && [ $(( ${DISC_BACK:-0} + ${DISC_DUP:-0} )) -ge 1 ]; then
-      echo ">> REFUSED: BACKHAUL TIMELINE ROT — ${DISC_COUNT} forward timestamp gap(s)"
+      # WO 4.2: warn, don't refuse — the demoted gate keeps the refusal's full
+      # voice (evidence + the same three routes) but the verdict now belongs to
+      # measurement: the mux-confession hard stop + verify on the actual build.
+      echo "** WARN: BACKHAUL TIMELINE ROT — ${DISC_COUNT} forward timestamp gap(s)"
       echo "   (~${DISC_MISSING}s dropped, first @ ${DISC_FIRST}s) PLUS non-monotonic DTS"
-      echo "   (whole-file: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0}). On this class a plain"
-      echo "   copy makes the MOV muxer invent timing (mux-confession hard stop) and a"
-      echo "   resync build leaves near-zero sample durations that verify gate (d)"
-      echo "   correctly fails — knowable now, before a multi-gigabyte build."
+      echo "   (whole-file: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0}). Building anyway — the"
+      echo "   verdict belongs to measurement, not prediction (WO 4.2): the mux-confession"
+      echo "   gate hard-stops if the muxer invents timing, and verify.sh judges the"
+      echo "   finished timeline with evidence. Expect REVIEW/FAIL on this class."
       backhaul_routes
-      echo "MOV_REFUSED profile=timeline-rot vcodec=$PR_VCODEC disc=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}"   # machine-readable
-      exit 11
+      echo "MOV_ROT_WARN profile=timeline-rot vcodec=$PR_VCODEC disc=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}"   # machine-readable (additive, WO 4.2)
+    else
+      echo "   backhaul scan clear (gaps=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}) -> continuing."
     fi
-    echo "   backhaul scan clear (gaps=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}) -> continuing."
     ;;
   esac
 fi
-# a FORCED build of the QT-undecodable profile must never be reported as
-# "QuickTime-ready" — the verify gates prove losslessness, not decodability
+# WO 4.1: "QuickTime-ready" on a contribution profile is now EARNED, not
+# assumed — the DONE line below is only reachable when the post-build
+# playability check returned ok (fail/skip demote to 10 REVIEW first)
 READY_TAG="QuickTime-ready"
-if [ "$FORCE_BACKHAUL" -eq 1 ] && [ "${PR_PIX_FMT:-}" = yuv422p ]; then
-  case "$PR_VCODEC" in mpeg2video|h264)
-    echo "   NOTE: --force-backhaul on a QT-undecodable profile ($PR_VCODEC 4:2:2) — building"
-    echo "   a lossless MASTER; QuickTime will NOT play it (IINA/VLC/mpv and NLEs will)."
-    READY_TAG="NOT QuickTime-playable ($PR_VCODEC 4:2:2) — lossless master"
-    ;;
-  esac
-fi
 
 # gate verdict propagates: every child that writes a .mov (auto/remux/rebuild/
 # pairfill) carries its own backhaul_gate, so a cleared or force-approved front
@@ -179,20 +314,79 @@ fi
 [ "$FORCE_BACKHAUL" -eq 1 ] && export RTM_FORCE_BACKHAUL=1
 export RTM_BACKHAUL_GATED=1
 
+# --- mid-GOP start pre-flight (WO 2.2): PERFORM the trim ts-health prescribes ---
+# A capture that joins the broadcast mid-GOP carries pre-roll video before its
+# first IDR that no player can decode (parameter sets never captured) — and the
+# untrimmed build is not even a faithful copy of it: ffmpeg streamcopy silently
+# DROPS initial non-keyframe video packets (-copyinkf default) while the audio
+# pre-roll all lands, so verify's duration-parity gate flags a phantom desync
+# (measured on late-sps: 102 video pkts vanished, REVIEW at 4.25 s mismatch).
+# trim-to-idr.sh cuts BOTH tracks at the first IDR (gop-probe-proven boundary,
+# 0-pre-keyframe gated, kept region byte-identical); the build then consumes the
+# trimmed intermediate and verify runs against IT — the honest source of what
+# was built. Announced, never silent; --no-idr-trim keeps the old behavior
+# (also announced — no silent mapping decisions, house rule).
+. "$SELF_DIR/lib-probe.sh"   # ffp: this scan opens the input directly
+TRIMTMP=""; IDRTRIM=none
+# windowed flag scan: pre-keyframe count within the first 600 video packets; a
+# window with packets but NO keyframe is still the mid-GOP class (trim-to-idr
+# scans deeper). awk consumes to EOF (early exit would SIGPIPE ffprobe under
+# pipefail) and 0-guards its counters (the remux.sh:69 POSIX-awk trap).
+PREKEY=$(ffp -v error -select_streams v:0 -read_intervals '%+#600' \
+           -show_entries packet=flags -of csv=p=0 "$IN" 2>/dev/null | \
+         awk '{ if(!f){ if(index($0,"K")) f=1; else n++ } } END{ printf "%d", n+0 }')
+if [ "${PREKEY:-0}" -gt 0 ]; then
+  if [ "$NOIDRTRIM" -eq 1 ]; then
+    echo "** mid-GOP start: $PREKEY pre-keyframe packet(s) KEPT (--no-idr-trim)."
+    echo "   Expect the mux to drop the video pre-roll silently while the audio"
+    echo "   pre-roll survives — A/V duration parity will read as a desync REVIEW."
+    IDRTRIM=skipped
+  else
+    echo "** mid-GOP start: trimming pre-roll to first IDR ($PREKEY pre-keyframe packets) — --no-idr-trim to skip"
+    b="$(basename "$IN")"; ext="${b##*.}"; [ "$ext" = "$b" ] && ext=ts
+    TRIMTMP="${OUT%.*}.idrtrim.tmp.$ext"
+    set +e; bash "$SELF_DIR/trim-to-idr.sh" "$IN" "$TRIMTMP" | sed 's/^/   /'; trc=${PIPESTATUS[0]}; set -e
+    if [ "$trc" -eq 0 ] && [ -s "$TRIMTMP" ]; then
+      IN="$TRIMTMP"; IDRTRIM=$PREKEY
+      # the pre-roll skewed every windowed probe fact (untimestamped fractions,
+      # PAFF ratios measured across undecodable garbage) -> re-probe the input
+      # the build will actually consume
+      eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
+      echo "   building from the trimmed intermediate: $TRIMTMP"
+      echo "   (deleted after a verified DONE; kept for the closer look otherwise)"
+    else
+      TRIMTMP=""; IDRTRIM=failed
+      echo "** WARN: IDR trim failed (rc=$trc) — proceeding with the UNTRIMMED source"
+      echo "   (old behavior: the mux drops the video pre-roll silently; expect the"
+      echo "   A/V parity REVIEW). Standalone re-run: scripts/trim-to-idr.sh \"$IN\" TRIMMED.$ext"
+    fi
+  fi
+fi
+# temp custody: DONE deletes the intermediate; REVIEW/FAIL keeps it — verify and
+# any diagnosis compare against the trimmed input, not the untrimmed capture.
+trim_cleanup () {  # $1 = final rc
+  [ -n "$TRIMTMP" ] || return 0
+  if [ "$1" -eq 0 ]; then rm -f "$TRIMTMP"
+  else echo "   (trimmed intermediate kept at $TRIMTMP — verify/diagnose against IT, not the untrimmed capture)"
+  fi
+}
+
 # --- field-coded: hand the timeline repair to the tested ladder driver ---
 if [ "$PF_PAFF" = yes ]; then
   echo "   field-coded (PAFF) -> timeline repair via auto.sh (routed by timestamp profile:"
   echo "   pair-fill keeps real PTS + original audio; the rebuild decodes audio to PCM)"
   if [ "${PF_HALF_TS:-no}" = no ] && [ "${PF_REORDER:-no}" = yes ]; then
-    # full-TS reordered PAFF goes through auto's COPY rung, whose audio policy is
-    # single-track (auto is the ladder driver, not the deliverable builder) — so
-    # the /mov dual-track promise does not apply on this one path. Say so (5e).
-    echo "   note: this profile rides the copy rung — audio lands single-track (auto.sh"
-    echo "   policy). For the dual-track deliverable, run scripts/dual-track.sh on the"
-    echo "   source after this verifies OK (same copy mux + PCM access track)."
+    # full-TS reordered PAFF goes through auto's COPY rung — remux.sh under it,
+    # so every audio track survives (the WO 3.3 `all` default), but auto is the
+    # ladder driver, not the deliverable builder: no dual-track pair on this
+    # one path. Say so (5e).
+    echo "   note: this profile rides the copy rung — every audio track survives, but"
+    echo "   the dual-track pair is not built here (auto.sh is the ladder driver). For"
+    echo "   the dual-track deliverable, run scripts/dual-track.sh on the source after"
+    echo "   this verifies OK (same copy mux + PCM access track)."
   fi
   [ "$ALWAYS" -eq 1 ] && echo "   note: --always-dual does not apply on the PAFF path — audio policy comes from the repair rung (pairfill dual-tracks non-native codecs by itself)."
-  [ "$AKEEP" != layouts ] && echo "   note: --audio-keep does not apply on the PAFF path — audio policy comes from the repair rung (a:0; pairfill warns on multi-track sources)."
+  [ "$AKEEP" != all ] && echo "   note: --audio-keep does not apply on the PAFF path — audio policy comes from the rung (repair rungs build a:0 and pairfill warns on multi-track sources; the copy rung keeps every track)."
   set +e; bash "$SELF_DIR/auto.sh" "$IN" "$OUT" $FULL; rc=$?; set -e
   if [ "$rc" -eq 0 ] && [ "${#MDARGS[@]}" -gt 0 ]; then
     apply_metadata "$OUT" || rc=$?
@@ -205,11 +399,18 @@ if [ "$PF_PAFF" = yes ]; then
       case "$o" in *">> OK"*) : ;; *">> REVIEW"*) rc=10;; *) rc=1;; esac
     fi
   fi
+  trim_cleanup "$rc"
   exit "$rc"
 fi
 
-# --- classify audio from the FULL track set (QTFF audit 5-2c; gate ③ approved
-#     2026-07-26: layouts is the default keep policy) ---
+# --- classify audio from the FULL track set (QTFF audit 5-2c; WO 3.3
+#     2026-08-14: the default keep policy is `all` — the old layouts default
+#     lost a same-codec same-rank tie purely on track order (multilang.ts
+#     dropped its Spanish track; reversed order dropped English), while the
+#     QuickTime hazard it appeared to guard is already handled: movenc enables
+#     exactly one audio track (tkhd 0x0003/0x0002/0x0002 parsed on a 3-audio
+#     build, bench 2026-08-13 — precisely TN3177). Dropping tracks buys nothing
+#     for playability; `layouts` stays as the opt-in curation flag) ---
 # The selection logic lives in remux.sh; mov.sh consumes its plan via
 # --print-plan (RMX_PLAN + RMX_T machine rows) instead of duplicating it. The
 # old classifier read a:0 only — the FLAC-5.1 + MP2-stereo source classified
@@ -231,16 +432,13 @@ KINFO=$(trkinfo 1); DINFO=$(trkinfo 0)
 NKEPT=0; [ -n "$KEPT" ] && NKEPT=$(printf '%s' "$KEPT" | awk -F, '{print NF}')
 
 # MODE: copy (native) | dual (preserve original as track 2) | pcm (can't
-# preserve in MOV) | multi (several layouts survive) | none
-native_c () { case "$1" in aac|alac|mp3|pcm_*|eac3) return 0;; *) return 1;; esac; }
+# preserve in MOV) | multi (several layouts survive) | none. The codec decision
+# tables live in native_c/mode_for at the top of this file (WO 3.1:
+# pcm_bluray/pcm_dvd route to pcm there, never to a dead-on-arrival copy).
 if [ "$NKEPT" -eq 0 ]; then MODE=none
 elif [ "$NKEPT" -eq 1 ] && [ "$KEPT" = 0 ]; then
   c0=${KINFO#0:}; c0=${c0%%:*}
-  case "$c0" in
-    aac|alac|mp3|pcm_*|eac3) MODE=copy ;;                 # plays natively in QuickTime (eac3 = DD+)
-    ac3|dts|dca|mp2|mp1)     MODE=dual ;;                 # not native, but MOV-copyable -> keep original via dual-track
-    *)                       MODE=pcm  ;;                 # flac/opus/truehd/...: original not MOV-copyable
-  esac
+  MODE=$(mode_for "$c0")
   [ "$ALWAYS" -eq 1 ] && [ "$MODE" = copy ] && MODE=dual  # --always-dual upgrades native -> dual
 else MODE=multi; fi
 
@@ -256,19 +454,26 @@ case "$MODE" in
     echo "   (to keep the original bitstream, deliver as MP4/MKV instead; see references/ingest-compatibility.md)"
     bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio pcm --audio-keep "$AKEEP" ;;
   multi)
-    echo "-- $NKEPT audio tracks survive the '$AKEEP' policy (distinct deliverables) --"
+    echo "-- $NKEPT audio tracks survive the '$AKEEP' policy --"
     nonnative=0
     for e in $(printf '%s' "$KINFO" | tr ',' ' '); do
       c=${e#*:}; c=${c%%:*}; native_c "$c" || nonnative=1
     done
     if [ "$nonnative" -eq 1 ]; then
       echo "   note: in the multi-track shape, non-native tracks land as PCM ACCESS"
-      echo "   audio; their original bitstreams are NOT preserved in this file (the"
-      echo "   dual-track original-preserving pair is a single-layout deliverable —"
-      echo "   run scripts/dual-track.sh on the source for the layout you need, or"
-      echo "   keep the source container for provenance)."
+      echo "   audio while QT-native tracks copy bit-exact (remux.sh --audio auto"
+      echo "   decides per kept track, WO 3.2); non-native original bitstreams are"
+      echo "   NOT preserved in this file (the dual-track original-preserving pair"
+      echo "   is a single-layout deliverable — run scripts/dual-track.sh on the"
+      echo "   source for the layout you need, or keep the source container for"
+      echo "   provenance)."
     fi
     [ "$ALWAYS" -eq 1 ] && echo "   note: --always-dual applies to the single-track dual route, not the multi-track shape."
+    # no --audio flag ON PURPOSE (WO 3.2): remux.sh's per-track auto IS the
+    # promise above — QT-native tracks copy bit-exact, everything else lands
+    # as PCM access. Pre-3.2 this call copied AC-3 through while the banner
+    # promised PCM access (entry 1); a blanket --audio pcm would instead
+    # decode already-native AAC for nothing.
     bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio-keep "$AKEEP" ;;
   none)
     echo "-- no audio (or none kept) -> pure copy --"
@@ -278,7 +483,7 @@ case "$MODE" in
     bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio copy --audio-keep "$AKEEP" ;;
 esac
 
-apply_metadata "$OUT" || exit $?
+apply_metadata "$OUT" || { rc=$?; trim_cleanup "$rc"; exit "$rc"; }
 
 # --signaling always: it is demux-only (a handful of ffprobe reads), untagged
 # fields compare unknown==unknown cleanly, and it now also guards SAR/pasp —
@@ -292,10 +497,39 @@ o=$(bash "$SELF_DIR/verify.sh" "$IN" "$OUT" $FULL $AUDV $SIG 2>&1); rc=$?
 set -e
 printf '%s\n' "$o" | sed 's/^/   /'
 
+case "$o" in *">> OK"*) rc=0;; *">> REVIEW"*) rc=10;; *) rc=1;; esac
+
+# --- post-build playability (WO 4.1): the demoted 4:2:2 gate's empirical half.
+# Only when a pre-build fact made it due — the contribution profile (yuv422p*),
+# or since WO 5.1 a class outside the measured-native matrix (PR_VNATIVE
+# variant/no) — and only on a build worth blessing (never on FAIL — nothing
+# verified to test). FAIL verdict or an unverifiable platform -> 10 REVIEW,
+# never a silent OK; the verdict self-dates its macOS via playable-check.sh
+# (Ground Rule 6).
+if [ "$PLAYCHECK_DUE" -eq 1 ] && [ "$rc" -ne 1 ] && [ -f "$OUT" ]; then
+  echo "-- playability ($PLAYCHECK_WHY: prove, don't guess) --"
+  playability_verdict "$OUT"
+  case "$PLAY_VERDICT" in
+    fail)
+      rc=10
+      echo "   -> AVFoundation cannot decode THIS build on THIS macOS: REVIEW. A"
+      echo "      QuickTime-native deliverable needs Rung 4 (scripts/rung4.sh, operator-"
+      echo "      attested re-encode — recipes in references/delivery-encode.md). The file"
+      echo "      itself is a verified lossless NLE/archival master (IINA/VLC/mpv decode it)."
+      ;;
+    skip)
+      rc=10
+      echo "   -> playability unverified on this platform: REVIEW — this class's output"
+      echo "      ($PLAYCHECK_WHY) must be proven on the target Mac"
+      echo "      (scripts/playable-check.sh OUT)."
+      ;;
+  esac
+fi
+
 echo
-echo "MOV_SUMMARY mode=$MODE out=$OUT audio_kept=${KINFO:-none} audio_dropped=${DINFO:-none}"   # machine-readable
-case "$o" in
-  *">> OK"*)     echo ">> DONE: $OUT — $READY_TAG, verified lossless${AUDV:+ + dual-track aligned}."; exit 0 ;;
-  *">> REVIEW"*) echo ">> REVIEW: $OUT written; verify wants a closer look (above). Source untouched."; exit 10 ;;
-  *)             echo ">> FAIL: see verify output above. Source untouched; $OUT is unverified."; exit 1 ;;
+echo "MOV_SUMMARY mode=$MODE out=$OUT audio_kept=${KINFO:-none} audio_dropped=${DINFO:-none} idr_trim=$IDRTRIM"   # machine-readable
+case "$rc" in
+  0)  trim_cleanup 0;  echo ">> DONE: $OUT — $READY_TAG, verified lossless${AUDV:+ + dual-track aligned}."; exit 0 ;;
+  10) trim_cleanup 10; echo ">> REVIEW: $OUT written; verify wants a closer look (above). Source untouched."; exit 10 ;;
+  *)  trim_cleanup 1;  echo ">> FAIL: see verify output above. Source untouched; $OUT is unverified."; exit 1 ;;
 esac

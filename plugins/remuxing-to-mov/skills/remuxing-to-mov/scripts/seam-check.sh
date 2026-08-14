@@ -22,6 +22,8 @@
 # A real player/eyeball is still the final arbiter (a glitch can be valid bitstream).
 # Exit: 0 = clean; 1 = decode errors or a flash detected at a seam.
 set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+. "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 JOINED="${1:?usage: seam-check.sh JOINED.mov SEAM[,SEAM...] [--png DIR] [--win S] [--thresh F]}"; shift
 SEAMS=""; PNGDIR=""; WIN=1.0; THRESH=0.40; DELTA=5
 while [ $# -gt 0 ]; do case "$1" in
@@ -33,7 +35,10 @@ while [ $# -gt 0 ]; do case "$1" in
 esac; done
 [ -f "$JOINED" ] || { echo "no such file: $JOINED" >&2; exit 2; }
 [ -n "${SEAMS// /}" ] || { echo "need at least one SEAM time" >&2; exit 2; }
+. "$SELF_DIR/lib-probe.sh"  # FF_INPUT_OPTS: raised probe window on the JOINED input
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
+# psnr's PNG inputs deliberately skip FF_INPUT_OPTS: a PNG's parameters live in
+# its header at byte 0 — probing cannot miss, so the window is irrelevant there.
 psnr () { # average PSNR(dB) between two PNG frames; "inf" (identical) -> 99
   local v; v=$( { ffmpeg -nostdin -hide_banner -i "$1" -i "$2" -lavfi psnr -f null - 2>&1 \
         | sed -n 's/.*average:\([0-9a-z.]*\).*/\1/p' | head -1; } || true)
@@ -49,13 +54,28 @@ for S in $SEAMS; do
   echo "-- seam @ ${S}s  (decoding ${start}s +${span}s continuously) --"
 
   # (b) decode-scan the window for broken references / timestamp errors
-  errs=$(ffmpeg -nostdin -v error -ss "$start" -i "$JOINED" -t "$span" -map 0:v:0 -f null - 2>&1 | grep -c . || true)
+  errs=$(ffmpeg -nostdin -v error -ss "$start" "${FF_INPUT_OPTS[@]}" -i "$JOINED" -t "$span" -map 0:v:0 -f null - 2>&1 | grep -c . || true)
   echo "   decode errors in window: $errs (want 0)"
   [ "${errs:-0}" -gt 0 ] && bad=1
 
-  # one pass: extract straddling frames (eyeball test) + per-frame scene scores
-  ffmpeg -nostdin -v error -ss "$start" -i "$JOINED" -t "$span" \
-    -vf "select='gte(scene,0)',metadata=print:file=$WORK/sc.txt" -vsync passthrough "$dir/%04d.png" 2>/dev/null || true
+  # one pass: extract straddling frames (eyeball test) + per-frame scene scores.
+  # -fps_mode passthrough, not -vsync: ffmpeg 9 removed the long-deprecated
+  # -vsync (bench moved 8.1.2 -> 9.0.1, 2026-08-14, and broke exactly here);
+  # -fps_mode is the per-stream replacement and exists since ffmpeg 5.1, so
+  # this raises no floor beyond what the suite already requires.
+  scrc=0
+  ffmpeg -nostdin -v error -ss "$start" "${FF_INPUT_OPTS[@]}" -i "$JOINED" -t "$span" \
+    -vf "select='gte(scene,0)',metadata=print:file=$WORK/sc.txt" -fps_mode passthrough "$dir/%04d.png" 2>"$WORK/sc.err" || scrc=$?
+  # WHY this guard (2026-08-14): when the scan above dies (the -vsync removal
+  # did exactly that), sc.txt never appears and the read below EOFs under
+  # set -e — an opaque rc=1 with no verdict and no diagnostic. Every failure
+  # announces itself (house rule: no silent decisions); exit 1 is the
+  # contract's FAIL, made deliberate instead of accidental.
+  if [ ! -s "$WORK/sc.txt" ]; then
+    cat "$WORK/sc.err" >&2
+    echo ">> seam-check: scene scan failed (ffmpeg exited $scrc) — cannot analyze; see stderr above" >&2
+    exit 1
+  fi
   read -r pi pts ps < <(awk '/pts_time:/{for(i=1;i<=NF;i++) if($i ~ /^pts_time:/){split($i,a,":"); t=a[2]}}
                               /scene_score=/{n++; split($0,b,"="); s=b[2]+0; if(s>ms){ms=s;mi=n;mt=t}}
                               END{print mi+0, mt+0, ms+0}' "$WORK/sc.txt" 2>/dev/null)
