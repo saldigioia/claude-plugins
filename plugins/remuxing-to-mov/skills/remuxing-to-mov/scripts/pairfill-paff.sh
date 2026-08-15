@@ -65,6 +65,7 @@ esac; done
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"
+. "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
 
 # backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
 # defers to the post-build proof, rot WARNs and builds) — this script writes a
@@ -160,20 +161,26 @@ acodec=$(ffp -v error -select_streams a:0 -show_entries stream=codec_name -of de
 alang=$(ffp -v error -select_streams a:0 -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 case "$alang" in ""|und|unknown) alang=eng;; esac
 DRC=(); case "$acodec" in ac3|eac3) DRC=(-drc_scale 0);; esac
-AARGS=()
+# PF_CENSUS_* : the audio plan, recorded by the same case that builds the mux
+# args, so the post-mux census (D5) asserts exactly what this run intended.
+pf_vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+AARGS=(); PF_CENSUS_N=1; PF_CENSUS_C="${pf_vcodec:-?}"
 case "$acodec" in
   "") echo "   audio: none";;
   aac|alac|mp3|pcm_*|eac3)
     echo "   audio: $acodec is QuickTime-native -> single copied track"
+    PF_CENSUS_N=2; PF_CENSUS_C="${pf_vcodec:-?},$acodec"
     AARGS=(-map 0:a:0 -c:a copy -metadata:s:a:0 language="$alang");;
   ac3|dts|dca|mp2|mp1)
     echo "   audio: $acodec not QuickTime-native -> dual-track (PCM access + original bit-exact)"
+    PF_CENSUS_N=3; PF_CENSUS_C="${pf_vcodec:-?},pcm_s24le,$acodec"
     AARGS=(-map 0:a:0 -map 0:a:0 -c:a:0 pcm_s24le -c:a:1 copy
            -disposition:a:0 default -disposition:a:1 0
            -metadata:s:a:0 title="PCM 24-bit (access)" -metadata:s:a:0 language="$alang"
            -metadata:s:a:1 title="$(echo "$acodec" | tr a-z A-Z) (original)" -metadata:s:a:1 language="$alang");;
   *)
     echo "   audio: $acodec not MOV-copyable -> single PCM access track (original kept only in the source)"
+    PF_CENSUS_N=2; PF_CENSUS_C="${pf_vcodec:-?},pcm_s24le"
     AARGS=(-map 0:a:0 -c:a pcm_s24le -metadata:s:a:0 language="$alang");;
 esac
 
@@ -183,7 +190,7 @@ MOVFLAGS="+faststart"; { [ -n "$cprim" ] && [ "$cprim" != unknown ]; } && MOVFLA
 # The repair itself. lt(x,-8e18) is the unset test (INT64_MIN, not NaN); the DTS
 # ramp anchors to the FIRST REAL PTS (domain-relative) and alternates A/B ticks.
 SETTS="setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+${A}\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS-${PREROLL}\,PREV_OUTDTS+${A}+${AB}*mod(N\,2))"
-PART="${OUT}.part"; MUXLOG="$(mktemp)"
+PART="$(rtm_part "$OUT")"; MUXLOG="$(mktemp)"   # extension-keeping (D6)
 echo "-- muxing (video bits copied untouched; timeline pair-filled) --"
 pf_mux () {  # pf_mux INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
   ffmpeg -nostdin -y -hide_banner -nostats ${DRC[@]+"${DRC[@]}"} "$@" -i "$IN" \
@@ -263,6 +270,12 @@ if [ "$gates_ok" -ne 1 ]; then
   exit 1
 fi
 rm -f "$MUXLOG"
+# POST-MUX CENSUS (D5, 1.13): the timeline gates above judge v:0 only — an audio
+# track the muxer quietly dropped would sail past every one of them.
+if ! mux_census "$PART" "$PF_CENSUS_N" "$PF_CENSUS_C" pairfill-paff; then
+  echo "   NOT blessing the output. Kept: $PART"
+  exit 1
+fi
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
 # bash 3.2 can't parse $(case ...) inside a double-quoted string — precompute

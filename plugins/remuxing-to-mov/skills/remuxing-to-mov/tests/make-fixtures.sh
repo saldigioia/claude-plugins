@@ -60,7 +60,7 @@ command -v ffmpeg  >/dev/null 2>&1 || { echo "make-fixtures: ffmpeg not found"  
 command -v ffprobe >/dev/null 2>&1 || { echo "make-fixtures: ffprobe not found" >&2; exit 2; }
 mkdir -p "$FIX"
 
-ALL="multilang.ts mixed.ts dupe_lang.ts late-sps.ts gap.ts corrupt.ts rot.ts m2v422.mov m2v422.ts h264_422.ts h264_422_10.ts hevc_422_10.mov m2v420.ts aac.ts mp4v.mov mjpeg.mov dv.mov prores.mov pcm_bluray.m2ts vp9.webm"
+ALL="multilang.ts mixed.ts dupe_lang.ts late-sps.ts gap.ts corrupt.ts rot.ts m2v422.mov m2v422i.mov m2v422.ts h264_422.ts h264_422_10.ts hevc_422_10.mov m2v420.ts aac.ts mp4v.mov mjpeg.mov dv.mov prores.mov pcm_bluray.m2ts vp9.webm"
 
 FFE () { ffmpeg -nostdin -y -v error "$@"; }
 fail () { echo "FIXTURE FAILED: $1 — $2" >&2; exit 1; }
@@ -389,6 +389,26 @@ fx_m2v422_mov () {
   mv "$FIX/m2v422.mov.part" "$FIX/m2v422.mov"
   built m2v422.mov "mpeg2video yuv422p in MOV (QT-undecodable pixel format)"
 }
+fx_m2v422i_mov () {
+  # D1 (1.13): the INTERLACED sibling of m2v422.mov. The fidelity gate's 0.90
+  # default is progressive-tuned and false-FAILs healthy interlaced material
+  # (measured 2026-08-15: this clip scores All 0.8669 — Y 0.8892 / U 0.8527 /
+  # V 0.8588 — through a perfectly healthy AVFoundation render), which is the
+  # whole reason the threshold became scan-keyed. Without this fixture the
+  # false-negative half of D1 is unpinnable.
+  # `interlace` builds real field-alternating content; +ilme+ildct makes the
+  # encoder code it as fields; setfield stamps the flag the gate keys off.
+  # (`-top 1` is NOT an encoding option on ffmpeg 9 — measured; setfield is.)
+  local out="$FIX/m2v422i.mov.part" fo
+  FFE -f lavfi -i "testsrc2=size=640x480:rate=30000/1001:duration=6" \
+      -vf "interlace=scan=tff:lowpass=0,setfield=tff" \
+      -c:v mpeg2video -pix_fmt yuv422p -b:v 8M -flags +ilme+ildct -f mov "$out"
+  check_v "$out" m2v422i.mov mpeg2video yuv422p
+  fo=$(p1 "$out" v:0 stream=field_order)
+  case "$fo" in tt|bb|tb|bt) ;; *) fail m2v422i.mov "field_order is '$fo', want an interlaced value (tt/bb/tb/bt)";; esac
+  mv "$out" "$FIX/m2v422i.mov"
+  built m2v422i.mov "mpeg2video yuv422p INTERLACED (field_order=$fo) in MOV — the scan-keyed-threshold fixture"
+}
 fx_m2v422_ts () {
   build_vts "$FIX/m2v422.ts.part" m2v422.ts mpeg2video yuv422p -b:v 5M
   mv "$FIX/m2v422.ts.part" "$FIX/m2v422.ts"
@@ -521,6 +541,7 @@ run_one () {
     corrupt.ts)      fx_corrupt ;;
     rot.ts)          fx_rot ;;
     m2v422.mov)      fx_m2v422_mov ;;
+    m2v422i.mov)     fx_m2v422i_mov ;;
     m2v422.ts)       fx_m2v422_ts ;;
     h264_422.ts)     fx_h264_422 ;;
     h264_422_10.ts)  fx_h264_422_10 ;;

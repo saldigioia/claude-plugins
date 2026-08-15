@@ -1,4 +1,11 @@
 .DS_Store
 *.part
+# 1.13 (D6): atomic part files now KEEP the real extension ("x.part.mov", never
+# "x.mov.part") so a kept artifact stays openable by the extension-keyed macOS
+# tools — which means the bare `*.part` pattern above no longer matches them.
+*.part.*
+*.premeta.*
+*.autobest.*
 *.mov
+*.mp4
 !examples/**/*.mov

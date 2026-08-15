@@ -51,7 +51,18 @@ video, Dolby E audio — or a child script's own refusal).
   duration histogram), a scrub gate, an A/V duration-parity (sync) gate, and a
   presentation-ORDER check on `--full`; playable ≠ valid ≠ lossless ≠ in-sync ≠
   in-order, so all are checked.
-- **Safety rails** — atomic output (`.part` → `mv`), refusal to overwrite the
+- **Lossless container swap before any re-encode** — some MPEG-2 4:2:2 masters
+  verify lossless, open in QuickTime, and render as garbage; no MOV sample-entry
+  retag fixes them (ffmpeg writes one generic body for every MPEG-2 fourcc).
+  `mp4-swap.sh` rebuilds the same bitstream as `.mp4` (`mp4v`+`esds`), verifies
+  it, and re-runs the fidelity proof — measured to render correctly where the
+  `.mov` of the identical bits does not. It sits between the retag and Rung 4,
+  so a bad render never routes straight to a re-encode.
+- **Post-mux census** — every builder reconciles the finished file against the
+  plan it printed (stream count + per-stream codec identity) before blessing it;
+  ffmpeg has been measured dropping a mapped stream with only a warning line.
+- **Safety rails** — atomic output (`x.part.mov` → `mv`, extension kept so the
+  kept artifact stays diagnosable), refusal to overwrite the
   source in place, intermediates never auto-deleted, `-nostdin` everywhere.
 - **Attested re-encodes + recorded waivers** — `rung4.sh` is the only
   sanctioned re-encode path: it refuses without the operator's verbatim
@@ -67,7 +78,8 @@ skills/remuxing-to-mov/
   SKILL.md                 workflow, escalation ladder, instant-answer card
   scripts/                 doctor, probe, ts-health, diagnose, mov + auto (one-shot
                            drivers), remux, trim-to-idr, pairfill-paff, rebuild-paff,
-                           resync, dual-track, metadata, verify, batch, gop-probe,
+                           resync, dual-track, mp4-swap (container-swap rung),
+                           metadata, verify, batch, gop-probe,
                            seam-check, playable-check, qt-groups (opt-in post-pass),
                            rung4 (attested re-encode), waiver
   references/              codec/container tables, timeline repair, color/HDR,

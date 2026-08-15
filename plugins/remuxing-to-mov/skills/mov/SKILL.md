@@ -94,11 +94,20 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
   renders ≠ renders correctly, measured 2026-08-15 macOS 26.6.1) — and the
   machine line `MOV_PLAYABILITY os=… verdict=ok|fail|skip fidelity=ok|fail|skip`
   is emitted. Verdict `fail` →
-  exit 10 REVIEW naming the Rung-4 route (the file is still a verified
-  lossless master); no macOS/qlmanage → exit 10 REVIEW, "playability
-  unverified on this platform". (The old categorical refusal was falsified on
-  macOS 26.6.1, 2026-08-13 — decode support drifts by macOS version, so the
-  answer is per-file and empirical.)
+  exit 10 REVIEW routed to the **lossless container swap first** (1.13: the
+  same bitstream in an `.mp4`, sample entry `mp4v`+`esds` — measured
+  2026-08-15 to render correctly where the `.mov` of the same bits does not,
+  SSIM 0.9175+ on the failing timestamps). Relay that route
+  (`scripts/mp4-swap.sh SOURCE`, or re-run `mov.sh --mp4-swap` to have it
+  built and proven automatically) — **Rung 4 is the last named route now, not
+  the first**; the `.mov` itself is still a verified lossless master. No
+  macOS/qlmanage → exit 10 REVIEW, "playability unverified on this platform".
+  (The old categorical refusal was falsified on macOS 26.6.1, 2026-08-13 —
+  decode support drifts by macOS version, so the answer is per-file and
+  empirical.) The fidelity threshold is scan-keyed since 1.13 (0.90
+  progressive / 0.86 interlaced, `RTM_FIDELITY_SSIM_INTERLACED`): 0.90 was
+  progressive-tuned and false-FAILed healthy interlaced material, and the
+  per-plane `y=`/`u=`/`v=` split now names a chroma-only collapse.
 - **Unroutable codecs are refused pre-flight with routes (1.11, WO 5.2)** —
   VC-1, VP9 or AV1 video (no MOV carriage exists — VP9 bench-verified
   un-muxable) and Dolby E audio (broadcast mezzanine; PCM-treating it yields

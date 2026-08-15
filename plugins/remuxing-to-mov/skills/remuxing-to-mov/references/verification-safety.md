@@ -147,15 +147,33 @@ A correct mux can still fail to play; don't chase a phantom "bad mux".
 |---------|-----------------|----------------------------|
 | HEVC tagged `hev1` | Yes | No — needs `-tag:v hvc1` |
 | MPEG-2 4:2:0 | Yes | Yes |
-| MPEG-2 4:2:2 (422@HL) | Yes | Historically no; per-OS/per-file empirical since 1.11 (demoted gate — prove the finished build with `playable-check.sh`, `--fidelity` since 1.12), and tag-dependent, not codec-categorical: `m2v1` renders macroblock garbage where `xd5*` renders correctly on the same bitstream (measured 2026-08-15, macOS 26.6.1 — `ingest-compatibility.md`) |
+| MPEG-2 4:2:2 (422@HL) | Yes | Historically no; per-OS/per-file empirical since 1.11 (demoted gate — prove the finished build with `playable-check.sh`, `--fidelity` since 1.12). Tag-dependent AND **container-dependent** (1.13): `m2v1` renders macroblock garbage where `xd5*` renders correctly on the same bitstream *when the stream matches the fourcc profile contract* (2026-08-15 VMA pair) — but on a stream that does not, all five MOV tags corrupt identically and the same bits in an `.mp4` (`mp4v`+`esds`) render correctly (2026-08-15, 21 GB capture, SSIM 0.9175+). Route: `scripts/mp4-swap.sh` — see "The container axis" in `ingest-compatibility.md` |
 | Dolby Vision HEVC | Yes (ffmpeg ≥5.0, single-layer) | Device/app-dependent |
 | AC-3 | Yes | Yes on modern macOS (older: spotty) |
 | E-AC-3 (Dolby Digital Plus) | Yes | Yes — native in modern QuickTime |
 | DTS / DTS-HD MA | Yes | No |
-| MP2 | Yes (non-standard) | Not expected |
+| MP2 | Yes (non-standard) | **No** — AVFoundation has no MPEG Layer II path (1.13, D3: measured silent; the `esds` OTI ffmpeg writes is already the correct `0x6B`). A PCM access track is not optional for this source class; `verify.sh` gate (g) REVIEWs an MP2 track with none |
 
-For genuine playback of the "no/unverified" rows you're at Rung 4 (transcode —
-see `delivery-encode.md`), or keep the original container for archival.
+For genuine playback of the "no/unverified" rows: first the lossless rungs —
+a sample-entry retag where the class allows it, then the **container swap**
+(`scripts/mp4-swap.sh`, 1.13) — and only then Rung 4 (transcode — see
+`delivery-encode.md`), or keep the original container for archival. A fidelity
+FAIL routed straight to a re-encode was the D2 defect: the measured remedy for
+the 2026-08-15 class is lossless and was not on the list.
+
+## The muxer can drop a mapped stream, silently (1.13)
+
+`ffmpeg -c copy -f mov` was measured writing **2 of 3 mapped streams** with
+nothing but a `-v warning` line (2026-08-15, the field-report capture). Nothing
+in the pre-1.13 gate set could see it: the essence gates compare the streams
+that ARE present, the timeline gates read `v:0`, and `RMX_PLAN ... unmapped=N`
+is a plan printed *before* the mux. So the loss shipped green.
+
+Every builder now reconciles the finished part file against its own plan —
+count **and** per-stream codec identity — before the `mv` that blesses it
+(`mux_census` in `lib-mux.sh`, machine line `RMX_CENSUS ... match=ok|MISMATCH`).
+A MISMATCH is exit 1 with the artifact kept as `x.part.mov`. Rule of thumb when
+adding a builder: if you wrote `-map`, you owe a census.
 
 ## Mux-valid ≠ seekable (the silent-corruption gap)
 

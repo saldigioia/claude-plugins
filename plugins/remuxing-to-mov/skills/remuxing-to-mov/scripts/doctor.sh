@@ -25,13 +25,23 @@ if [ "$FFMPEG" = yes ]; then
   VER=$(ffmpeg -version 2>/dev/null | head -1 | grep -oE "[0-9]+\.[0-9]+" | head -1 || true)
   MAJOR=${VER%%.*}; MINOR=${VER#*.}; MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}
 fi
-MUX_MOV=no; MUX_NULL=no; MUX_SHASH=no; MUX_FMD5=no
+MUX_MOV=no; MUX_NULL=no; MUX_SHASH=no; MUX_FMD5=no; MUX_MP4=no; ISO_PCM=no
 BSF_FU=no; BSF_H264=no; BSF_HEVC=no; BSF_SETTS=no
 if [ "$FFMPEG" = yes ]; then
   MUX_MOV=$(has_mux mov);        MUX_NULL=$(has_mux null)
+  MUX_MP4=$(has_mux mp4)
   MUX_SHASH=$(has_mux streamhash); MUX_FMD5=$(has_mux framemd5)
   BSF_FU=$(has_bsf filter_units); BSF_H264=$(has_bsf h264_mp4toannexb); BSF_HEVC=$(has_bsf hevc_mp4toannexb)
   BSF_SETTS=$(has_bsf setts)
+  # ISO PCM carriage ('ipcm', ISO/IEC 23003-5 + pcmC) — the container-swap rung's
+  # access track. ffmpeg writes it since 6.1 (d4ee177a). MEASURED, not inferred
+  # from the version string: mint 0.2 s of tone into an MP4 and look at the entry.
+  if [ "$MUX_MP4" = yes ]; then
+    _ipcm_tmp="$(mktemp -d)"
+    if ffmpeg -nostdin -y -v error -f lavfi -i "sine=frequency=440:duration=0.2:sample_rate=48000" \
+         -c:a pcm_s16le -f mp4 "$_ipcm_tmp/p.mp4" >/dev/null 2>&1 && [ -s "$_ipcm_tmp/p.mp4" ]; then ISO_PCM=yes; fi
+    rm -rf "$_ipcm_tmp"
+  fi
 fi
 
 # Platform / hardware / optional helpers — REPORT-ONLY (informational; never gates
@@ -55,10 +65,10 @@ status=READY; [ "$required_ok" = yes ] || status=BLOCKED
 { [ "$status" = READY ] && { [ "$vcl_ok" = no ] || [ "$MUX_SHASH" = no ]; }; } && status=DEGRADED
 
 if [ "$KV" -eq 1 ]; then
-  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_BSF_SETTS=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\n' \
+  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_BSF_SETTS=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\nDOC_MUX_MP4=%s\nDOC_ISO_PCM=%s\n' \
     "$FFMPEG" "$FFPROBE" "${VER:-na}" "$MUX_MOV" "$MUX_NULL" "$MUX_SHASH" "$MUX_FMD5" \
     "$BSF_FU" "$BSF_H264" "$BSF_HEVC" "$BSF_SETTS" "$vcl_ok" "$dv_copy" \
-    "$OS" "$ARCH" "$VTB" "$T_MINFO" "$T_MP4BOX" "$T_MP4DUMP" "$status"
+    "$OS" "$ARCH" "$VTB" "$T_MINFO" "$T_MP4BOX" "$T_MP4DUMP" "$status" "$MUX_MP4" "$ISO_PCM"
   [ "$required_ok" = yes ] || exit 1
   exit 0
 fi
@@ -72,6 +82,13 @@ echo "  mov        : $(mark "$MUX_MOV")   [required]"
 echo "  null       : $(mark "$MUX_NULL")   [required: decode spot-checks / scrub gate]"
 echo "  streamhash : $(mark "$MUX_SHASH")   [recommended: packet + VCL lossless proof]"
 echo "  framemd5   : $(mark "$MUX_FMD5")   [recommended: non-H.264 lossless + --full]"
+echo "  mp4        : $(mark "$MUX_MP4")   [required for the container-swap rung, scripts/mp4-swap.sh]"
+if [ "$ISO_PCM" = yes ]; then
+  echo "  ISO PCM ('ipcm') : writable — the container swap can carry a PCM access track (measured, not inferred)"
+else
+  echo "  ISO PCM ('ipcm') : NOT writable by this ffmpeg (the entry landed in 6.1) — mp4-swap.sh"
+  echo "                     needs --audio copy here; the VIDEO half of the swap is unaffected"
+fi
 echo "-- bitstream filters --"
 echo "  filter_units     : $(mark "$BSF_FU")   [recommended: H.264 VCL lossless arbiter]"
 echo "  h264_mp4toannexb : $(mark "$BSF_H264")   [recommended: VCL / rebuild on AVCC sources]"

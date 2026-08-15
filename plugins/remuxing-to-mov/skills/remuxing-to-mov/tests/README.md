@@ -146,6 +146,58 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     1080i59.94 broadcast masters, off-repo) and recorded as a residual on the
     sub-suite's closing line, never faked into a green.
 
+29. **The container axis (1.13, `regression.d/44-container-axis.sh`)** — the
+    1.12 round shipped "retag fixes the class"; the same day a real 21 GB
+    MPEG-2 4:2:2 capture proved otherwise (five MOV retags, identical
+    corruption) and the CONTAINER turned out to be the axis. This suite pins
+    the mechanism halves that ARE synthesizable: `-tag:v mp4v -f mov` dies at
+    header write with the documented tag-table message while `-f mp4` writes
+    `mp4v`+`esds` **by default**; `mp4-swap.sh` builds, verifies, and is
+    provably lossless (one video packet hash across source → `.mov` → `.mp4`,
+    so the A/B really is the same bitstream); the swap's `ipcm` access track
+    passes gate (g) instead of being condemned; `--container mp4` scopes the
+    "unroutable" refusal correctly (VP9 → MOV still exit 11, VP9 → MP4
+    builds); `PR_TAG_ADVICE` now fires on a **.ts source** (D7 — it was dead
+    on every TS before, because `STSD_ENTRY` only exists for MP4-family
+    containers) while staying silent on the 4:2:0 control and on an
+    already-retagged `xd5b` MOV; and every fidelity-FAIL route names the swap
+    before Rung 4. SYNTHESIS LIMIT: the corruption itself needs real broadcast
+    content — the MOV-destroyed/MP4-correct A/B is operator-verified
+    (2026-08-15, SSIM 0.81–0.85 vs 0.9175+) and rides the closing line.
+30. **Census + part names (1.13, `regression.d/45-census-partnames.sh`)** —
+    D5: `mux_census` is asserted on both arms directly (match, dropped stream,
+    right-count-wrong-codec, `?` wildcard, count-only `codecs=na`) and every
+    builder is asserted to emit `RMX_CENSUS … match=ok` on a real build, with
+    `planned=` cross-checked against the streams actually in the file. D6:
+    `rtm_part`/`rtm_sidecar` unit cases (including an extensionless target and
+    a dotted directory), a code-level sweep proving no builder still writes
+    `$OUT.part` (comments stripped first — these files *document* the shape
+    they replaced), and a functional check that the mux-confession hard stop
+    leaves `hs.part.mov`, not `hs.mov.part`. On macOS it additionally proves a
+    `.part`-named healthy build now PASSES `playable-check.sh` and
+    **re-measures C105** on the spot: the same payload through `qlmanage` as a
+    `.mov` symlink (no thumbnail, deadline) vs a `.mov` hardlink (renders) —
+    which is why the guard hardlinks. SYNTHESIS LIMIT: the silent stream drop
+    itself is operator-measured, not reproducible here; what is pinned is that
+    the assertion works.
+31. **Scan + alignment (1.13, `regression.d/46-scan-align.sh`)** — D1: the new
+    `m2v422i.mov` interlaced fixture is proven interlaced, then shown to score
+    **below** the 0.90 progressive default through a perfectly healthy
+    AVFoundation render (0.867 on the evidence bench) and to PASS anyway on
+    the interlaced floor, with `scan=`/`thresh=`/`y=`/`u=`/`v=` on the machine
+    line and Y asserted above All (the deficit is chroma, not field
+    structure); the progressive control keeps 0.90 and its 1.12 verdict; and
+    `RTM_FIDELITY_SSIM_INTERLACED=0.999` proves the interlaced gate can still
+    fail, the documented way, with a named plane signature and the container
+    swap routed first. Off-macOS all of that is an announced SKIP. D4: the
+    dual-track gate is asserted to either take the fast path or to MEASURE
+    (start_pts, common window) rather than assert, that the word "misaligned"
+    no longer appears on content that matches, and that a genuinely wrong
+    access track (half-volume decode) is still caught. D3: an MP2-only build
+    now REVIEWs ("no PCM access track") while the dual-track pair does not,
+    and the dead-HDMV-track class still FAILs — the allowlist demotion did not
+    weaken it.
+
 ## Synthesis limit (why some things aren't tested directly)
 
 `libx264` cannot mint true broadcast PAFF (separate field pictures), and the
@@ -203,7 +255,8 @@ bash tests/make-fixtures.sh gap.ts m2v422   # subset: filename or stem
 | `gap.ts` | byte-clean TS, one ~4 s forward PTS/DTS gap at t=10 | the "present + monotonic, the mux will succeed" desync class: only the timeline is dirty (CC/TEI/PES all 0) | Phase 2 (ts-health/diagnose routing) |
 | `corrupt.ts` | `gap.ts` recipe + real transport damage (TEI ×6, one PES length clobbered) | scanners must keep timeline dirt (routable) apart from transport damage (permanent); `ts-health.sh` reads corrupt=7, PES=1 deterministically | Phase 2 |
 | `rot.ts` | mpegts/mpeg2video with a forward gap AND a backward DTS step | the backhaul timeline-rot class — the WO 4.2 demoted gate: warn + build + verify judges, never a pre-build exit 11 | Phase 4 (rot demotion) |
-| `m2v422.mov` / `m2v422.ts` | mpeg2video yuv422p (TS variant + MP2) | the 4:2:2 contribution family — refused 1.8.0–1.10.0, demoted 1.11 (WO 4.1) to advisory + post-build playability proof | Phase 4 (gates), Phase 2 (banners) |
+| `m2v422.mov` / `m2v422.ts` | mpeg2video yuv422p (TS variant + MP2) | the 4:2:2 contribution family — refused 1.8.0–1.10.0, demoted 1.11 (WO 4.1) to advisory + post-build playability proof; since 1.13 also the container-axis A/B (`.mov` `m2v1`+glbl vs `.mp4` `mp4v`+esds) | Phase 4 (gates), Phase 2 (banners), 1.13 D2/D7 |
+| `m2v422i.mov` | mpeg2video yuv422p **interlaced** (field_order tb; `interlace`+`+ilme+ildct`) | the scan-keyed-threshold fixture (1.13 D1): a perfectly healthy interlaced 4:2:2 render scores ~0.867 — **below** the progressive-tuned 0.90 default — so without this clip the false-FAIL half of D1 is unpinnable | 1.13 D1 (`46-scan-align.sh`) |
 | `h264_422.ts` / `h264_422_10.ts` | H.264 High 4:2:2 8-bit / 10-bit + MP2 | the 2017-feed class, plus the 10-bit AVC-Intra shape the old exact 8-bit gate missed — both now announced + proven post-build | Phase 4 |
 | `hevc_422_10.mov` | HEVC Rext yuv422p10le tagged `hvc1` | Rext 4:2:2 with correct signaling — the tag alone doesn't decide decodability; the post-build check does | Phase 4 |
 | `m2v420.ts` | mpeg2video yuv420p + MP2 | verified-good 4:2:0 control: must KEEP passing every gate | Phases 2/4 (no-false-positive) |

@@ -52,6 +52,7 @@ esac; done
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # mux_confessions, backhaul_gate
+. "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
 
 # backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
 # defers to the post-build proof, rot WARNs and builds; lib-paff.sh) — this
@@ -115,7 +116,7 @@ esac
 
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
-PART="${OUT}.part"
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6)
 
 # track titles, self-describing
 T1="PCM ${BITS}-bit (access)"
@@ -206,6 +207,14 @@ else
   build_from "$IN"
 fi
 
+# POST-MUX CENSUS (D5, 1.13): the dual-track contract IS a stream count — video
+# + PCM access + preserved original. A silently dropped track here is the whole
+# deliverable's promise gone, and nothing checked it before this.
+if ! mux_census "$PART" 3 "$vcodec,$PCMC,$acodec" dual-track; then
+  echo "   NOT blessing the output; kept at $PART. The access+original pair is the"
+  echo "   contract of this tool — a missing track means the promise was not kept."
+  exit 1
+fi
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
 echo "VERIFY (alignment): decode track 2 with the SAME params and md5-compare to track 1, e.g."

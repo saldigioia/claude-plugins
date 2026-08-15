@@ -51,6 +51,7 @@ esac; done
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
+. "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
 
 vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
@@ -156,12 +157,30 @@ for spec in $ASPECS; do
   fi
 done
 
-PART="${OUT}.part"
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6)
 # shellcheck disable=SC2086
 ffmpeg -nostdin -v error -fflags +genpts "${FF_INPUT_OPTS[@]}" -i "$IN" \
   -map 0:v:0 -c:v copy $VTAG \
   $AMAP -af "aresample=async=1:first_pts=0" -c:a "$PCM" \
   -movflags "$MOVFLAGS" -f mov "$PART"
+# POST-MUX CENSUS (D5, 1.13): ASPECS above IS the audio plan this run mapped —
+# reconcile it against the file before blessing. Every re-timed track lands as
+# $PCM by construction, so the identity half is assertable too.
+# count only the specs that EXIST: the default map is `-map 0:a:0?` — the `?`
+# makes it optional, so a video-only source legitimately writes one stream and
+# a naive 1+len(ASPECS) plan would MISMATCH on a healthy build.
+RS_NA=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
+RS_N=1; RS_C="$vcodec"
+for spec in $ASPECS; do
+  rs_i=${spec#a:}
+  case "$rs_i" in ''|*[!0-9]*) continue;; esac
+  [ "$rs_i" -lt "${RS_NA:-0}" ] || continue
+  RS_N=$((RS_N+1)); RS_C="$RS_C,$PCM"
+done
+if ! mux_census "$PART" "$RS_N" "$RS_C" resync; then
+  echo "   NOT blessing the output; kept at $PART."
+  exit 1
+fi
 mv -f "$PART" "$OUT"
 echo "   wrote: $OUT"
 

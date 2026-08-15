@@ -486,9 +486,22 @@ echo "-- (g) audio playability (QTFF sample-entry allowlist + bounded decode) --
 #          AC-3, so this is a dead-track gate, not a per-track QT-playability
 #          gate. Case is load-bearing: this bench's muxer writes ac-3/ec-3 on
 #          fresh encodes but AC-3 on stream copies — both minted 2026-08-14.
-#      Anything else in a QTFF container is a track no decoder claims -> FAIL
-#      with the tag named. Non-QTFF outputs (an MKV cross-check) carry no
-#      sample entries, so only assertion 2 applies there — never a false FAIL.
+#        ipcm                            the ISO PCM entry (D3, added 1.13):
+#          ISO/IEC 23003-5 with the pcmC config box, MP4RA-registered, written
+#          by ffmpeg since 6.1 and read by VLC/GPAC (which actively NORMALIZES
+#          QTFF 'twos' to 'ipcm' on MP4 remux); Sony XAVC has shipped it in
+#          broadcast delivery since 2021. It is what `-c:a pcm_s16le -f mp4`
+#          produces — i.e. what the container-swap rung's access track IS
+#          (minted + decoded on this bench 2026-08-15). Calling it "a sample
+#          entry no decoder claims" was factually false.
+#      Anything else in a QTFF container is UNRECOGNIZED, which since 1.13 is a
+#      PRIOR, not a verdict (D3): the bounded decode probe runs anyway and a
+#      clean decode downgrades the FAIL to an advisory REVIEW. Pre-1.13 the
+#      probe was deliberately SKIPPED for off-list tags — the one measurement
+#      that could falsify the claim was the one never taken, and `ipcm` was
+#      condemned unwaivably (exit 1) on evidence that was never gathered.
+#      Non-QTFF outputs (an MKV cross-check) carry no sample entries, so only
+#      assertion 2 applies there — never a false FAIL.
 #   2. DECODE: a bounded head decode (first ${WIN}s, this audio track only)
 #      returns 0 error lines — gate (c)'s confirm-min doctrine: a nonzero
 #      count re-runs and keeps the minimum, so load strays never FAIL.
@@ -511,6 +524,17 @@ else
     done
     printf '%s' "$n"
   }
+  # D3 (1.13) inverse-error inputs: an mp4a/.mp2 track carrying MPEG Layer II
+  # is the configuration that produces NO AUDIO in AVFoundation, and the old
+  # gate PASSED it (allowlisted on the rationale that a PCM access track
+  # guarantees playback — true only when one EXISTS). ffmpeg declares MP2 at
+  # >24 kHz with OTI 0x6B (MPEG-1 Part 3), the formally correct value, and the
+  # demuxer maps 0x69/0x6B to AV_CODEC_ID_MP3 first-match — so ffprobe LABELS
+  # 48 kHz Layer II as 'mp3'. The source is the discriminator this gate has and
+  # the label does not: verify.sh holds both files.
+  g_src_mp2=$(ffp -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$SRC" 2>/dev/null | grep -c '^mp2$' || true)
+  g_has_pcm=$(ffp -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$OUT" 2>/dev/null | grep -c '^pcm_' || true)
+  g_mp2_naked=0
   gi=0
   while [ "$gi" -lt "$g_naud" ]; do
     g_tag=$(ffp -v error -select_streams "a:$gi" -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
@@ -518,21 +542,36 @@ else
     g_tag_ok=1
     if [ "$g_qtff" -eq 1 ]; then
       case "$g_tag" in
-        sowt|twos|lpcm|in24|in32|fl32|mp4a|alac|.mp3|ec-3|EC-3|ac-3|AC-3|dtsc|.mp2) : ;;
+        sowt|twos|lpcm|in24|in32|fl32|mp4a|alac|.mp3|ec-3|EC-3|ac-3|AC-3|dtsc|.mp2|ipcm) : ;;
         *) g_tag_ok=0;;
       esac
     fi
+    # ALWAYS probe (D3): the allowlist is a prior, and an off-list tag is
+    # exactly the case where a measurement beats an opinion.
+    g_err=$(g_dec "$gi")
     if [ "$g_tag_ok" -eq 0 ]; then
-      verdict=FAIL; other_failed=1
-      echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}) — NOT on the QTFF audio allowlist:"
-      echo "        a sample entry no decoder claims (the dead-HDMV-track class, entry 1)."
-      echo "        Do not ship; rebuild the audio via mov.sh's default routing (container-"
-      echo "        framed LPCM decodes to a raw-PCM access track)."
-      note="${note:+$note }Audio track a:$gi carries sample-entry tag '${g_tag:-none}' outside the QTFF allowlist — a dead track no decoder claims (entry 1: an 18.5 GB Blu-ray pcm_bluray copy-mux shipped 'verified' with unplayable audio, 2026-08-13); mov.sh's default routing rebuilds it as raw PCM."
-      # no decode probe on a dead sample entry: nothing claims it, the decode
-      # can only restate the tag verdict with noisier evidence
+      if [ "${g_err:-1}" -eq 0 ]; then
+        # unrecognized BUT it decodes — the ipcm class before 1.13 knew about
+        # it. Advisory REVIEW: an entry this plugin has not benched is a real
+        # unknown for OTHER players, but it is not a dead track and it is not
+        # an unwaivable essence FAIL.
+        [ "$verdict" = FAIL ] || verdict=REVIEW
+        echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}): NOT on the QTFF audio"
+        echo "        allowlist, but the bounded head decode is CLEAN — so it is not the"
+        echo "        dead-sample-entry class. Advisory, not a FAIL (D3, 1.13): unbenched"
+        echo "        here means unproven in QuickTime, not unclaimed by every decoder."
+        echo "        Prove the render before shipping: scripts/playable-check.sh OUT"
+        note="${note:+$note }Audio track a:$gi carries the unbenched sample-entry tag '${g_tag:-none}' (codec ${g_cod:-unknown}); it decodes cleanly, so this is an advisory, not the dead-track class — prove QuickTime playback before shipping."
+      else
+        verdict=FAIL; other_failed=1
+        echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}) — NOT on the QTFF audio allowlist"
+        echo "        AND it does not decode ($g_err error line(s) in the first ${WIN}s):"
+        echo "        a sample entry no decoder claims (the dead-HDMV-track class, entry 1)."
+        echo "        Do not ship; rebuild the audio via mov.sh's default routing (container-"
+        echo "        framed LPCM decodes to a raw-PCM access track)."
+        note="${note:+$note }Audio track a:$gi carries sample-entry tag '${g_tag:-none}' outside the QTFF allowlist AND fails to decode ($g_err error line(s)) — a dead track no decoder claims (entry 1: an 18.5 GB Blu-ray pcm_bluray copy-mux shipped 'verified' with unplayable audio, 2026-08-13); mov.sh's default routing rebuilds it as raw PCM."
+      fi
     else
-      g_err=$(g_dec "$gi")
       g_tagword="allowlisted"; [ "$g_qtff" -eq 1 ] || g_tagword="tag N/A (non-QTFF)"
       if [ "${g_err:-1}" -eq 0 ]; then
         echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_tagword; head decode clean."
@@ -542,8 +581,27 @@ else
         note="${note:+$note }Audio track a:$gi does not decode cleanly ($g_err error line(s) in the first ${WIN}s, deterministic after confirm-min) — no playable-audio guarantee; do not ship."
       fi
     fi
+    # the MP2-with-no-access-track signature, collected per track and judged once
+    if [ "$g_qtff" -eq 1 ]; then
+      case "$g_tag" in
+        .mp2) g_mp2_naked=1;;
+        mp4a) { [ "$g_cod" = mp2 ] || { [ "$g_cod" = mp3 ] && [ "${g_src_mp2:-0}" -gt 0 ]; }; } && g_mp2_naked=1;;
+      esac
+    fi
     gi=$((gi+1))
   done
+  if [ "$g_mp2_naked" -eq 1 ] && [ "${g_has_pcm:-0}" -eq 0 ]; then
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    echo "   >> MP2 audio with NO PCM access track — the configuration this gate used to"
+    echo "      PASS while failing the ones that work (D3, 1.13). AVFoundation has no"
+    echo "      MPEG Layer II path for mp4a/.mp2 tracks: no positive report of Layer II"
+    echo "      decode in QuickTime X/AVFoundation exists in any container, and this"
+    echo "      bench measured silence. The allowlist entry for .mp2 is legal ONLY as"
+    echo "      dual-track's preserved original, where the PCM access track is what"
+    echo "      plays. Rebuild: scripts/mov.sh (routes MP2 to dual-track automatically)"
+    echo "      or scripts/remux.sh --audio pcm."
+    note="${note:+$note }Output carries MP2 audio with no PCM access track — AVFoundation has no Layer II path, so this file has no playable audio in QuickTime (D3, 1.13); rebuild via mov.sh (dual-track) or remux.sh --audio pcm."
+  fi
 fi
 
 if [ "$SILP" -eq 1 ]; then
@@ -741,12 +799,109 @@ if [ "$AUD" -eq 1 ]; then
         verdict=FAIL; other_failed=1
       fi
     fi
-    # shellcheck disable=SC2086
-    d0=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$OUT" -map 0:a:0 -c:a "$a0c" -f "$raw" - 2>/dev/null | md5sum | awk '{print $1}')
-    # shellcheck disable=SC2086
-    d1=$(ffmpeg -nostdin -v error $drc "${FF_INPUT_OPTS[@]}" -i "$OUT" -map 0:a:1 -c:a "$a0c" -f "$raw" - 2>/dev/null | md5sum | awk '{print $1}')
-    if [ "$d0" = "$d1" ]; then echo "   access track (a:0 PCM): == decoded original, aligned."
-    else echo "   access track (a:0): NOT aligned with the original decode."; [ "$verdict" = FAIL ] || verdict=REVIEW; note="${note:+$note }Dual-track audio misaligned."; fi
+    # --- D4 (1.13): "misaligned" must be a MEASUREMENT, not a hash inequality --
+    # The pre-1.13 gate md5'd both tracks WHOLE and called any difference
+    # "Dual-track audio misaligned" — a TIMING claim a whole-track hash cannot
+    # support, since any length delta flips the hash. The field report hit
+    # exactly that: a 1040-sample length delta equal to the tracks' declared
+    # start_pts, cross-correlation 1.000000 at offset 0, zero differing samples
+    # in the overlap — reported as "misaligned", inviting a "fix" that would
+    # have introduced real desync. So: hash whole first (unchanged fast path);
+    # on a mismatch, MEASURE — lengths, declared start_pts, and the content of
+    # the common window (tail-trimmed, then head-trimmed by the delta) — and
+    # keep the word "misaligned" for a mismatch that survives all of it.
+    dec_md5 () {  # dec_md5 TRACK [FILTER] [DRC] -> md5 of the decoded track
+      # shellcheck disable=SC2086
+      ffmpeg -nostdin -v error ${3:-} "${FF_INPUT_OPTS[@]}" -i "$OUT" -map "0:a:$1" \
+        ${2:+-af "$2"} -c:a "$a0c" -f "$raw" - 2>/dev/null | md5sum | awk '{print $1}'
+    }
+    dec_len () {  # dec_len TRACK [DRC] -> decoded byte count
+      # shellcheck disable=SC2086
+      ffmpeg -nostdin -v error ${2:-} "${FF_INPUT_OPTS[@]}" -i "$OUT" -map "0:a:$1" \
+        -c:a "$a0c" -f "$raw" - 2>/dev/null | wc -c | tr -d ' '
+    }
+    d0=$(dec_md5 0); d1=$(dec_md5 1 "" "$drc")
+    if [ "$d0" = "$d1" ]; then
+      echo "   access track (a:0 PCM): == decoded original, aligned."
+    else
+      ach=$(ffp -v error -select_streams a:0 -show_entries stream=channels    -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+      asr=$(ffp -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+      case "$a0c" in pcm_s16le) bps=2;; pcm_s24le) bps=3;; pcm_s32le|pcm_f32le) bps=4;; pcm_s8|pcm_u8) bps=1;; *) bps=0;; esac
+      case "$ach" in ''|*[!0-9]*) ach=0;; esac
+      case "$asr" in ''|*[!0-9]*) asr=0;; esac
+      bpf=$((bps * ach))
+      spo () {  # spo TRACK -> declared start offset in SAMPLES (0 if undeclared)
+        ffp -v error -select_streams "a:$1" -show_entries stream=start_pts,time_base \
+            -of default=nw=1:nk=1 "$OUT" 2>/dev/null | \
+          awk -v r="$asr" 'NR==1{p=$0} NR==2{split($0,t,"/");
+            if(p=="N/A"||p==""||t[2]+0==0||r+0==0){print 0; exit}
+            printf "%.0f", p*t[1]/t[2]*r}'
+      }
+      n0=$(dec_len 0); n1=$(dec_len 1 "$drc")
+      sp0=$(spo 0); sp1=$(spo 1)
+      case "$sp0" in ''|*[!0-9]*) sp0=0;; esac
+      case "$sp1" in ''|*[!0-9]*) sp1=0;; esac
+      echo "   access track (a:0) whole-track hash differs from the decoded original — measuring:"
+      if [ "$bpf" -le 0 ] || [ "${n0:-0}" -le 0 ] || [ "${n1:-0}" -le 0 ]; then
+        echo "     decoded bytes a:0=$n0 a:1=$n1 (frame size unknown for '$a0c' — cannot"
+        echo "     convert to samples). Not claiming a timing verdict on this evidence."
+        [ "$verdict" = FAIL ] || verdict=REVIEW
+        note="${note:+$note }Dual-track access/original decodes differ and the sample geometry could not be measured — inspect before shipping."
+      else
+        dbytes=$((n0 - n1)); [ "$dbytes" -lt 0 ] && dbytes=$((-dbytes))
+        dsamp=$((dbytes / bpf)); nmin=$n0; [ "$n1" -lt "$n0" ] && nmin=$n1
+        nsmin=$((nmin / bpf))
+        spd=$((sp0 - sp1)); [ "$spd" -lt 0 ] && spd=$((-spd))
+        echo "     decoded samples a:0=$((n0 / bpf)) a:1=$((n1 / bpf)) (delta $dsamp), declared start_pts a:0=$sp0 a:1=$sp1 samples"
+        # (i) same content, one track longer at the TAIL
+        t0=$(dec_md5 0 "atrim=end_sample=$nsmin"); t1=$(dec_md5 1 "atrim=end_sample=$nsmin" "$drc")
+        if [ "$t0" = "$t1" ]; then
+          expl=""
+          if [ "$dsamp" -eq "$spd" ] && [ "$spd" -ne 0 ]; then expl="= the declared start_pts DELTA"
+          elif [ "$dsamp" -eq "$sp0" ] && [ "$sp0" -ne 0 ]; then expl="= a:0's declared start_pts"
+          elif [ "$dsamp" -eq "$sp1" ] && [ "$sp1" -ne 0 ]; then expl="= a:1's declared start_pts"; fi
+          if [ -n "$expl" ]; then
+            echo "     >> ALIGNED at offset 0: the $nsmin-sample common window is byte-identical;"
+            echo "        the $dsamp-sample length delta $expl (container-declared start offset,"
+            echo "        not drift). This is the field-report signature (2026-08-15) the"
+            echo "        pre-1.13 whole-track hash reported as 'misaligned' — it is not."
+          else
+            echo "     >> content ALIGNED at offset 0 over the $nsmin-sample common window, but the"
+            echo "        $dsamp-sample length delta is NOT explained by either track's declared"
+            echo "        start_pts (a:0=$sp0 a:1=$sp1). Aligned where they overlap; the tail is the"
+            echo "        review item — a truncated or over-long access track, not desync."
+            [ "$verdict" = FAIL ] || verdict=REVIEW
+            note="${note:+$note }Dual-track audio: content identical over the ${nsmin}-sample common window (offset 0), but an unexplained ${dsamp}-sample length delta remains (declared start_pts a:0=$sp0 a:1=$sp1) — a tail-length question, not a sync one."
+          fi
+        else
+          # (ii) same content, one track longer at the HEAD (shift by the delta)
+          h0=$t0; h1=$t1; shifted=no
+          if [ "$dsamp" -gt 0 ]; then
+            if [ "$n0" -gt "$n1" ]; then
+              h0=$(dec_md5 0 "atrim=start_sample=$dsamp,atrim=end_sample=$nsmin")
+              h1=$(dec_md5 1 "atrim=end_sample=$nsmin" "$drc")
+            else
+              h0=$(dec_md5 0 "atrim=end_sample=$nsmin")
+              h1=$(dec_md5 1 "atrim=start_sample=$dsamp,atrim=end_sample=$nsmin" "$drc")
+            fi
+            [ "$h0" = "$h1" ] && shifted=yes
+          fi
+          if [ "$shifted" = yes ]; then
+            echo "     >> OFFSET by exactly $dsamp samples ($(awk -v s="$dsamp" -v r="$asr" 'BEGIN{printf "%.3f", (r>0? s/r : 0)}')s): the tracks carry the SAME"
+            echo "        samples with one leading the other. That IS a sync defect (the access"
+            echo "        track and the preserved original do not start together)."
+            [ "$verdict" = FAIL ] || verdict=REVIEW
+            note="${note:+$note }Dual-track audio offset by ${dsamp} samples (same content, shifted head) — the access track and the preserved original do not start together."
+          else
+            echo "     >> MISALIGNED: the common window differs even after trimming to equal"
+            echo "        length and after shifting by the measured delta — the decodes are"
+            echo "        not the same audio, which no start_pts explains."
+            [ "$verdict" = FAIL ] || verdict=REVIEW
+            note="${note:+$note }Dual-track audio misaligned: the ${nsmin}-sample common window differs at offset 0 and at the measured ${dsamp}-sample shift."
+          fi
+        fi
+      fi
+    fi
   fi
 fi
 

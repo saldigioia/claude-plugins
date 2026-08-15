@@ -139,9 +139,26 @@ probe_struct () {
   # discriminator: a 4:2:0 MPEG-2 MOV carries stsd m2v1 too and must NOT
   # advise (consumer decode of 4:2:0 is fine). Append-only API: the kv/json
   # field is emitted ONLY when the advisory fires (absent otherwise).
+  # D7 (1.13): the advisory used to REQUIRE STSD_ENTRY=m2v1 — and STSD_ENTRY is
+  # produced by mp4_atom_scan, which early-returns on non-MP4-family containers.
+  # So on a .ts — the field report's input and this plugin's PRIMARY input class
+  # — the advisory could never fire, and nothing re-probed the built MOV: the
+  # class was only ever announced when an operator hand-probed an already-broken
+  # .mov. For a non-MP4-family source the output's sample entry is KNOWN in
+  # advance: movenc falls back to m2v1 for NTSC (mov_get_mpeg2_xdcam_codec_tag
+  # truncates avg_frame_rate to int, so 29.97 matches neither 30 nor 60 and the
+  # xd5* auto-pick is unreachable), so codec+pix_fmt alone is the right key
+  # there. Inside MP4-family containers the real stsd entry is readable, so keep
+  # requiring m2v1 — that is what keeps the advisory idempotent on a file
+  # already retagged xd5b, and silent on 4:2:0 MOVs carrying the same m2v1.
   tag_advice=""
-  if [ "$vcodec" = mpeg2video ] && [ "${STSD_ENTRY:-}" = m2v1 ]; then
-    case "$pixfmt" in yuv422p*) tag_advice=xd5b;; esac
+  if [ "$vcodec" = mpeg2video ]; then
+    case "$pixfmt" in yuv422p*)
+      case "$container" in
+        *mov*|*mp4*|*m4a*) [ "${STSD_ENTRY:-}" = m2v1 ] && tag_advice=xd5b;;
+        *)                 tag_advice=xd5b;;
+      esac;;
+    esac
   fi
   tagadv_json=""
   if [ -n "$tag_advice" ]; then tagadv_json=",\"tag_advice\":\"$tag_advice\""; fi
@@ -293,8 +310,25 @@ fi
 # FourCC, not damage: third instance of the sample-entry rule (hvc1/hev1,
 # dvh1/dvhe). pix_fmt discriminates — 4:2:0 MPEG-2 MOVs also carry stsd m2v1
 # and must stay silent here.
-if [ "$vcod_h" = mpeg2video ] && [ "${STSD_ENTRY:-}" = m2v1 ]; then
+adv_h=0
+if [ "$vcod_h" = mpeg2video ]; then
   case "$pix_h" in yuv422p*)
+    case "$container" in
+      *mov*|*mp4*|*m4a*) [ "${STSD_ENTRY:-}" = m2v1 ] && adv_h=1;;
+      *)                 adv_h=1;;   # D7: the OUTPUT's entry is known to be m2v1
+    esac;;
+  esac
+fi
+if [ "$adv_h" -eq 1 ]; then
+  case "$pix_h" in yuv422p*)
+    case "$container" in
+      *mov*|*mp4*|*m4a*) : ;;
+      *) echo "   NOTE MPEG-2 4:2:2 in '$container': a .mov built from this gets stsd 'm2v1'"
+         echo "        (movenc cannot auto-pick an xd5* tag for NTSC — it truncates 29.97 to"
+         echo "        29, matching neither 30 nor 60), so the dispatch class below applies to"
+         echo "        the OUTPUT this source will produce. Pre-1.13 this advisory required a"
+         echo "        readable stsd entry and was therefore dead on every .ts (D7).";;
+    esac
     echo "   NOTE stsd 'm2v1' on MPEG-2 4:2:2: QuickTime glitching/smearing here is decoder"
     echo "        DISPATCH, not damage — AVFoundation routes the generic 'm2v1' entry to its"
     echo "        consumer MPEG-2 decoder (macroblock garbage on 4:2:2) and the xd5* XDCAM"
@@ -302,16 +336,29 @@ if [ "$vcod_h" = mpeg2video ] && [ "${STSD_ENTRY:-}" = m2v1 ]; then
     echo "        26.6.1: two real 1080i59.94 broadcast masters — garbage as m2v1, frame-"
     echo "        for-frame identical to the ffmpeg reference as xd5b; XDCAM's nominal"
     echo "        50 Mb/s CBR is NOT enforced (19.7 and 31.2 Mb/s VBR both played)."
-    echo "        Retag, don't re-encode (4 bytes in the sample entry; bitstream"
+    echo "        STEP 1 — retag, don't re-encode (4 bytes in the sample entry; bitstream"
     echo "        bit-identical):"
     echo "           ffmpeg -i \"$IN\" -map 0 -c copy -tag:v xd5b -movflags +faststart OUT.mov"
     echo "        xd5b = 1080i59.94; other geometries: the xd5* table in"
     echo "        references/ingest-compatibility.md (only xd5b is measured — prove any"
     echo "        other tag per-file: scripts/playable-check.sh --fidelity OUT.mov)."
-    echo "        Advisory-only in 1.12, no script auto-applies (deferral record:"
+    echo "        Advisory-only, no script auto-applies (deferral record:"
     echo "        references/known-limits.md); applying it requires a provenance note in"
     echo "        the output metadata naming the retag (m2v1 -> xd5b), e.g. metadata.sh"
     echo "        or -metadata comment=."
+    echo "        STEP 2 — IF THE RETAG DOES NOT FIX IT, the container is the axis (D2,"
+    echo "        1.13). NARROWED 2026-08-15, the same day the retag advisory shipped: on"
+    echo "        a real 21 GB 1080i29.97 capture ALL FIVE tags (m2v1/mp2v/hdv3/xd5b/xd5c)"
+    echo "        corrupted IDENTICALLY, because movenc has no XDCAM-specific sample-"
+    echo "        description writer — every MPEG-2 fourcc gets the same generic body"
+    echo "        (glbl+fiel+colr), so a retag changes the FourCC and nothing else. The"
+    echo "        retag works only when the stream matches the fourcc's profile contract."
+    echo "        The same bitstream in an MP4 ('mp4v'+esds) rendered correctly, SSIM"
+    echo "        0.9175+ on the very timestamps that failed:"
+    echo "           scripts/mp4-swap.sh \"$IN\"       # lossless; verifies + proves the render"
+    echo "        (ffmpeg REFUSES to write mp4v into a .mov — 'Tag mp4v incompatible with"
+    echo "        output codec id 2' — which is a muxer TAG-TABLE artifact, not a QTFF"
+    echo "        rule: Apple lists esds as a legal video sample-description extension.)"
   ;; esac
 fi
 

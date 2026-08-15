@@ -233,6 +233,86 @@ no advisory) and prints the retag advisory + additive `PR_TAG_ADVICE=xd5b`
      geometry; the operator picks from the `xd5*` table).
   Only `xd5b` 1080i59.94 is measured (2026-08-15); every other tag is
   per-spec, unmeasured.
+- **NARROWED 2026-08-15, the same day it shipped (D8, 1.13):** the retag is
+  **not** the remedy for the class — it is step one of two, and on some streams
+  it does nothing at all. On a real 21 GB 1080i29.97 4:2:2 capture **all five**
+  tags (`m2v1`/`mp2v`/`hdv3`/`xd5b`/`xd5c`) corrupted **identically**, because
+  movenc has no XDCAM-specific sample-description writer: every MPEG-2 fourcc
+  gets the same generic body (`glbl`(extradata) + `fiel` + optional `colr`;
+  movenc.c 1926–1986, 2756–2784, 2946), so a retag changes the FourCC and the
+  compressor-name string and nothing else. The advisory holds only where the
+  stream matches the fourcc's profile contract (CoreMedia enumerates the
+  HDV/XDCAM family as `kCMMPEG2VideoProfile_*` — chroma, raster, field rate and
+  rate-control class — under one codec type, `kCMVideoCodecType_MPEG2Video`).
+  When it does not: the container axis (next entry).
+- **D7 fix (1.13):** the advisory used to require a readable stsd entry, which
+  `mp4_atom_scan` only produces for MP4-family containers — so on a **.ts**, the
+  plugin's primary input class, it could never fire, and no driver re-probed the
+  built MOV. Non-MP4-family sources are now keyed on `mpeg2video` + `yuv422p*`
+  alone, because the output's entry is known in advance (`m2v1`).
+
+### The MOV/MP4 container axis for MPEG-2 4:2:2 (named limitation, 2026-08-15)
+
+**ffmpeg cannot write the sample entry that works into a `.mov`.** The same
+bitstream that AVFoundation destroys as `.mov` (`m2v1` + `glbl`) renders
+correctly as `.mp4` (`mp4v` + `esds`) — measured 2026-08-15 on the 21 GB
+capture: SSIM **0.9175+** on the exact timestamps that scored 0.81–0.85 in every
+MOV build. `scripts/mp4-swap.sh` is that rung (lossless remux → verify →
+`--fidelity` proof), and `mov.sh`/`auto.sh --mp4-swap` take it automatically on
+a fidelity FAIL.
+
+The limitation is the *deliverable extension*, not the format:
+
+- `-tag:v mp4v` into MOV dies at header write — `Tag mp4v incompatible with
+  output codec id '2' (m2v1)` — from a linear tag-table lookup in generic muxer
+  init (`libavformat/mux.c` against `ff_codec_movvideo_tags`, which pairs `mp4v`
+  only with MPEG-4). The MP4 muxer's own table pairs it with MPEG-2.
+- The entry is **spec-legal in QTFF**: Apple's "video sample description
+  extensions" table lists `esds` alongside `gama`/`fiel`/`avcC`/`pasp`/`colr`/
+  `clap`. So an `mp4v`+`esds` **MOV** is a legal file ffmpeg has no path to
+  write.
+- **UNBENCHED route, recorded not implemented:** building that MOV by `stsd`
+  surgery (MP4Box/Bento4) would keep the `.mov` deliverable promise. Nobody has
+  measured whether AVFoundation then decodes it correctly. Until someone does,
+  the honest deliverable for this class is a `.mp4`.
+- `glbl` (what the MOV path writes instead of `esds`) is an **FFmpeg invention**:
+  absent from Apple's extensions table and from MP4RA's box registry — ffmpeg's
+  own demuxer comment calls out "broken files created by legacy versions of
+  libavformat". CoreMedia's documented behavior for unknown `stsd` atoms is
+  carry-verbatim (`kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms`),
+  so `glbl` is **probably inert** rather than the poison — hypothesis, not a
+  measurement.
+- **Upstream candidates (unfiled):** (a) the container-dependence itself — same
+  MPEG-2 bitstream corrupt in MOV, clean in MP4, through AVFoundation — appears
+  unreported; (b) `mov_get_mpeg2_xdcam_codec_tag` truncating `avg_frame_rate` to
+  int, which makes NTSC XDCAM auto-tagging unreachable (29.97 → 29 matches
+  neither 30 nor 60); (c) `esds` OTI always 0x61 for MPEG-2 where 0x65 (422P)
+  exists.
+
+### Interlaced sources sit in a lower fidelity-SSIM band (measured 2026-08-15)
+
+`playable-check.sh --fidelity`'s 0.90 default is **progressive-tuned**. Healthy
+interlaced windows measured **0.8866–0.9684** against **0.8146–0.8471** corrupt
+on the field report's real 1080i59.94 capture, and a healthy synthetic
+interlaced 4:2:2 clip scored **0.8669** on this bench — i.e. 0.90 false-FAILs
+healthy interlaced material. Since 1.13 a declared interlaced `field_order` is
+judged against `RTM_FIDELITY_SSIM_INTERLACED` (default **0.86**, inside the
+measured gap).
+
+**Residual, stated:** those bands are ~0.02 apart, so the interlaced floor
+separates them with thin margin — a corrupt interlaced window at 0.855 would
+pass. Two things mitigate it and neither is a proof: the per-plane split now
+printed with every sample (`y=`/`u=`/`v=`), and the fact that a FAIL now routes
+to a lossless container swap rather than a re-encode.
+
+**Field normalization was tried and rejected — measured, not assumed** (same
+bench, same clip, best-frame All SSIM): bwdif on the reference 0.8669 (no-op),
+yadif 0.8718, bwdif both sides 0.8661, `setfield=prog` on either or both 0.8669,
+`scale interl=0` both 0.8669, an 8-bit-chroma path 0.8669, nearest-neighbour
+scaling 0.8612. Every candidate moved the number by ≤0.005. The deficit is not
+field STRUCTURE: on the best temporally-aligned frame Y measured 0.9678 against
+U 0.8441 / V 0.8461 — healthy interlaced 4:2:2 pays its SSIM in the **chroma
+planes**. Do not "fix" this with a deinterlacer.
 
 ### Chaptered MOV past ~50 min: movie-timescale overflow warning; geometry-gated chapter-track drop past ~99 min
 

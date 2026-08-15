@@ -6,7 +6,15 @@
 #
 # Usage: scripts/mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul]
 #                       [--no-idr-trim] [--audio-keep all|first|layouts|IDX[,IDX...]]
-#                       [metadata flags]
+#                       [--mp4-swap] [metadata flags]
+#   --mp4-swap     if the post-build fidelity proof FAILS, take the container-swap
+#                  rung automatically (scripts/mp4-swap.sh: same bitstream, MP4,
+#                  'mp4v'+esds — measured 2026-08-15 to render correctly where the
+#                  .mov of the same bits does not) and report its verdict. WITHOUT
+#                  the flag the route is only NAMED, never built: a .mp4 is a
+#                  second deliverable the caller did not ask for, and this plugin
+#                  does not write files nobody requested. Either way Rung 4 is now
+#                  the LAST named route out of a bad render, not the first (D2).
 #   OUTPUT         default: <input dir>/<input base>.mov
 #                  (<base>.qt.mov if the input is itself a .mov, so the source is safe)
 #   --always-dual  build the dual-track even when the source audio already plays in
@@ -87,6 +95,7 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # arms, so no entry point can diverge), and the suite unit-pins them by
 # sourcing THIS file under the guard.
 . "$SELF_DIR/lib-paff.sh"   # unroutable_* classifiers + refusal voice, backhaul machinery
+. "$SELF_DIR/lib-mux.sh"    # rtm_sidecar: extension-keeping intermediates (D6)
 
 # --- audio classifiers (top of file so the RTM_TEST harness can source them) ---
 # native_c: does QuickTime PLAY this codec as-is? The pcm_* glob means RAW PCM
@@ -115,7 +124,7 @@ esac; }
 if [ "${RTM_TEST:-0}" = 1 ] && [ "${BASH_SOURCE[0]:-}" != "$0" ]; then return 0; fi
 
 IN="${1:?usage: mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul] [--no-idr-trim] [--audio-keep POLICY] [metadata flags]}"; shift
-OUT=""; ALWAYS=0; FULL=""; MDARGS=(); AKEEP=all; FORCE_BACKHAUL=0; NOIDRTRIM=0
+OUT=""; ALWAYS=0; FULL=""; MDARGS=(); AKEEP=all; FORCE_BACKHAUL=0; NOIDRTRIM=0; MP4SWAP=0
 # optional positional OUTPUT (the next arg, only if it isn't a --flag)
 if [ "${1:-}" != "" ] && [ "${1#--}" = "${1:-}" ]; then OUT="$1"; shift; fi
 while [ $# -gt 0 ]; do case "$1" in
@@ -123,6 +132,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --full)        FULL="--full"; shift;;
   --force-backhaul) FORCE_BACKHAUL=1; shift;;
   --no-idr-trim) NOIDRTRIM=1; shift;;
+  --mp4-swap)    MP4SWAP=1; shift;;
   --audio-keep)  AKEEP="${2:?--audio-keep needs a value}"; shift 2;;
   --audio-keep=*) AKEEP="${1#*=}"; shift;;
   # OPT-IN metadata: collected and passed verbatim to metadata.sh after the build
@@ -146,10 +156,15 @@ fi
 apply_metadata () {  # $1 = finished .mov to tag in place via a temp
   [ "${#MDARGS[@]}" -gt 0 ] || return 0
   echo "-- embedding QuickTime metadata (opt-in) --"
-  mv -f "$1" "$1.premeta"
-  local rc; set +e; bash "$SELF_DIR/metadata.sh" "$1.premeta" "$1" "${MDARGS[@]}" | sed 's/^/   /'; rc=${PIPESTATUS[0]}; set -e
-  [ "$rc" -eq 0 ] || { echo ">> metadata step failed (rc=$rc); untagged build kept at $1.premeta" >&2; return "$rc"; }
-  rm -f "$1.premeta"
+  # EXTENSION-KEEPING intermediate (D6, 1.13): this was "$1.premeta", and on a
+  # metadata failure that untagged build — a perfectly good deliverable — was
+  # left under a name qlmanage/avconvert cannot open, so the operator's first
+  # diagnostic move reported a decode failure that did not exist.
+  local pre; pre="$(rtm_sidecar "$1" premeta)"
+  mv -f "$1" "$pre"
+  local rc; set +e; bash "$SELF_DIR/metadata.sh" "$pre" "$1" "${MDARGS[@]}" | sed 's/^/   /'; rc=${PIPESTATUS[0]}; set -e
+  [ "$rc" -eq 0 ] || { echo ">> metadata step failed (rc=$rc); untagged build kept at $pre" >&2; return "$rc"; }
+  rm -f "$pre"
 }
 
 # probe once; consume the structured KEY=VAL (single source of truth). The grep
@@ -257,8 +272,12 @@ backhaul_routes () {
   echo "              (lossless; Matroska stores per-block timestamps, so the timeline"
   echo "               survives honestly; plays in IINA/VLC/mpv) — then"
   echo "              scripts/ts-health.sh OUT.mkv to prove the copy's timeline intact"
-  echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the ONLY"
-  echo "              sanctioned path to a true QuickTime-native deliverable"
+  echo "     mp4swap  scripts/mp4-swap.sh SOURCE — lossless CONTAINER swap (same"
+  echo "              bitstream, .mp4, sample entry mp4v+esds). Measured 2026-08-15:"
+  echo "              an MPEG-2 4:2:2 capture QuickTime destroyed as .mov rendered"
+  echo "              correctly as .mp4, SSIM 0.9175+ on the same timestamps"
+  echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the LAST"
+  echo "              route (it is the only one that stops being lossless)"
   echo "   Skip this scan+warning (the build runs either way): --force-backhaul"
 }
 # WO 4.1: the pix_fmt arm announces and defers to the post-build proof (the
@@ -586,10 +605,34 @@ if [ "$PLAYCHECK_DUE" -eq 1 ] && [ "$rc" -ne 1 ] && [ -f "$OUT" ]; then
   case "$PLAY_VERDICT" in
     fail)
       rc=10
-      echo "   -> AVFoundation cannot decode THIS build on THIS macOS: REVIEW. A"
-      echo "      QuickTime-native deliverable needs Rung 4 (scripts/rung4.sh, operator-"
-      echo "      attested re-encode — recipes in references/delivery-encode.md). The file"
-      echo "      itself is a verified lossless NLE/archival master (IINA/VLC/mpv decode it)."
+      echo "   -> AVFoundation cannot decode THIS build correctly on THIS macOS: REVIEW."
+      echo "      The file itself is a verified lossless NLE/archival master (IINA/VLC/mpv"
+      echo "      decode it) — what failed is QuickTime's render, and the next rung is a"
+      echo "      LOSSLESS CONTAINER SWAP, not a re-encode (D2, 1.13)."
+      # THE CONTAINER-SWAP RUNG (D2): before 1.13 every fidelity FAIL named
+      # Rung 4 and nothing else, while the measured remedy for this exact class
+      # (2026-08-15, 21 GB MPEG-2 4:2:2 capture) was the same bitstream in an
+      # MP4 — SSIM 0.9175+ on the timestamps that failed as .mov.
+      if [ "$MP4SWAP" -eq 1 ]; then
+        echo "-- container swap (--mp4-swap) --"
+        set +e; bash "$SELF_DIR/mp4-swap.sh" "$IN" "${OUT%.*}.mp4" $FULL | sed 's/^/   /'; swrc=${PIPESTATUS[0]}; set -e
+        case "$swrc" in
+          0)  echo "   >> the CONTAINER SWAP WORKS: ${OUT%.*}.mp4 is verified lossless AND renders"
+              echo "      correctly. The .mov beside it is the same bitstream in the container"
+              echo "      AVFoundation mis-dispatches; ship the .mp4, keep or delete the .mov." ;;
+          10) echo "   >> the container swap built and verified but its own render is not proven"
+              echo "      (above) — see ${OUT%.*}.mp4." ;;
+          *)  echo "   >> the container swap did not produce a verified artifact (above). The"
+              echo "      container axis is exhausted; next is stsd surgery (mp4v+esds inside a"
+              echo "      .mov via MP4Box/Bento4 — spec-legal, unbenched) or Rung 4." ;;
+        esac
+      else
+        echo "      Take the swap:  scripts/mp4-swap.sh \"$IN\" \"${OUT%.*}.mp4\""
+        echo "      (or re-run this command with --mp4-swap to have it done automatically;"
+        echo "       nothing writes a second deliverable unless you ask). If the swap also"
+        echo "       fails, THEN Rung 4 (scripts/rung4.sh, operator-attested re-encode —"
+        echo "       recipes in references/delivery-encode.md)."
+      fi
       ;;
     skip)
       rc=10

@@ -26,6 +26,7 @@ OUT="${2:?need OUT.mov}"; shift 2
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
+. "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
 
 MD=(); KV=(); CHAP=(-map_chapters -1)   # default: strip chapters (the "menu")
 add () { MD+=(-metadata "com.apple.quicktime.$1=$2"); KV+=("com.apple.quicktime.$1=$2"); }
@@ -49,7 +50,7 @@ esac; done
 
 vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 VTAG=(); [ "$vcodec" = hevc ] && VTAG=(-tag:v hvc1)
-PART="${OUT}.part"
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6)
 # -map 0 -map -0:d? keeps every real stream (video, all audio, subtitles) but drops
 # DATA tracks — the chapter/timecode text track QuickTime shows as a generic "menu".
 # CHAP controls chapter metadata; +bitexact suppresses the generic encoder tag;
@@ -59,6 +60,19 @@ ffmpeg -nostdin -y -v error -fflags +bitexact "${FF_INPUT_OPTS[@]}" -i "$IN" \
   -map 0 -map -0:d? -map_metadata 0 ${CHAP[@]+"${CHAP[@]}"} \
   -c copy ${VTAG[@]+"${VTAG[@]}"} -movflags use_metadata_tags+faststart \
   ${MD[@]+"${MD[@]}"} -f mov "$PART"
+# POST-MUX CENSUS (D5, 1.13): this pass REWRITES the container of a finished
+# deliverable — losing a track HERE would silently narrow a file that already
+# verified. `-map 0 -map -0:d?` keeps every non-data stream, so that is the plan.
+# NOTE ffprobe csv orders fields by ITS canonical section order regardless of
+# the request order: index,codec_name,codec_type — $2 is the NAME, $3 the TYPE
+# (the same trap remux.sh's non-audio census documents).
+MD_C=$(ffp -v error -show_entries stream=index,codec_type,codec_name -of csv=p=0 "$IN" 2>/dev/null | \
+       awk -F, 'NF{ if(seen[$1]++) next; if($3=="data") next; printf "%s%s", s, $2; s="," }')
+MD_N=$(printf '%s' "$MD_C" | awk -F, '{print ($0=="" ? 0 : NF)}')
+if ! mux_census "$PART" "$MD_N" "$MD_C" metadata; then
+  echo "   NOT blessing the tagged output; kept at $PART (the untagged input is untouched)." >&2
+  exit 1
+fi
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT (proper QuickTime metadata; no chapter menu)"
 

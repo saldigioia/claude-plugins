@@ -52,6 +52,7 @@ esac; done
 case "$PROFILE" in h264|hevc|prores) : ;; *) echo "rung4.sh: --profile must be h264, hevc, or prores (see references/delivery-encode.md)" >&2; exit 2;; esac
 
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
+. "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
 . "$SELF_DIR/lib-attest.sh"
 if [ "$ATT" != "$RTM_RUNG4_ATTEST" ]; then
   echo "rung4.sh: REFUSED — no valid attestation." >&2
@@ -95,11 +96,21 @@ PROV=(-metadata "com.apple.quicktime.rung4.source=$(basename "$IN")"
 
 # .part hides the extension from ffmpeg — pick the muxer from OUT explicitly
 case "$OUT" in *.mov|*.MOV) FMT=mov;; *.mp4|*.m4v|*.MP4) FMT=mp4;; *) FMT=$([ "$DEXT" = mov ] && echo mov || echo mp4);; esac
-PART="${OUT}.part"
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6)
 if ! ffmpeg -nostdin -y -v error "${FF_INPUT_OPTS[@]}" -i "$IN" \
     "${VARGS[@]}" ${AARGS[@]+"${AARGS[@]}"} \
     "${PROV[@]}" -movflags use_metadata_tags+faststart -f "$FMT" "$PART"; then
   echo ">> encode FAILED; partial output kept at $PART for inspection." >&2
+  exit 1
+fi
+# POST-MUX CENSUS (D5, 1.13): COUNT ONLY here — this rung re-encodes, so the
+# written codec_names are deliberately not the source's; what must not change
+# silently is how many streams came out. ffmpeg's default selection is best
+# video + best audio, so the plan is 1 + (1 if the source has audio).
+R4_NA=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
+R4_N=1; [ "${R4_NA:-0}" -gt 0 ] && R4_N=2
+if ! mux_census "$PART" "$R4_N" "" rung4; then
+  echo ">> NOT blessing the re-encode; kept at $PART for inspection." >&2
   exit 1
 fi
 mv -f "$PART" "$OUT"

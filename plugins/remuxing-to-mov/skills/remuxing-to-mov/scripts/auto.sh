@@ -13,6 +13,10 @@
 #               all tracks, pairfill a:0 only — with a printed WARN)
 #   --full      pass --full to verify.sh (archival sign-off)
 #   --audio M   override audio handling passed to remux.sh
+#   --mp4-swap  on a post-build fidelity FAIL, take the CONTAINER-SWAP rung
+#               (scripts/mp4-swap.sh — same bitstream, .mp4, mp4v+esds) instead
+#               of only naming it. Rung 4 is the last route out of a bad render,
+#               never the first (D2, 1.13)
 #
 # Guarantees: NEVER re-encodes (Rung 4 is a human decision); NEVER touches or
 # deletes the source; output is written atomically by the sub-scripts.
@@ -38,12 +42,13 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: auto.sh INPUT OUTPUT.mov [--dry-run] [--all-audio] [--full] [--audio MODE]}"
 OUT="${2:?need OUTPUT.mov}"; shift 2
-DRY=0; ALLAUD=""; FULL=""; AUDIO=""; PLAYABLE=0
+DRY=0; ALLAUD=""; FULL=""; AUDIO=""; PLAYABLE=0; MP4SWAP=0
 while [ $# -gt 0 ]; do case "$1" in
   --dry-run)   DRY=1; shift;;
   --all-audio) ALLAUD="--all-audio"; shift;;
   --full)      FULL="--full"; shift;;
   --playable)  PLAYABLE=1; shift;;     # macOS: confirm QuickTime can actually play it
+  --mp4-swap)  MP4SWAP=1; shift;;      # on a fidelity FAIL, take the container-swap rung (D2)
   --audio)     AUDIO="${2:?--audio needs a value}"; shift 2;;
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
@@ -51,6 +56,7 @@ esac; done
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to write onto the source" >&2; exit 2; }
 . "$SELF_DIR/lib-paff.sh"
+. "$SELF_DIR/lib-mux.sh"    # rtm_sidecar: extension-keeping intermediates (D6)
 
 # eval only well-formed PR_/PF_ KEY=VAL lines. probe emits controlled ffprobe
 # tokens (never the path) — the filter is defense-in-depth so a stray line can't
@@ -137,7 +143,11 @@ RESULT=FAIL; USED_RUNG=""
 #   failure is reported separately (pair-fill's timeline gates themselves are
 #   untouched: the cascade was the defect, not the gates).
 BEST_RESULT=FAIL; BEST_RUNG=none        # grade + rung of the artifact at OUT
-BEST_SAVE="$OUT.autobest"               # parks the best artifact during a riskier attempt
+# EXTENSION-KEEPING park name (D6, 1.13): "$OUT.autobest" hid the extension, so
+# the one artifact an operator most wants to inspect mid-ladder — the verified
+# rung the escalation is about to overwrite — could not be opened by the
+# extension-keyed macOS tools (qlmanage/avconvert) at all.
+BEST_SAVE="$(rtm_sidecar "$OUT" autobest)"   # parks the best artifact during a riskier attempt
 GATE_F_ONLY=0
 rank () { case "$1" in OK) echo 2;; REVIEW) echo 1;; *) echo 0;; esac; }
 save_best () {  # park a REVIEW-or-better artifact before the next attempt overwrites OUT
@@ -297,10 +307,22 @@ if [ -f "$OUT" ] && { { [ "$PLAYCHECK_DUE" -eq 1 ] && [ "$RESULT" != FAIL ]; } |
   case "$PLAY_VERDICT" in
     fail)
       RESULT=REVIEW; BEST_RESULT=REVIEW
-      echo "   -> verified lossless but NOT QuickTime-decodable on THIS macOS: REVIEW."
-      echo "      A QuickTime-native deliverable needs Rung 4 (scripts/rung4.sh, operator-"
-      echo "      attested re-encode); the artifact itself remains a legitimate lossless"
-      echo "      NLE/archival master (IINA/VLC/mpv decode it)."
+      echo "   -> verified lossless but NOT correctly QuickTime-rendered on THIS macOS:"
+      echo "      REVIEW. The artifact remains a legitimate lossless NLE/archival master"
+      echo "      (IINA/VLC/mpv decode it); the next rung is the LOSSLESS CONTAINER SWAP,"
+      echo "      not a re-encode (D2, 1.13)."
+      if [ "$MP4SWAP" -eq 1 ]; then
+        echo "-- container swap (--mp4-swap) --"
+        set +e; bash "$SELF_DIR/mp4-swap.sh" "$IN" "${OUT%.*}.mp4" $FULL | sed 's/^/   /'; swrc=${PIPESTATUS[0]}; set -e
+        case "$swrc" in
+          0) echo "   >> the CONTAINER SWAP WORKS: ${OUT%.*}.mp4 is verified lossless AND renders correctly.";;
+          *) echo "   >> the container swap did not produce a proven artifact (above; rc=$swrc).";;
+        esac
+      else
+        echo "      Take the swap:  scripts/mp4-swap.sh \"$IN\" \"${OUT%.*}.mp4\""
+        echo "      (or re-run with --mp4-swap). Only if THAT fails: Rung 4 (scripts/rung4.sh,"
+        echo "      operator-attested re-encode)."
+      fi
       ;;
     skip)
       if [ "$PLAYCHECK_DUE" -eq 1 ]; then

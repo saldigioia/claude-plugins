@@ -41,6 +41,7 @@ esac; done
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"
+. "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
 
 # backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
 # defers to the post-build proof, rot WARNs and builds) — this script writes a
@@ -112,7 +113,7 @@ done
 # 3) rebuild from zero at the field rate
 cp=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
-PART="${OUT}.part"; MUXLOG="$WORK/mux.log"
+PART="$(rtm_part "$OUT")"; MUXLOG="$WORK/mux.log"   # extension-keeping (D6)
 # ${arr[@]+...} expansions keep bash 3.2 (macOS default) happy under set -u with empty arrays
 if ! ffmpeg -nostdin -y -hide_banner -nostats -fflags +genpts -r "$RATE" "${FF_INPUT_OPTS[@]}" -i "$WORK/v.h264" ${AIN[@]+"${AIN[@]}"} \
     -map 0:0 ${AMAP[@]+"${AMAP[@]}"} -c:v copy -c:a pcm_s16le \
@@ -143,6 +144,16 @@ echo "   output timeline: packets=$RG_N N/A=$RG_NAPTS/$RG_NADTS backward=$RG_BAC
 if [ "${RG_NAPTS:-1}" -ne 0 ] || [ "${RG_NADTS:-1}" -ne 0 ] || [ "${RG_BACK:-1}" -ne 0 ] || [ "${RG_DUP:-1}" -ne 0 ] || [ "${RG_OFFDUR:-9}" -gt 1 ]; then
   echo ">> HARD STOP: the rebuilt timeline is not the clean constant-rate ramp this"
   echo "   rung promises. NOT blessing the output; kept at $PART (log: $MUXLOG)."
+  exit 1
+fi
+# POST-MUX CENSUS (D5, 1.13): this rung re-muxes from N+1 separate inputs (the
+# elementary video plus one WAV per audio track) — exactly the shape where a
+# quietly unmapped input goes unnoticed. Video codec comes from the elementary
+# stream; every audio track is pcm_s16le by construction.
+RB_C="$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)"   # the SOURCE codec, not the artifact reading itself
+i=0; while [ "$i" -lt "$NA" ]; do RB_C="$RB_C,pcm_s16le"; i=$((i+1)); done
+if ! mux_census "$PART" "$((1 + NA))" "$RB_C" rebuild-paff; then
+  echo "   NOT blessing the output; kept at $PART (log: $MUXLOG; intermediates in $WORK)."
   exit 1
 fi
 mv -f "$PART" "$OUT"

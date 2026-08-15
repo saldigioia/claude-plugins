@@ -331,8 +331,12 @@ backhaul_gate_routes () {
   echo "     playback ffmpeg -i SOURCE -map 0:v:0 -map '0:a?' -c copy OUT.mkv  (lossless;"
   echo "              plays in IINA/VLC/mpv) — then scripts/ts-health.sh OUT.mkv to prove"
   echo "              the copy's timeline survived intact"
-  echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the ONLY sanctioned"
-  echo "              path to a true QuickTime-native deliverable"
+  echo "     mp4swap  scripts/mp4-swap.sh SOURCE — lossless CONTAINER swap (same bitstream,"
+  echo "              .mp4, sample entry mp4v+esds): the rung between a retag and a"
+  echo "              re-encode. Measured 2026-08-15 on an MPEG-2 4:2:2 capture QuickTime"
+  echo "              destroyed as .mov — SSIM 0.9175+ on the same timestamps as .mp4"
+  echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the LAST route (the"
+  echo "              only one that stops being lossless)"
   echo "   Skip this scan+warning: mov.sh --force-backhaul (sets RTM_FORCE_BACKHAUL=1)"
 }
 # --- WO 5.2 unroutable codecs — shared classifiers + refusal voice ------------

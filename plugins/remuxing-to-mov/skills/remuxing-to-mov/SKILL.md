@@ -69,10 +69,16 @@ REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
    loss is explained instead of re-flagged forever — never widened without a
    measurement, and the explained residual is stated, never silent. Gate (g)
    (WO 3.6) proves **audio playability** on every QTFF output track: sample-entry
-   tag on a positive allowlist + a bounded head decode — the dead-HDMV-track
+   tag as a *prior* + a bounded head decode — the dead-HDMV-track
    class (an 18.5 GB Blu-ray `pcm_bluray` copy shipped "verified" with
    unplayable audio) FAILs here, and that FAIL is never waivable; non-QTFF
-   outputs (an MKV cross-check) get the decode half only.
+   outputs (an MKV cross-check) get the decode half only. Since 1.13 (D3) the
+   allowlist no longer decides alone: an **off-list tag still gets the decode
+   probe** (it used to be skipped there) and a clean decode is an advisory
+   REVIEW, not a FAIL — `ipcm` was condemned unwaivably on evidence never
+   gathered — while **MP2 with no PCM access track** is now the REVIEW it always
+   should have been (AVFoundation has no Layer II path; the gate passed the
+   configuration that fails and failed the one that works).
 
 ## The escalation ladder — stop at the first rung that works
 
@@ -106,10 +112,24 @@ Rung 3  Rebuild timeline from the elementary stream
         re-stamps at a constant rate (PTS=DTS), which plays a reordered stream
         in DECODE order (shuffled motion), so it now REFUSES those (use 3-PAIR).
         probe.sh/diagnose.sh route between 3-PAIR and 3 by timestamp profile.
+Rung 3-SWAP  Lossless container swap   scripts/mp4-swap.sh IN [OUT.mp4]
+        when: the build verifies lossless but its post-build FIDELITY proof
+        FAILs — QuickTime opens it and renders the wrong pixels. Same bitstream,
+        MP4 container, sample entry mp4v+esds instead of the MOV's m2v1+glbl.
+        Measured 2026-08-15 (21 GB MPEG-2 4:2:2 1080i29.97): SSIM 0.9175+ on the
+        exact timestamps that failed as .mov, where all five MOV retags scored
+        0.81-0.85. It builds, verifies AND re-runs the fidelity gate on the .mp4.
+        The deliverable is a .mp4 by necessity: ffmpeg's MOV tag table refuses to
+        write that entry into a .mov (spec-legal there, per Apple's QTFF video
+        sample-description extensions list — only stsd surgery could, unbenched).
+        mov.sh/auto.sh --mp4-swap take this rung automatically on a fidelity FAIL;
+        without the flag they NAME it (no unrequested second deliverable).
 Rung 4  Re-encode (last resort)   scripts/rung4.sh IN --profile h264|hevc|prores
         only: a build whose post-build playable-check FAILs on the target
         macOS (decode support drifts by OS version — proven per file since
-        1.11, never assumed per codec), Dolby Vision playback, or a
+        1.11, never assumed per codec) AND whose container swap (Rung 3-SWAP)
+        also failed — since 1.13 a fidelity FAIL is never routed straight
+        here — plus Dolby Vision playback, or a
         frame-exact cut at a non-keyframe. Minimize footprint. rung4.sh is the
         ONLY sanctioned route: it refuses without the operator's verbatim
         attestation and stamps mdta provenance so the derivative can never
@@ -201,12 +221,15 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 | Broadcast splice changes resolution mid-stream (new SPS / MPEG-2 sequence header) | **Named limitation — detect-and-warn candidate, not implemented** (the video parallel of resync.sh's audio layout-change refusal): the copy mux succeeds with no warning, `stsd` declares the FIRST resolution while later samples decode at the new size, and no gate catches it (measured 2026-08-14). Junction-spanning capture: check `ffprobe -show_frames -show_entries frame=width,height` around the splice and cut there first. `references/known-limits.md` |
 | Capture starts mid-GOP (video packets before the first IDR — undecodable pre-roll) | `scripts/trim-to-idr.sh IN OUT.ts` — the trim ts-health prescribes, **implemented**: locates the first IDR (windowed scan, raised probe window), proves the boundary closed with `gop-probe.sh` (open-GOP boundary → refuses; that trade is the operator's), copy-cuts **both** tracks with `-ss` relative to `start_time` (the WO 1.3 origin, self-documented), blesses only after ts-health's own counter reads **0** pre-keyframe packets + the first output packet is the source IDR byte-for-byte; kept region stream-copied byte-identical. `mov.sh` auto-runs it when its pre-flight sees pre-roll — **announced, never silent**; `--no-idr-trim` keeps the old behavior (also announced). WHY the untrimmed build REVIEWs: ffmpeg streamcopy silently drops the video pre-roll (`-copyinkf` default) while the audio pre-roll lands — a phantom A/V-parity "desync" the trim removes at the source |
 | HEVC file won't open in QuickTime | Retag, don't re-encode: `ffmpeg -i IN -c copy -tag:v hvc1 OUT.mov` |
-| MPEG-2 4:2:2 MOV glitches/smears in QuickTime but plays clean in IINA/VLC (probe shows tag `m2v1`) | Decoder dispatch, not damage. Retag, don't re-encode: `ffmpeg -i IN -map 0 -c copy -tag:v xd5b -movflags +faststart OUT.mov` (`xd5b` = 1080i59.94; pick from the `xd5*` table in ingest-compatibility.md). Measured 2026-08-15, macOS 26.6.1: AVFoundation routes `xd5*` to the pro XDCAM HD422 decoder and does not enforce CBR. |
+| MPEG-2 4:2:2 glitches/smears in QuickTime but plays clean in IINA/VLC (the built `.mov` carries stsd `m2v1`) | Decoder **dispatch**, not damage — and a **two-step**, narrowed 2026-08-15 (D8, 1.13; the 1.12 row claimed the retag WAS the remedy). **1. Retag** (free, 4 bytes, bitstream bit-identical): `ffmpeg -i IN -map 0 -c copy -tag:v xd5b -movflags +faststart OUT.mov` — works when the stream matches the fourcc's profile contract (measured 2026-08-15 on the VMA 1080i59.94 pair: garbage as `m2v1`, frame-for-frame identical to the ffmpeg reference as `xd5b`; CBR not enforced). **2. If the retag does not fix it, swap the container:** `scripts/mp4-swap.sh IN` — same bitstream, `.mp4`, sample entry `mp4v`+`esds` (measured the same day on a 21 GB 1080i29.97 capture where **all five** tags — `m2v1`/`mp2v`/`hdv3`/`xd5b`/`xd5c` — corrupted **identically**, because movenc gives every MPEG-2 fourcc the same generic sample-description body: `glbl`+`fiel`+`colr`. The swap scored SSIM 0.9175+ on the very timestamps that failed). ffmpeg cannot write `mp4v` into a `.mov` (`Tag mp4v incompatible with output codec id '2'`) — that is a **muxer tag-table artifact**, not QTFF: Apple lists `esds` among the legal video sample-description extensions, so the entry is spec-legal in MOV and only `stsd` surgery (MP4Box/Bento4, unbenched) could put it there. Rung 4 is step 3, not step 1. `probe.sh` fires the advisory on **.ts sources too** since 1.13 (D7 — it was dead on every TS before). |
+| A stream you mapped is missing from the output (or came out as another codec) | **Post-mux census** (D5, 1.13): every builder now reconciles its own plan against the finished file BEFORE blessing it — `RMX_CENSUS stage=… planned=N written=M codecs=ok\|mismatch\|na match=ok\|MISMATCH`, run on the `.part` file, and a mismatch is a loud exit 1 with nothing under the real name. Motive: `ffmpeg -c copy -f mov` was measured dropping 1 of 3 streams at `-v warning` — silently — and every downstream gate passed, because they only ever examined the streams that survived. `RMX_PLAN … unmapped=N` is still a plan *printed before the mux*; the census is the half that looks at the file |
+| Output has MP2 audio and no PCM access track | **No audio in QuickTime** — AVFoundation has no MPEG Layer II path for `mp4a`/`.mp2` tracks (no positive report of Layer II decode in QuickTime X/AVFoundation exists in any container; ffmpeg's `mov_write_esds_tag` already declares the formally-correct OTI `0x6B`, so there is nothing to fix on the write side). `verify.sh` gate (g) REVIEWs this configuration since 1.13 (D3) — before that it *passed* it while FAILing configurations that work. Rebuild: `scripts/mov.sh` (routes MP2 to dual-track automatically) or `remux.sh --audio pcm`. The `.mp2` allowlist entry is legal only as dual-track's **preserved original**, where the PCM access track is what plays |
+| Verify FAILs an audio sample entry it doesn't recognize (e.g. `ipcm`) | The allowlist is a **prior, not a verdict** since 1.13 (D3): an off-list tag now runs the bounded decode probe (pre-1.13 the probe was deliberately *skipped* there — the one measurement that could falsify the claim), and a clean decode downgrades the FAIL to an advisory REVIEW. `ipcm` is explicitly allowlisted: it is the ISO-registered PCM entry (ISO/IEC 23003-5 + `pcmC`, MP4RA-registered, written by ffmpeg since 6.1, read by VLC/GPAC, shipped by Sony XAVC since 2021) and it is exactly what `-c:a pcm_s16le -f mp4` produces — i.e. what the container-swap rung's access track is. The old text ("a sample entry no decoder claims") was factually false about it |
 | Plays locally, slow start over network | `ffmpeg -i IN -c copy -movflags +faststart OUT.mov` (moov was at EOF) |
 | Video plays, audio silent in QuickTime | Audio QT can't play (AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm`. **E-AC-3 (Dolby Digital Plus) plays natively — just copy it** |
 | Glitches/tears only on scrub | Timestamps, not the video → `scripts/diagnose.sh` |
 | Audio drifts out of sync over a long capture (leads/lags the picture) | Discontinuous source: dropped frames the video keeps but raw PCM collapses on copy. `scripts/diagnose.sh` finds the forward gaps → `scripts/resync.sh IN OUT.mov` (video bit-identical, audio gap-filled) → `verify.sh` parity gate confirms. resync **refuses** (exit 11) sources whose audio changes channel layout mid-stream — the filter-graph-rebuild silence-injection class — and its verify pass adds `--silence` content parity |
-| Backhaul/contribution TS (4:2:2 `yuv422p*`, **any bit depth** — MPEG-2, H.264 Hi422/AVC-Intra, HEVC Rext) | **Demoted to empirical, 1.11 (WO 4.1):** the categorical "QuickTime cannot decode 4:2:2" refusal was **falsified on macOS 26.6.1 (2026-08-13)** — both formerly-refused classes fully decoded the synthetic bench clips (qlmanage + `avconvert` whole-file; renders — correctness is per-file, see the 2026-08-15 narrowing later in this row), and the 8-bit-exact gate had let real 10-bit contribution profiles through unannounced. Now every entry point **announces** the profile (`contribution profile <codec>/<pix_fmt>`) and builds losslessly; the **driver paths** (`mov.sh`/`auto.sh`/`batch.sh`-via-auto) then **prove playability on the finished output** (`playable-check.sh` auto-run — since 1.12 with `--fidelity`, the SSIM proof it rendered *correctly*, after two real 4:2:2 masters false-greened the thumbnail-only check on 26.6.1, 2026-08-15; additive machine line `MOV_PLAYABILITY os=… verdict=ok\|fail\|skip fidelity=ok\|fail\|skip`), while a **standalone** `remux.sh`/`dual-track.sh`/`pairfill-paff.sh`/`rebuild-paff.sh` run prints the advisory telling the operator to prove it themselves (`playable-check.sh OUT.mov` — no auto-run there). Verdict `fail` → exit 10 REVIEW with Rung 4 named (the file remains a verified lossless NLE/archival master); no macOS/qlmanage → exit 10 REVIEW, `playability unverified on this platform`. `--force-backhaul`/`RTM_FORCE_BACKHAUL` stay API (no-ops for this arm — nothing refuses on pix_fmt). Separately, on MPEG-2 TS, gaps **plus** non-monotonic DTS (timeline rot, whole-file scan) now **warn + build** too (1.11, WO 4.2 — additive `MOV_ROT_WARN` machine line, the old refusal's same three routes, every entry point): the mux-confession hard stop refuses invented timing at the mux, and `verify.sh` judges the finished timeline (bench 2026-08-14: the constructed rot fixture built and drew an evidence-bearing dual-track-misalignment REVIEW, not an exit 11); gaps ALONE rebuild fine (the 2008 recovery) |
+| Backhaul/contribution TS (4:2:2 `yuv422p*`, **any bit depth** — MPEG-2, H.264 Hi422/AVC-Intra, HEVC Rext) | **Demoted to empirical, 1.11 (WO 4.1):** the categorical "QuickTime cannot decode 4:2:2" refusal was **falsified on macOS 26.6.1 (2026-08-13)** — both formerly-refused classes fully decoded the synthetic bench clips (qlmanage + `avconvert` whole-file; renders — correctness is per-file, see the 2026-08-15 narrowing later in this row), and the 8-bit-exact gate had let real 10-bit contribution profiles through unannounced. Now every entry point **announces** the profile (`contribution profile <codec>/<pix_fmt>`) and builds losslessly; the **driver paths** (`mov.sh`/`auto.sh`/`batch.sh`-via-auto) then **prove playability on the finished output** (`playable-check.sh` auto-run — since 1.12 with `--fidelity`, the SSIM proof it rendered *correctly*, after two real 4:2:2 masters false-greened the thumbnail-only check on 26.6.1, 2026-08-15; additive machine line `MOV_PLAYABILITY os=… verdict=ok\|fail\|skip fidelity=ok\|fail\|skip`), while a **standalone** `remux.sh`/`dual-track.sh`/`pairfill-paff.sh`/`rebuild-paff.sh` run prints the advisory telling the operator to prove it themselves (`playable-check.sh OUT.mov` — no auto-run there). Verdict `fail` → exit 10 REVIEW routed to the **container-swap rung first** (1.13 D2: `scripts/mp4-swap.sh`, or `--mp4-swap` on `mov.sh`/`auto.sh` to have it built and proven automatically), with Rung 4 named LAST (the file remains a verified lossless NLE/archival master); no macOS/qlmanage → exit 10 REVIEW, `playability unverified on this platform`. The fidelity threshold is **scan-keyed** since 1.13 (D1): 0.90 is progressive-tuned and false-FAILs healthy interlaced material — measured 0.8866–0.9684 healthy vs 0.8146–0.8471 corrupt on the field report's real 1080i59.94 capture, and 0.8669 on a healthy synthetic interlaced 4:2:2 clip on this bench — so a declared interlaced `field_order` is judged against `RTM_FIDELITY_SSIM_INTERLACED` (0.86, in the measured gap; the ~0.02 margin is a stated residual). Field normalization was tried and REJECTED, measured not assumed (bwdif/yadif on either or both sides, `setfield=prog`, `scale interl=0`, an 8-bit chroma path, neighbour scaling: every candidate moved the score ≤0.005) — the deficit is chroma-plane, not field-structure, which is why the gate now reports the **Y/U/V split** (`y=`/`u=`/`v=` on `PLAYCHECK_FIDELITY`) and NAMES a luma-survives-chroma-collapses failure instead of returning one opaque scalar. `--force-backhaul`/`RTM_FORCE_BACKHAUL` stay API (no-ops for this arm — nothing refuses on pix_fmt). Separately, on MPEG-2 TS, gaps **plus** non-monotonic DTS (timeline rot, whole-file scan) now **warn + build** too (1.11, WO 4.2 — additive `MOV_ROT_WARN` machine line, the old refusal's same three routes, every entry point): the mux-confession hard stop refuses invented timing at the mux, and `verify.sh` judges the finished timeline (bench 2026-08-14: the constructed rot fixture built and drew an evidence-bearing dual-track-misalignment REVIEW, not an exit 11); gaps ALONE rebuild fine (the 2008 recovery) |
 | Field-coded (PAFF) H.264 (coded-pic rate ≈ 2× frame rate — the rate counts ALL packets, untimestamped included) | genpts is guilty-until-proven → pair-timestamped/reordered: `scripts/pairfill-paff.sh` (keeps real PTS); no reorder: `scripts/rebuild-paff.sh`; confirm with `scripts/verify.sh` (timeline + scrub gates) |
 | Mux log says `pts has no value` / `Timestamps are unset` / `Non-monotonic DTS` on a copy mux | **HARD STOP — the muxer invented the timeline.** Never ship it, whatever verify says about the essence. remux.sh/dual-track.sh refuse automatically; run `scripts/diagnose.sh` for the repair |
 | Repair looks fine but motion is subtly shuffled | Constant-rate restamp flattened a reorder pyramid (PTS=DTS = decode order). `verify.sh --full` compares framemd5 presentation ORDER; repair with `pairfill-paff.sh`, never `rebuild-paff.sh` |
@@ -290,11 +313,26 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
   parameters`), the mux paths retry **once** at 1G on both axes, announced
   first (`** probe window exhausted at default; retrying with 1G — consider
   RTM_PROBESIZE`, WO 1.2); any other failure is never retried.
-- `-nostdin` on every call; **atomic output** (`.part` → `mv`); temp/intermediate
+- `-nostdin` on every call; **atomic output** — and since 1.13 the part file
+  **keeps the real extension** (`x.part.mov`, never `x.mov.part`; `lib-mux.sh`'s
+  `rtm_part`/`rtm_sidecar`, applied to every builder plus `mov.sh`'s `.premeta`
+  and `auto.sh`'s parked `.autobest`). WHY (D6): `qlmanage`/`avconvert` are
+  **extension-keyed**, so an operator diagnosing a kept part file got "the decode
+  stack cannot handle this input" — a decode verdict for a filename problem — on
+  exactly the artifacts the builders deliberately keep on failure.
+  `playable-check.sh` additionally probes any non-QuickTime-extensioned argument
+  through a temporary **hardlink** (measured 2026-08-15: Quick Look does NOT
+  follow symlinks — the symlinked `.mov` hit the deadline, the hardlink
+  thumbnailed instantly), announced, never silent. Temp/intermediate
   files are **never auto-deleted** and `set -e` gates every step, so a failure
   never reaches cleanup. (One deliberate exception, stated where it happens:
   `mov.sh`'s auto-trim intermediate is removed only **after a verified DONE**;
   on REVIEW/FAIL it is kept and named, because verify compared against it.)
+- **Post-mux census before any blessing** (D5, 1.13): every builder reconciles
+  the stream count *and* per-stream codec identity of the finished `.part`
+  against the plan it just printed, then moves it into place — `RMX_CENSUS`,
+  exit 1 on MISMATCH with the part file kept. A silently dropped stream used to
+  ship green (measured: `-c copy -f mov` losing 1 of 3 streams at `-v warning`).
 - Color: `colr` is written automatically by modern ffmpeg; do **not** fabricate
   tags for `unknown` sources.
 
@@ -314,10 +352,13 @@ exit 10). The accepted-legacy contract is stated in `verify.sh`'s header; a
 caller coded to its exit code alone reads REVIEW as green (the qt-groups
 defect the 1.11 fix round repaired).
 
-**What still REFUSES (exit 11) in 1.11** — nothing else does: the shared
+**What still REFUSES (exit 11)** — nothing else does: the shared
 unroutable-codec pre-flight on VC-1/VP9/AV1 video and Dolby E audio (routes +
 `MOV_REFUSED`; since the 1.11 fix round enforced at `mov.sh`, `auto.sh` AND
-`remux.sh` — gate at every entry point), and `resync.sh`'s mid-stream
+`remux.sh` — gate at every entry point). **Scoped in 1.13:** "unroutable" was
+always a MOV fact, so `remux.sh --container mp4` (the container-swap rung)
+refuses only VC-1 there — VP9/AV1 into MP4 is the refusal's own named route and
+is no longer refused by it. Also: `resync.sh`'s mid-stream
 audio-layout-change guard (propagates through `auto.sh`/`mov.sh`; `batch.sh`
 counts any 11 as its own `REFUSED` verdict class, never a batch failure). Related hard stops that are
 **not** 11: the mux-confession HARD STOP (invented timing) is exit **1**, the
@@ -335,10 +376,12 @@ renamed — Ground Rule 4):
 | `MOV_SUMMARY` | `mov.sh` | `mode=copy\|dual\|pcm\|multi\|none out= audio_kept= audio_dropped= idr_trim=none\|<N>\|skipped\|failed` (idr_trim appended WO 2.2: N = pre-keyframe packets trimmed) |
 | `AUTO_SUMMARY` | `auto.sh` | `result= best_rung= best_result= rung=` — the additive `best_*` pair (WO 2.3) sits **before** `rung=` on purpose (batch.sh's greedy `.*rung=` parse) |
 | `MOV_PLAYABILITY` | driver post-build check (`lib-paff.sh`) | `os=<macOS\|na> verdict=ok\|fail\|skip fidelity=ok\|fail\|skip` (WO 4.1; self-dating, Ground Rule 6; `fidelity=` appended 1.12 WO-B — `skip` when the mode wasn't requested or couldn't measure) |
-| `PLAYCHECK_FIDELITY` | `playable-check.sh --fidelity` (1.12 WO-B) | `verdict=ok\|fail\|skip reason=none\|fidelity\|convert-hang\|convert-fail\|compare-fail\|<skip-cause> ssim=<worst\|na> os=<macOS\|na>` — SSIM below `RTM_FIDELITY_SSIM` → `verdict=fail reason=fidelity` + exit 1 |
+| `PLAYCHECK_FIDELITY` | `playable-check.sh --fidelity` (1.12 WO-B) | `verdict=ok\|fail\|skip reason=none\|fidelity\|convert-hang\|convert-fail\|compare-fail\|<skip-cause> ssim=<worst\|na> os=<macOS\|na> y= u= v= scan=interlaced\|progressive\|unknown thresh= mp4_swap=untried` — the five trailing fields appended 1.13 (D1/D2, Ground Rule 4): the per-plane split of the worst sample, the scan the threshold was keyed off, the threshold in force, and `mp4_swap=untried` (this script sees only the OUTPUT, never the source, so it can name the container-swap rung but not run it). SSIM below the in-force threshold → `verdict=fail reason=fidelity` + exit 1 |
 | `MOV_ROT_WARN` | `mov.sh` + shared `backhaul_gate` | `profile=timeline-rot vcodec= disc= back= dup=` (WO 4.2 — warn + build, never a refusal) |
 | `MOV_CHAPTER_TS_WARN` | `mov.sh` + `resync.sh` | `chapters= dur_s= limit_s= [drop_s=]` (1.12 WO-C — announce-only chaptered movie-timescale-overflow pre-announce, never a refusal; `drop_s=` appended only when the tier-2 silent-drop arm fires; thresholds `RTM_CHAPTER_TS_WARN_SECS` (2900) / `RTM_CHAPTER_TS_DROP_SECS` (5965)) |
 | `MOV_REFUSED` | shared unroutable pre-flight (`lib-paff.sh`; emitted by `mov.sh`/`auto.sh`/`remux.sh` — WO 5.2, parity closed in the 1.11 fix round) | `profile=unroutable-vcodec vcodec=` / `profile=dolby-e-audio track=a:<N>`. The 1.8.0–1.10.0 backhaul values (`qt-undecodable-*`, rot) are **retired — no longer emitted, reserved, never reused** |
+| `RMX_CENSUS` | every builder, post-mux, pre-bless (`lib-mux.sh`) | `stage=remux\|dual-track\|resync\|rebuild-paff\|pairfill-paff\|trim-to-idr\|metadata\|rung4 planned=<N> written=<M> codecs=ok\|mismatch\|na match=ok\|MISMATCH` (D5, 1.13 — the plan-vs-file reconciliation; MISMATCH is exit 1 with the artifact kept as `.part`) |
+| `MP4_SWAP` | `mp4-swap.sh` | `out= verdict=ok\|review\|fail stage=build\|verify fidelity=ok\|fail\|skip\|na` (D2, 1.13 — the container-swap rung's own verdict) |
 | `QTG_SUMMARY` | `qt-groups.sh` | `date= macos= mp4box= audio= enabled= group= patched= out=` |
 | `VERIFY_SUMMARY` / `VERIFY_SIGNATURE` | `verify.sh` (waiver flow) | waiver verdict + the exact gate/signature a sidecar must match |
 | `TSH_*` / `PR_*`+`PF_*` | `ts-health.sh --kv` / `probe.sh --kv` | KV blocks. Probe additions (WO 5.1/5.2): `PR_VNATIVE` (`--json`: `vnative`) = `yes\|variant\|no\|na` — the measured QT-native matrix; `PR_AUDIO_ACTION` gained `specialist` (Dolby E) beside `copy\|pcm\|none`; `PR_TAG_ADVICE` (1.12 WO-A) = the lossless `-tag:v xd5*` retag advice for `m2v1` MPEG-2 4:2:2 decoder dispatch — `references/ingest-compatibility.md` |
@@ -354,6 +397,7 @@ renamed — Ground Rule 4):
 | Track selection/language tags, verification methods, safety, playable≠valid | `references/verification-safety.md` |
 | Atom anatomy, MOV vs MP4, required structure, validation checks; QuickTime metadata (`mdta`) & the chapter-menu strip | `references/container-internals.md` |
 | Codec/container landscape: terminology, licensing, efficiency, audio transparency numbers, Atmos/DTS:X carriage, what each container accepts, "what is X / X vs Y" questions | `references/codec-landscape.md` |
+| The container axis: a build that verifies lossless but renders WRONG in QuickTime — the retag vs the lossless `.mp4` swap, why ffmpeg cannot write the working entry into a `.mov`, and what is still unbenched | `references/ingest-compatibility.md` ("The container axis") + `references/known-limits.md` + `scripts/mp4-swap.sh` |
 | Rung-4 delivery/encode recipes (x264/x265/ProRes) — NOT the lossless path | `references/delivery-encode.md` |
 | QuickTime language menu: `alternate_group` mechanics, the measured tool-avenue log (MP4Box `-group-add` recipe, gpac hazards), the 5-proof binary patch | `references/alternate-group.md` + `scripts/qt-groups.sh` |
 | **DEFAULT deliverable**: QuickTime-ready dual-track (PCM access + original preserved), alignment-safe two-pass cutting, dual-track QC | `references/dual-track-quicktime.md` + `scripts/dual-track.sh` |
@@ -431,6 +475,23 @@ referenced files.
   synthetic — they disprove "cannot decode", not every real master; that
   residual is why the check is per-file, and why it now checks pixels, not
   just the open.)
+  **And the CONTAINER is a third axis (1.13, D2).** The 1.12 answer to a bad
+  4:2:2 render was "retag" — narrowed the same day: on a real 21 GB 1080i29.97
+  capture all five MOV tags (`m2v1`/`mp2v`/`hdv3`/`xd5b`/`xd5c`) corrupted
+  IDENTICALLY, because movenc writes one generic sample-description body for
+  every MPEG-2 fourcc (`glbl`+`fiel`+`colr`) — a retag changes the FourCC and
+  the compressor name, nothing else, so it can only work where the stream
+  matches the fourcc's profile contract. The same bitstream in an `.mp4`
+  (`mp4v`+`esds`) rendered correctly, SSIM 0.9175+ on the failing timestamps.
+  That is now a rung (`scripts/mp4-swap.sh`, Rung 3-SWAP) named at every
+  fidelity-FAIL route, and Rung 4 comes after it. ffmpeg refuses to write
+  `mp4v` into a `.mov` — a muxer TAG-TABLE artifact, not QTFF: Apple lists
+  `esds` as a legal video sample-description extension, so only `stsd` surgery
+  (unbenched) could keep the `.mov` extension. Also 1.13: the fidelity
+  threshold is scan-keyed (0.90 progressive / 0.86 interlaced — 0.90
+  false-FAILed healthy interlaced material) and every sample reports its Y/U/V
+  split, because the interlaced deficit is chroma-plane, not field-structure
+  (normalization sweep measured and rejected — `known-limits.md`).
   Timeline defects are the **orthogonal** axis (buildability, not decodability):
   forward gaps + non-monotonic DTS = backhaul timeline rot — since 1.11 (WO
   4.2) a pre-build **warning**, not a refusal (whole-file demux scan — the

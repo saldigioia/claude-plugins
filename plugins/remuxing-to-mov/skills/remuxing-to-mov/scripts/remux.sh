@@ -10,7 +10,18 @@
 # Usage: scripts/remux.sh INPUT OUTPUT.mov [--audio auto|copy|pcm] [--genpts]
 #                         [--audio-keep all|first|layouts|IDX[,IDX...]]
 #                         [--all-audio] [--print-plan] [--timescale N]
-#                         [--drc auto|off|on]
+#                         [--drc auto|off|on] [--container mov|mp4]
+#   --container  mov (default) | mp4 — the CONTAINER-SWAP rung (D2, 1.13). Same
+#                bitstream, same audio policy, ISO container. Exists because a
+#                MOV fidelity FAIL is not a one-route verdict: MPEG-2 4:2:2 that
+#                AVFoundation destroys as 'm2v1'+glbl in a .mov decodes cleanly
+#                as 'mp4v'+esds in a .mp4 (measured 2026-08-15 on a 21 GB
+#                capture: SSIM 0.9175+ on the very timestamps that failed), and
+#                ffmpeg's MOV tag table REFUSES to write that entry into a .mov
+#                ("Tag mp4v incompatible with output codec id '2' (m2v1)" —
+#                mux.c's linear table lookup, not a QTFF rule; `esds` is a
+#                first-class QuickTime video sample-description extension). The
+#                normal driver route is scripts/mp4-swap.sh, which wraps this.
 #   --audio auto (default): per kept track — QT-DECODABLE (AAC/ALAC/MP3/raw
 #                           PCM/E-AC-3) copies bit-exact; EVERYTHING else lands
 #                           as PCM access audio, announced per track (WO 3.2):
@@ -61,9 +72,11 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: remux.sh INPUT OUTPUT.mov [opts]}"; OUT="${2:?need OUTPUT.mov}"; shift 2
-AUDIO=auto; GENPTS=""; KEEP=all; PLANONLY=0; TSCALE=""; DRCOPT=auto   # KEEP default all (WO 3.3)
+AUDIO=auto; GENPTS=""; KEEP=all; PLANONLY=0; TSCALE=""; DRCOPT=auto; FMT=mov   # KEEP default all (WO 3.3)
 while [ $# -gt 0 ]; do case "$1" in
   --audio) AUDIO="$2"; shift 2;;
+  --container) FMT="${2:?--container needs mov|mp4}"; shift 2;;
+  --container=*) FMT="${1#*=}"; shift;;
   --drc) DRCOPT="${2:?--drc needs a value}"; shift 2;;
   --genpts) GENPTS="-fflags +genpts"; shift;;
   --all-audio) KEEP=all; shift;;
@@ -75,11 +88,13 @@ while [ $# -gt 0 ]; do case "$1" in
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
 case "$DRCOPT" in auto|off|on) ;; *) echo "bad --drc: $DRCOPT" >&2; exit 2;; esac
+case "$FMT" in mov|mp4) ;; *) echo "bad --container: $FMT (mov|mp4)" >&2; exit 2;; esac
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # mux_confessions, backhaul_gate
+. "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
 
 # backhaul gate (1.11: advises + warns, refuses nothing — 4:2:2 announces the
 # contribution profile and defers to the post-build proof, WO 4.1; timeline rot
@@ -95,7 +110,14 @@ backhaul_gate "$IN" || exit $?
 # probed vcodec also drives the hvc1 tag below (one probe, two uses). Dolby E
 # is per-track and policy-aware — checked on the KEPT set in the mux loop.
 vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
-if unroutable_v "$vcodec"; then
+# CONTAINER-SCOPED (D2, 1.13): "unroutable" was always a MOV fact. VP9/AV1 are
+# refused because the MOV muxer rejects them — MP4 takes both with -c copy (the
+# refusal's own named route), so on --container mp4 they are routable and must
+# not be refused. VC-1 has no sample entry in either family and still refuses.
+if [ "$FMT" = mov ] && unroutable_v "$vcodec"; then
+  unroutable_v_refuse "$vcodec"
+  exit 11
+elif [ "$FMT" = mp4 ] && [ "$vcodec" = vc1 ]; then
   unroutable_v_refuse "$vcodec"
   exit 11
 fi
@@ -279,7 +301,10 @@ echo "RMX_PLAN policy=$KEEP kept=${KEPT:-none} dropped=${DROPPED:-none} unmapped
 # Every auto conversion is a WARN (house rule 5: the original bitstream is
 # not preserved, and nobody chose that silently); a forced mode announces
 # itself as forced (the human already chose).
-AARGS=(); outi=0; DRCDEC=0
+# CENSUS_C accumulates the codec the census will demand of each written stream,
+# in output order, built by the SAME loop that builds the mux args (D5): the
+# plan and the assertion can never drift because they are one pass.
+AARGS=(); outi=0; DRCDEC=0; CENSUS_C=""
 if [ -n "$KEPT" ]; then
   for ord in $(printf '%s' "$KEPT" | tr ',' ' '); do
     codec=$(printf '%s\n' "$PLAN" | awk -F'|' -v o="$ord" '$1==o{print $2; exit}')
@@ -294,12 +319,14 @@ if [ -n "$KEPT" ]; then
     AARGS=(${AARGS[@]+"${AARGS[@]}"} -map "0:a:$ord")
     if [ "$(track_disp "$codec")" = copy ]; then
       AARGS=(${AARGS[@]+"${AARGS[@]}"} "-c:a:$outi" copy)
+      CENSUS_C="$CENSUS_C,$codec"
       case "$AUDIO" in
         copy) echo "audio a:$ord: $codec -> copy (forced)";;
         *)    echo "audio a:$ord: $codec -> copy (QuickTime-native)";;
       esac
     else
       AARGS=(${AARGS[@]+"${AARGS[@]}"} "-c:a:$outi" pcm_s16le)
+      CENSUS_C="$CENSUS_C,pcm_s16le"
       case "$AUDIO" in
         pcm) echo "audio a:$ord: $codec -> PCM (forced)";;
         *)   echo "** WARN audio a:$ord: $codec -> PCM access ($(pcm_why "$codec"))";;
@@ -351,12 +378,17 @@ fi
 
 # --- video tag (HEVC needs hvc1 for QuickTime; vcodec probed at the gate above) ---
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
+# On the MP4 container-swap rung, MPEG-2 is written explicitly as 'mp4v' (D2).
+# ffmpeg's MP4 muxer already picks mp4v+esds by default for MPEG-2 (verified on
+# this bench, ffmpeg 9.0.1) — the explicit tag is self-documentation: THIS entry,
+# the one AVFoundation decodes correctly, is the entire point of the rung.
+[ "$FMT" = mp4 ] && [ "$vcodec" = mpeg2video ] && VTAG="-tag:v mp4v"
 
 # --- color: +write_colr is redundant on modern ffmpeg but harmless; include only if tagged ---
 cp=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 
-PART="${OUT}.part"; MUXLOG="$(mktemp)"
+PART="$(rtm_part "$OUT")"; MUXLOG="$(mktemp)"   # extension-keeping (D6)
 mux_once () {  # mux_once INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
   # $DRC sits BEFORE -i (WO 3.7): -drc_scale is a decoder option and must ride
   # the input side; after -i ffmpeg would reject it as an unknown output option
@@ -365,7 +397,7 @@ mux_once () {  # mux_once INPUT_OPT... — one attempt; only the probe window va
     ${AARGS[@]+"${AARGS[@]}"} \
     -c:v copy $VTAG \
     ${TSCALE:+-video_track_timescale "$TSCALE"} \
-    -movflags "$MOVFLAGS" -f mov \
+    -movflags "$MOVFLAGS" -f "$FMT" \
     "$PART" 2>"$MUXLOG"
 }
 if ! mux_once "${FF_INPUT_OPTS[@]}"; then
@@ -402,6 +434,15 @@ if [ "${conf:-0}" -gt 0 ]; then
   exit 1
 fi
 rm -f "$MUXLOG"
+# POST-MUX CENSUS (D5): reconcile the plan against the FILE before blessing it.
+# RMX_PLAN above is a plan printed BEFORE the mux; nothing used to check the
+# muxer honored it, and a silently dropped stream shipped green.
+if ! mux_census "$PART" "$((1 + outi))" "$vcodec$CENSUS_C" remux; then
+  echo "   NOT blessing the output; kept at $PART."
+  echo "   Re-run with -v verbose to see what the muxer said about the missing stream,"
+  echo "   or map it by hand (references/known-limits.md)."
+  exit 1
+fi
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
 echo "verify with: scripts/verify.sh \"$IN\" \"$OUT\""

@@ -70,6 +70,7 @@ OUT="${2:?need OUTPUT (same container family as the input, e.g. trimmed.ts)}"
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # probe_shaped_failure / probe_retry_notice / FF_RETRY_OPTS
+. "$SELF_DIR/lib-mux.sh"    # mux_census (D5); the part name here already kept its extension (1.9)
 
 WINDOW="${RTM_IDR_WINDOW:-5000}"
 
@@ -209,6 +210,16 @@ if [ -n "$SRC_DUR" ]; then
   fi
 fi
 
+# POST-MUX CENSUS (D5, 1.13): this cut maps `0` — EVERY source stream must come
+# out the other side, or the "both tracks, A/V parity kept" promise is void and
+# the downstream build inherits a quietly narrower file as its "source".
+TTI_C=$(ffp -v error -show_entries stream=index,codec_name -of csv=p=0 "$IN" 2>/dev/null | \
+        awk -F, 'NF{ if(seen[$1]++) next; printf "%s%s", s, $2; s="," }')
+TTI_N=$(printf '%s' "$TTI_C" | awk -F, '{print ($0=="" ? 0 : NF)}')
+if ! mux_census "$PART" "$TTI_N" "$TTI_C" trim-to-idr; then
+  echo "   NOT blessing the cut; kept at $PART." >&2
+  exit 1
+fi
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
 echo "   kept region: every packet at/after the IDR, stream-copied byte-identical;"
