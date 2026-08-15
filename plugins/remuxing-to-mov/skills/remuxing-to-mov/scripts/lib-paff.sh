@@ -260,24 +260,36 @@ contribution_advisory () {
   echo "    decode support drifts by macOS version, so the driver PROVES this build"
   echo "    with playable-check.sh once it exists. On a standalone builder run,"
   echo "    prove it yourself: scripts/playable-check.sh OUT.mov)"
+  echo "    (4:2:2 contribution class: add --fidelity — renders ≠ renders correctly, 2026-08-15)"
 }
 
-# playability_verdict OUTPUT.mov — the empirical half of the demoted gate: run
-# playable-check.sh on a FINISHED build, print its output indented plus the
-# additive machine line
-#     MOV_PLAYABILITY os=<ver|na> verdict=<ok|fail|skip>
-# and set PLAY_VERDICT for the caller's exit-code mapping (contribution-profile
+# playability_verdict OUTPUT.mov [--fidelity] — the empirical half of the
+# demoted gate: run playable-check.sh on a FINISHED build (passing the optional
+# flag straight through), print its output indented plus the additive machine
+# line
+#     MOV_PLAYABILITY os=<ver|na> verdict=<ok|fail|skip> fidelity=<ok|fail|skip>
+# (os= and verdict= are byte-for-byte the WO 4.1 fields; fidelity= is APPENDED,
+# WO-B 2026-08-15 — parsed from the child's PLAYCHECK_FIDELITY line, `skip`
+# when the mode was not requested or the child could not measure) and set
+# PLAY_VERDICT for the caller's exit-code mapping (contribution-profile
 # fail/skip -> 10 REVIEW at the driver; never 11, never 1 — the artifact exists
-# and its essence verified). REUSES playable-check.sh (Ground Rule 6: the
-# verdict self-dates the macOS it ran on) — never forks its logic. Returns 0
-# always: the VERDICT is the result; the function itself must not trip set -e.
+# and its essence verified). A fidelity fail needs no separate mapping: the
+# child exits 1, which the existing case below already maps to fail. REUSES
+# playable-check.sh (Ground Rule 6: the verdict self-dates the macOS it ran on)
+# — never forks its logic. Returns 0 always: the VERDICT is the result; the
+# function itself must not trip set -e.
 playability_verdict () {
-  local out="${1:?playability_verdict needs OUTPUT}" prc=0 po osv
-  po=$(bash "$PF_LIB_DIR/playable-check.sh" "$out" 2>&1) || prc=$?
+  local out="${1:?playability_verdict needs OUTPUT}" fmode="${2:-}" prc=0 po osv fid
+  if [ -n "$fmode" ]; then
+    po=$(bash "$PF_LIB_DIR/playable-check.sh" "$fmode" "$out" 2>&1) || prc=$?
+  else
+    po=$(bash "$PF_LIB_DIR/playable-check.sh" "$out" 2>&1) || prc=$?
+  fi
   printf '%s\n' "$po" | sed 's/^/   /'
   osv=$(sw_vers -productVersion 2>/dev/null || echo na)
   case "$prc" in 0) PLAY_VERDICT=ok;; 3) PLAY_VERDICT=skip;; *) PLAY_VERDICT=fail;; esac
-  echo "MOV_PLAYABILITY os=${osv:-na} verdict=$PLAY_VERDICT"   # machine-readable (additive, WO 4.1)
+  fid=$(printf '%s\n' "$po" | sed -n 's/^PLAYCHECK_FIDELITY verdict=\([a-z]*\).*/\1/p' | awk 'NR==1')
+  echo "MOV_PLAYABILITY os=${osv:-na} verdict=$PLAY_VERDICT fidelity=${fid:-skip}"   # machine-readable (additive, WO 4.1; fidelity= appended WO-B)
   return 0
 }
 

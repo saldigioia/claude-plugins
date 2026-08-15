@@ -14,6 +14,7 @@ and `rebuild-paff.sh` are the executable forms of this file.
 - Field-rate / timescale table
 - The QuickTime "duration too long for timebase" error
 - MKV millisecond timebase → coarse MOV timescale (benign alternation)
+- Discontinuous source — the gap-collapse audio desync
 
 ## Identify the field structure
 
@@ -248,6 +249,24 @@ clean value (table above). If it persists after fixing the video track, the
 overflow is on another track — usually a `mov_text` subtitle inheriting the 1 ms
 timebase; sidecar the subtitle instead (see `color-hdr-subs.md`).
 
+If it persists on a **chaptered** source, it is the movie/chapter-track
+timescale, which `-video_track_timescale` does not govern (measured at
+600/30000/90000 — mvhd and the chapter track do not move): with chapters
+present, movenc warns once the duration passes **2^31 movie-timescale ticks**
+— 2982.6 s (~49.7 min) at the broadcast-common 720000 (90 kHz video +
+48 kHz audio; the movie timescale rides the track timescales, so a finer one
+overflows sooner). In-band the warning is benign on modern macOS as measured
+(2026-08-15, macOS 26.6.1/ffmpeg 9.0.1: 64-bit version-1 atoms file-wide,
+clean decode, chapters intact). Past 2^32 ticks (~99.4 min at 720000) movenc
+can **silently drop** the QuickTime chapter-menu track (Nero `chpl` survival
+only) — the drop is geometry-gated, not a plain duration law: it fires iff
+the FIRST chapter spans more than 2^31 ticks AND the total passes 2^32, and
+on exactly those skewed geometries the warning is suppressed, so check any
+chaptered build past that line. See `known-limits.md`, "Chaptered MOV past
+~50 min: movie-timescale overflow warning; geometry-gated chapter-track drop
+past ~99 min" under **Named limitations** (`-map_chapters -1` when the
+chapters are dispensable).
+
 ## MKV millisecond timebase → coarse MOV timescale (benign alternation, not judder)
 
 Matroska quantizes timestamps to **1/1000 s**. A `-c copy` MKV→MOV keeps those
@@ -351,6 +370,25 @@ audio* (silence added) — video stays lossless, audio does not. If you also nee
 the bit-exact original audio, the only frame-accurate fix is a re-mux **from the
 still-existing source** with the same gap handling; a desynced copy can recover
 the gaps the picture timeline shows but a residual can remain at the tail.
+
+**Post-hoc gap-collapse repair — the already-collapsed MOV (measured
+2026-08-15, macOS 26.6.1 / ffmpeg 9.0.1).** Everything above frames `resync.sh`
+as preventing the collapse during a fresh remux from the discontinuous source,
+but the same remedy repairs a MOV whose PCM audio a **prior bad remux already
+collapsed**. The signature of the class: the video timeline **keeps its
+forward gaps** (per-frame timestamps survive the bad copy) while the audio is
+**contiguous and short by a sizable fraction of (up to ≈) the summed gaps**.
+Dated record: a 30 GB master whose video carried its 10 forward gaps
+(≈ 0.742 s summed) with the audio measuring ~0.3–0.5 s short — roughly half
+the summed gaps on this master; the shortfall reading is measurement-method
+dependent — was repaired by `resync.sh --all-audio --pcm 32`
+and passed the full gate battery, including `--silence` content parity
+(11.311 s of silence matched within budget). No diagnostic change was needed:
+`diagnose.sh`'s DISCONTINUOUS SOURCE verdict fires on the already-collapsed
+MOV exactly as on a fresh capture, and routes here. This is the second
+recovery route on the broken-`.mov` row of `ingest-compatibility.md`'s
+source-container table — broken video timeline → `rebuild-paff.sh`; collapsed
+PCM with an intact gapped video timeline → `resync.sh` post-hoc.
 
 Two classes are **excluded from resync by design**: gaps **plus** non-monotonic
 DTS on mpegts/MPEG-2 (backhaul rot — the invented DTS leave near-zero `stts`

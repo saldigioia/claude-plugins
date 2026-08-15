@@ -55,7 +55,7 @@ Items marked **(8.1.1)** were verified empirically on ffmpeg 8.1.1
 | HEVC/H.265 | ~25–40% savings (50% is design target, not typical HD result) | Fragmented: Access Advance + Via-LA + Velos + unpooled | Yes, **`-tag:v hvc1`** | Yes with `hvc1` (macOS 10.13+, incl. 10-bit/HDR) | `libx265`, `hevc_videotoolbox` |
 | AV1 | ~30–50% vs H.264, ~20–30% vs HEVC | AOMedia royalty-free by design; contested by Sisvel pool | **No** — movenc rejects: `av1 only supported in MP4 and AVIF`; no `-strict` escape (8.1.1) | No (hw decode only M3+/A17 Pro) | `libsvtav1` (fast), `libaom-av1` (slow ref), `librav1e` |
 | ProRes | n/a — intra-frame mezzanine (~220 Mb/s 422 HQ @1080p30); 10-bit 4:2:2 / 12-bit 4:4:4(+16-bit alpha). Intra coding is why it scrubs well | Apple proprietary; bitstream public as SMPTE RDD 36; ffmpeg encoders are uncertified independent implementations | Yes — native (tags in `delivery-encode.md`) | Yes — native (macOS; **no iOS playback**) | `prores_ks` (best SW), `prores_videotoolbox` (Apple hw) |
-| MPEG-2 | needs ~2× H.264's bitrate | Patents **expired** (US, 2018) | Yes | 4:2:0 yes; 4:2:2 generally no | `mpeg2video` |
+| MPEG-2 | needs ~2× H.264's bitrate | Patents **expired** (US, 2018) | Yes | 4:2:0 yes; 4:2:2 per-OS/per-file empirical since 1.11 (prove post-build: `playable-check.sh`, `--fidelity` since 1.12) and tag-dependent — `m2v1` garbage vs `xd5*` correct, same bitstream (2026-08-15, macOS 26.6.1; `ingest-compatibility.md`) | `mpeg2video` |
 
 AV1 sources: remux to **MP4** (tag `av01`) or keep MKV — never re-encode the
 video to force MOV. iPhone 13 Pro+ can record ProRes (camera-original MOVs).

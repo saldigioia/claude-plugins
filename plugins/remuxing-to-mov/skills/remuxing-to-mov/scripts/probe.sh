@@ -114,6 +114,7 @@ vnative () {
 probe_struct () {
   local mode="$1" q="ffp -v error -select_streams"
   local container vcodec vtag isavc acodec aaction rung cmd cp ct cs cr pixfmt vnat
+  local tag_advice tagadv_json
   container=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vtag=$($q v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
@@ -129,6 +130,21 @@ probe_struct () {
   ms_tb_scan
   mp4_atom_scan "$container" "$vtag"
   vnat=$(vnative "$vcodec" "$pixfmt")
+  # XDCAM retag advisory (1.12 WO-A): stsd 'm2v1' on MPEG-2 4:2:2 is decoder
+  # DISPATCH, not damage — AVFoundation routes the generic m2v1 entry to its
+  # consumer decoder (macroblock garbage on 4:2:2) and the xd5* XDCAM HD422
+  # entries to the professional decoder (measured 2026-08-15, macOS 26.6.1:
+  # two real 1080i59.94 broadcast masters). Third instance of the FourCC-
+  # dispatch rule (hvc1/hev1 for HEVC, dvh1/dvhe for DV). pix_fmt is the real
+  # discriminator: a 4:2:0 MPEG-2 MOV carries stsd m2v1 too and must NOT
+  # advise (consumer decode of 4:2:0 is fine). Append-only API: the kv/json
+  # field is emitted ONLY when the advisory fires (absent otherwise).
+  tag_advice=""
+  if [ "$vcodec" = mpeg2video ] && [ "${STSD_ENTRY:-}" = m2v1 ]; then
+    case "$pixfmt" in yuv422p*) tag_advice=xd5b;; esac
+  fi
+  tagadv_json=""
+  if [ -n "$tag_advice" ]; then tagadv_json=",\"tag_advice\":\"$tag_advice\""; fi
   # a:0 advisory + first-rung pick. aaction=pcm forces Rung 1 (remux --audio
   # pcm) where a plain a:0 copy would be worthless; aaction=copy rides Rung 0,
   # whose default is remux.sh --audio auto — the per-track WO 3.2 whitelist —
@@ -164,8 +180,8 @@ probe_struct () {
   elif [ "$aaction" = pcm ]; then rung=1; cmd="remux.sh IN OUT.mov --audio pcm"
   else                            rung=0; cmd="remux.sh IN OUT.mov"; fi
   if [ "$mode" = "--json" ]; then
-    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","vnative":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"}\n' \
-      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","vnative":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"%s}\n' \
+      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd" "$tagadv_json"
   else
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
     printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_VNATIVE=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
@@ -174,6 +190,9 @@ probe_struct () {
     printf 'PR_MS_TB=%s\nPR_TS_HINT=%s\n' "$MS_TB" "${TS_HINT:-none}"    # 5-4e
     printf 'PR_GAMA=%s\nPR_STSD_ENTRY=%s\nPR_STSD_DV=%s\n' \
       "$GAMA" "${STSD_ENTRY:-unknown}" "${STSD_DV:-no}"                  # 5-5b/e
+    if [ -n "$tag_advice" ]; then
+      printf 'PR_TAG_ADVICE=%s\n' "$tag_advice"                         # 1.12 WO-A
+    fi
   fi
 }
 case "$MODE" in --kv|--json) probe_struct "$MODE"; exit 0;; esac
@@ -268,6 +287,32 @@ case "$(vnative "$vcod_h" "$pix_h")" in
 esac
 if qt_contribution_profile "$pix_h"; then
   contribution_advisory "$vcod_h" "$pix_h"
+fi
+# XDCAM retag advisory (1.12 WO-A) — human report only; the machine surfaces
+# carry the additive PR_TAG_ADVICE/tag_advice field. Decoder DISPATCH by
+# FourCC, not damage: third instance of the sample-entry rule (hvc1/hev1,
+# dvh1/dvhe). pix_fmt discriminates — 4:2:0 MPEG-2 MOVs also carry stsd m2v1
+# and must stay silent here.
+if [ "$vcod_h" = mpeg2video ] && [ "${STSD_ENTRY:-}" = m2v1 ]; then
+  case "$pix_h" in yuv422p*)
+    echo "   NOTE stsd 'm2v1' on MPEG-2 4:2:2: QuickTime glitching/smearing here is decoder"
+    echo "        DISPATCH, not damage — AVFoundation routes the generic 'm2v1' entry to its"
+    echo "        consumer MPEG-2 decoder (macroblock garbage on 4:2:2) and the xd5* XDCAM"
+    echo "        HD422 entries to the professional decoder. Measured 2026-08-15, macOS"
+    echo "        26.6.1: two real 1080i59.94 broadcast masters — garbage as m2v1, frame-"
+    echo "        for-frame identical to the ffmpeg reference as xd5b; XDCAM's nominal"
+    echo "        50 Mb/s CBR is NOT enforced (19.7 and 31.2 Mb/s VBR both played)."
+    echo "        Retag, don't re-encode (4 bytes in the sample entry; bitstream"
+    echo "        bit-identical):"
+    echo "           ffmpeg -i \"$IN\" -map 0 -c copy -tag:v xd5b -movflags +faststart OUT.mov"
+    echo "        xd5b = 1080i59.94; other geometries: the xd5* table in"
+    echo "        references/ingest-compatibility.md (only xd5b is measured — prove any"
+    echo "        other tag per-file: scripts/playable-check.sh --fidelity OUT.mov)."
+    echo "        Advisory-only in 1.12, no script auto-applies (deferral record:"
+    echo "        references/known-limits.md); applying it requires a provenance note in"
+    echo "        the output metadata naming the retag (m2v1 -> xd5b), e.g. metadata.sh"
+    echo "        or -metadata comment=."
+  ;; esac
 fi
 
 echo "-- audio --"

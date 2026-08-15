@@ -10,7 +10,7 @@ bitstream conversion? Answer this before running ffmpeg.
 | `.ts` | MPEG-TS | Off-air/cable. H.264/HEVC is **Annex-B**. May carry multiple programs, SAP audio, embedded captions, timestamp discontinuities. ffprobe may list a stream twice (program duplication) — take the first value. |
 | `.mpg` / `.vob` | MPEG-PS | DVD-style. MPEG-2 + AC-3, no per-stream language tags. Often split into numbered parts. |
 | `.mkv` | Matroska | Web/encode source. H.264/HEVC is **AVCC**. Millisecond timebase (relevant to the QuickTime timescale error — see `timeline-repair.md`). Strict muxer: refuses bad timestamps (useful as a validator). |
-| broken `.mov` | QTFF | A prior bad remux. The video bitstream is still a lossless copy and is recoverable — re-extract and rebuild (`rebuild-paff.sh`), don't re-encode. |
+| broken `.mov` | QTFF | A prior bad remux. The video bitstream is still a lossless copy and is recoverable — re-extract and rebuild (`rebuild-paff.sh`), don't re-encode. **Second route — already-collapsed PCM** (gapped video timeline + contiguous audio short by a sizable fraction of (up to ≈) the summed gaps): `resync.sh` repairs post-hoc — measured 2026-08-15, macOS 26.6.1/ffmpeg 9.0.1 (`--all-audio --pcm 32`; full gate battery incl. `--silence` passed; `diagnose.sh`'s DISCONTINUOUS SOURCE verdict fires on the collapsed MOV unchanged); dated record in `timeline-repair.md`, "Post-hoc gap-collapse repair". |
 
 ## Annex-B vs AVCC (only matters when EXTRACTING to raw .h264)
 
@@ -27,14 +27,71 @@ Detect: `ffprobe -v error -select_streams v:0 -show_entries stream=is_avc,nal_le
 
 | Codec | Copies into MOV? | Tag / note |
 |-------|------------------|------------|
-| H.264/AVC | Yes | `avc1` (default); Annex-B→avcC handled automatically on copy. 4:2:0 profiles play. **High 4:2:2 (`yuv422p*`, any bit depth) is a per-OS empirical fact, not a refusal (1.11, WO 4.1)**: it stalled qlmanage on macOS 26.5.2 (2026-07-31) but **fully decodes on 26.6.1** (re-measured 2026-08-13) — decode support drifts by macOS, so `mov.sh` announces the contribution profile, builds losslessly, and proves the finished output with `playable-check.sh` (fail/unverified → REVIEW with `rung4.sh` named) |
+| H.264/AVC | Yes | `avc1` (default); Annex-B→avcC handled automatically on copy. 4:2:0 profiles play. **High 4:2:2 (`yuv422p*`, any bit depth) is a per-OS empirical fact, not a refusal (1.11, WO 4.1)**: it stalled qlmanage on macOS 26.5.2 (2026-07-31); on 26.6.1 the synthetic bench clip **renders** (re-measured 2026-08-13) — a *renders* result, not a *renders-correctly* one (the MPEG-2 row's 2026-08-15 false-green shows the gap on the same OS). Decode support drifts by macOS and correctness is per-file, so `mov.sh` announces the contribution profile, builds losslessly, and proves the finished output with `playable-check.sh --fidelity` (fail/unverified → REVIEW with `rung4.sh` named) |
 | HEVC/H.265 | Yes | **`-tag:v hvc1`** — default `hev1` won't play in QuickTime (verified: default mux tag is `hev1`) |
-| MPEG-2 | Yes | Container OK. 4:2:0 plays in QuickTime. **4:2:2 (422@HL): same demoted-to-empirical verdict as H.264 Hi422 (1.11, WO 4.1)** — it distorted on macOS 26.5.2 (2026-07-30 controlled pair) but fully decodes on 26.6.1 (2026-08-13); announced + built + playability-proven post-build, never refused pre-flight |
+| MPEG-2 | Yes | Container OK. 4:2:0 plays in QuickTime. **4:2:2 (422@HL): same demoted-to-empirical verdict as H.264 Hi422 (1.11, WO 4.1)** — it distorted on macOS 26.5.2 (2026-07-30 controlled pair); on 26.6.1 the synthetic bench clip *rendered* (2026-08-13) — but **renders ≠ renders correctly**: two real 1080i59.94 broadcast masters rendered destroyed (macroblock garbage) on the same 26.6.1 (2026-08-15) while the thumbnail check said OK. Correctness is per-file: announced + built + proven post-build with `playable-check.sh --fidelity` (SSIM vs the ffmpeg reference), never refused pre-flight. **Sample-entry dispatch (measured 2026-08-15, macOS 26.6.1)** — same rule shape as the HEVC row's `hvc1`/`hev1`: `m2v1` = the generic MPEG-2 FourCC → AVFoundation's **consumer** decoder → corrupted macroblocks on 4:2:2; `xd5*` = the XDCAM HD422 tags → the **professional** decoder → both real masters decoded frame-for-frame identical to the ffmpeg reference after a stream-copy retag (`-c copy -tag:v xd5b` — 4 bytes in the sample entry, bitstream bit-identical). Tag pick + warnings: the `xd5*` selection table below |
 | ProRes | Yes | `apcn/apch/apcs/apco/ap4h/ap4x` — editorial/master |
 | DV/DVCPRO | Yes | Legacy; QuickTime yes, iOS no |
 | Dolby Vision HEVC | Yes (ffmpeg ≥5.0, single-layer) | ffmpeg ≥5.0 preserves single-layer DV (P5/P8) on `-c copy` with `-tag:v hvc1`; **dual-layer P7 (FEL)** needs conversion to P8.1 or keep MKV. Sample-entry family (5-5e/C61): `dvh1`/`dvhe` (DV-dedicated) and cross-compat `hvc2`/`hev2`/`hvc3`/`hev3` — the testable split is **`dvh1` plays where the `hev1`-family fails** (same hvc1-vs-hev1 rule extended to DV entries; still blocked on real DV artifacts). `probe.sh` reports the stsd entry (e.g. `hevc (dvh1)`). See `color-hdr-subs.md`. |
 | AV1 | **No (ffmpeg)** | ffmpeg's mov muxer hard-rejects (`av1 only supported in MP4 and AVIF`; no `-strict` escape — verified on 8.1.1). ffmpeg policy, not a container limit — see "What ffmpeg's MOV muxer refuses" below. Remux to **MP4** (tag `av01`) or keep MKV; never re-encode the video to force MOV. |
 | Legacy QT codecs (Cinepak `cvid`, Sorenson `svq3`, …) | Yes (container) | Deprecated since macOS Catalina — AVFoundation won't decode QuickTime 7-era codecs, so the file is valid but unplayable. Rung 4: transcode to ProRes/H.264 for a playable copy; keep the original as master. Detect: `ffprobe -v error -show_entries stream=codec_name -of csv=p=0 IN \| grep -E 'cinepak\|svq\|mjpeg\|icod'` (mjpeg/icod: version-drift risks, see below) |
+
+### `xd5*` selection table — the MPEG-2 4:2:2 retag route (m2v1 → XDCAM HD422)
+
+The retag route for the MPEG-2 row above: pick the XDCAM HD422 FourCC matching
+the stream's geometry and field rate, then
+
+```
+ffmpeg -i IN -map 0 -c copy -tag:v xd5b -movflags +faststart OUT.mov
+```
+
+(swap `xd5b` for the row that matches). Stream copy only — the tag is 4 bytes
+in the `stsd` sample entry and the bitstream stays bit-identical. `probe.sh`
+detects the class (`codec=mpeg2video` + `pix_fmt=yuv422p*` + stsd `m2v1`) and
+prints this advisory with the additive `PR_TAG_ADVICE=xd5b` machine field.
+`PR_TAG_ADVICE` is a **class marker** (the m2v1-dispatch class), not a
+per-file tag pick — it says `xd5b` regardless of geometry; the operator
+selects the actual tag from the table below by geometry/field-rate.
+
+| Tag | Geometry / field rate | Bench status |
+|-----|----------------------|--------------|
+| `xd51` | 720p30 | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+| `xd54` | 720p24 (50 Mb class) | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+| `xd55` | 720p25 | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+| `xd59` | 720p60 (59.94) | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+| `xd5a` | 720p50 | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+| `xd5b` | 1080i60 (1080i59.94) | **measured 2026-08-15** (macOS 26.6.1, ffmpeg 9.0.1): two real broadcast masters decode perfectly via AVFoundation after the retag, frame-for-frame identical to the ffmpeg reference |
+| `xd5c` | 1080i50 | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+| `xd5d` | 1080p24 | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+| `xd5e` | 1080p25 | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+| `xd5f` | 1080p30 | **unbenched** — route exists, tag choice per spec, verify per-file with `playable-check.sh --fidelity` |
+
+**CBR is not enforced (measured 2026-08-15, macOS 26.6.1):** XDCAM HD422's
+nominal 50 Mb/s CBR is not a decode precondition — 19.7 and 31.2 Mb/s **VBR**
+streams both played perfectly under the `xd5b` entry.
+
+**WARNING — the retag asserts XDCAM identity on streams that are not literal
+XDCAM.** A generic broadcast MPEG-2 4:2:2 stream retagged `xd5*` claims to be
+an XDCAM HD422 recording; the decoder **tolerated** that assertion on the two
+real files measured (2026-08-15), which is evidence, not a guarantee. Rules:
+
+- **Advisory-only in 1.12 — no script applies the tag.** `probe.sh` names the
+  command; the operator runs it. Auto-apply is deferred pending the bench
+  items in the authoritative deferral record:
+  `references/known-limits.md` § "XDCAM retag (m2v1 → xd5*)" (grep
+  `deferred`) — in short: `xd5c` on 1080i50, the 720p tags (`xd59`/`xd5a`),
+  the 1080p tags (`xd5d`–`xd5f`), an analogous dispatch tag for H.264 High
+  4:2:2, proof that 4:2:0 MPEG-2 is refused by geometry check (not tried),
+  and geometry-aware tag selection (deriving the right `xd5*` from probed
+  geometry/field-rate).
+- **Provenance note required in the output metadata** whenever the operator
+  applies the retag: the output must state that the video sample entry tag
+  was changed and from what — e.g. via `scripts/metadata.sh` or
+  `-metadata comment="video stsd retagged m2v1 -> xd5b (stream copy;
+  bitstream unchanged)"`. This is a documented requirement of the route; no
+  tooling applies it in 1.12.
+- Prove every retagged output per-file: `playable-check.sh --fidelity` (SSIM
+  vs the ffmpeg reference decode) — decode support drifts by macOS.
 
 ### Decode support is a moving target — macOS version drift
 

@@ -281,8 +281,19 @@ RESULT="$BEST_RESULT"
 # verify a contribution-profile build, demotes to REVIEW: never a silent OK,
 # never 11/1 — the artifact exists and its essence verified.
 if [ -f "$OUT" ] && { { [ "$PLAYCHECK_DUE" -eq 1 ] && [ "$RESULT" != FAIL ]; } || { [ "$PLAYABLE" -eq 1 ] && [ "$RESULT" = OK ]; }; }; then
-  echo "-- playability (macOS AVFoundation; empirical, per-file) --"
-  playability_verdict "$OUT"
+  # WO-B (2026-08-15): when the check is due because of the CONTRIBUTION
+  # PROFILE (PLAYCHECK_DUE, qt_contribution_profile), it gets the fidelity
+  # storey — the thumbnail-only check false-greened two real broadcast 4:2:2
+  # masters on macOS 26.6.1 (rendered, destroyed; renders != renders
+  # correctly). The legacy --playable opt-in stays thumbnail-only.
+  AC_FID=""
+  if [ "$PLAYCHECK_DUE" -eq 1 ] && [ "$RESULT" != FAIL ]; then AC_FID="--fidelity"; fi
+  if [ -n "$AC_FID" ]; then
+    echo "-- playability (macOS AVFoundation; empirical, per-file — thumbnail floor + fidelity SSIM vs ffmpeg reference) --"
+  else
+    echo "-- playability (macOS AVFoundation; empirical, per-file) --"
+  fi
+  playability_verdict "$OUT" ${AC_FID:+"$AC_FID"}
   case "$PLAY_VERDICT" in
     fail)
       RESULT=REVIEW; BEST_RESULT=REVIEW

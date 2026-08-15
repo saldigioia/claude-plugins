@@ -188,6 +188,141 @@ Candidate future knob for players that mishandle edit lists (C07 — negative
 offsets vs `-avoid_negative_ts make_zero` — is UNVERIFIED in the registry);
 until a measured case lands, adding the flag would be a knob without evidence.
 
+### XDCAM retag (m2v1 → xd5*): advisory-only — auto-apply deferred
+
+**The authoritative deferral record (maintainer decision, 2026-08-15).**
+Measured 2026-08-15 (macOS 26.6.1, ffmpeg 9.0.1): two real 1080i59.94 MPEG-2
+4:2:2 broadcast masters tagged `m2v1` decode as macroblock garbage through
+AVFoundation while decoding pristine through FFmpeg — decoder **dispatch** by
+FourCC, not damage (the third instance of the sample-entry dispatch rule,
+after `hvc1`/`hev1` and `dvh1`/`dvhe`). Retagged by stream copy, AVFoundation
+decodes both perfectly, frame-for-frame identical to the FFmpeg reference,
+and it did NOT enforce XDCAM's nominal 50 Mb/s CBR (19.7 and 31.2 Mb/s VBR
+both played):
+
+```
+ffmpeg -i IN.mov -map 0 -c copy -tag:v xd5b -movflags +faststart OUT.mov
+scripts/playable-check.sh --fidelity OUT.mov   # per-file proof, every time
+```
+
+`probe.sh` detects the class (`mpeg2video` + `yuv422p*` + stsd `m2v1` — the
+pix_fmt is the discriminator, a 4:2:0 MPEG-2 MOV also carries `m2v1` and gets
+no advisory) and prints the retag advisory + additive `PR_TAG_ADVICE=xd5b`
+(kv) / `tag_advice` (json). Tag selection: the `xd5*` table in
+`ingest-compatibility.md`.
+
+- **Status: advisory-only in 1.12 — no driver auto-applies the tag** (the
+  retag asserts XDCAM identity on streams that are not literal XDCAM;
+  tolerated by the decoder on two real files is evidence, not a guarantee).
+  When the operator applies it, a **provenance note in the output metadata is
+  required** — state that the tag was changed and from what (`metadata.sh` or
+  `-metadata comment=`); no script applies the tag in 1.12.
+- **Status: the auto-apply upgrade is deferred** until these bench items are
+  measured (any future session picking this up: measure, then flip):
+  1. `xd5c` on a real 1080i50 stream;
+  2. the 720p tags `xd59`/`xd5a`;
+  3. the 1080p tags `xd5d`–`xd5f`;
+  4. whether H.264 High 4:2:2 has an analogous dispatch tag;
+  5. confirmation that 4:2:0 MPEG-2 is refused by a geometry check, not
+     tried (the probe-side pix_fmt discriminator is in place; the auto-apply
+     path must prove the same negative);
+  6. geometry-aware tag selection: deriving the right `xd5*` from probed
+     geometry/field-rate must be implemented and benched before any
+     auto-apply — today's `PR_TAG_ADVICE=xd5b` is a class marker for the
+     m2v1-dispatch class, not a per-file tag pick (it says `xd5b` on any
+     geometry; the operator picks from the `xd5*` table).
+  Only `xd5b` 1080i59.94 is measured (2026-08-15); every other tag is
+  per-spec, unmeasured.
+
+### Chaptered MOV past ~50 min: movie-timescale overflow warning; geometry-gated chapter-track drop past ~99 min
+
+Measured 2026-08-15 (macOS 26.6.1, ffmpeg 9.0.1), `-t`-swept on constructed
+chaptered masters (90 kHz video + 48 kHz audio, and a 16384/8000 control):
+
+- **The movie timescale rides the track timescales.** On the stream-copy
+  muxes measured, mvhd landed on the LCM of the output track timescales:
+  90000 + 48000 → **720000** (the broadcast-common shape); 16384 + 8000 →
+  **2048000**. The auto-built chapter TEXT track's own timescale IS the movie
+  timescale (`bin_data` stream at 1/720000, chapter mdhd 720000).
+- **Warning onset = 2^31 movie-timescale ticks** (signed-32 overflow, not
+  2^32): bracketed at 2982/2983 s at 720000 (2^31/720000 = 2982.6 s ≈
+  **49.7 min**) and again at 1048/1049 s at 2048000 (1048.6 s ≈ 17.5 min — a
+  finer movie timescale overflows proportionally sooner). Verbatim, mid-mux:
+  `FATAL error, file duration too long for timebase, this file will not be
+  playable with QuickTime. Choose a different timebase with
+  -video_track_timescale or a different container format`.
+- **The warning is chapter-linked; the overflow is not.** A chapterless copy
+  of the same 6200 s source writes the same version-1 atoms silently — no
+  warning at any duration. Chapters present + duration past onset is the
+  trigger pair (which is exactly what the scripts' pre-announce gates on).
+- **`-video_track_timescale` does not govern it** (measured at 600, 30000,
+  90000): mvhd stays 720000, the chapter track stays 1/720000, the warning
+  persists. The timescale remedy in `timeline-repair.md` fixes video-track
+  overflow only.
+- **In-band the warning is benign as measured on this bench**: ffmpeg falls
+  back to 64-bit **version-1 atoms file-wide** — mvhd and every tkhd go
+  version=1, the chapter track's mdhd with them; only the video/audio mdhd
+  keep version 0 (their per-track timescales stay small). At 2990 s: mvhd
+  version=1 duration=2152811520, just past INT32_MAX. Whole-file decode 0
+  errors, every chapter ffprobe-readable, QT chapter text track + Nero
+  `chpl` atom both present. "Benign" is a property of MODERN macOS/ffmpeg as
+  measured (2026-08-15) — QuickTime 7-era software reading version-1 atoms
+  or the chapter menu is the expected casualty.
+- **Past 2^32 total ticks the chapter track can be SILENTLY DROPPED — and
+  the gate is chapter GEOMETRY, not file duration alone.** Close-out
+  measurement 2026-08-15 (verifier's 8-point matrix, independently
+  spot-checked on this bench's rig, same macOS/ffmpeg): movenc drops the QT
+  chapter text track **iff the FIRST chapter's duration exceeds 2^31
+  movie-timescale ticks AND the total duration exceeds 2^32 ticks** — both
+  conjuncts required. Spot-check raw (720000 timescale): 2 equal chapters
+  at 6200 s → **dropped** (3 streams → 2; chapters readable only via
+  `chpl`; every later open of the file logs `Referenced QT chapter track
+  not found` — the dangling tref is a detection signature); first chapter
+  3000 s in a 4000 s file → kept (total < 2^32); first chapter 100 s at
+  6200 s → kept (first conjunct false); 20×310 s at 6200 s → kept. Both
+  earlier same-day measurements were CORRECT on their own geometries: a
+  2-equal-chapter rig makes the conjuncts coincide at 5965.2 s (why the
+  drop first read as a plain past-2^32 file-duration law), while 20 short
+  chapters can never satisfy the first conjunct (why five sweep variants
+  here couldn't reproduce it). The 2026-08-15 off-repo incident (6058.5 s,
+  20 chapters: warning observed, all chapters intact) is thereby fully
+  RECONCILED, not discrepant.
+- **The warning is SUPPRESSED whenever ANY single chapter exceeds 2^31
+  ticks** — independent of the drop (measured: all three skewed-chapter
+  rigs above muxed warning-free, kept and dropped alike; only the 20
+  short-chapter rig warned). Consequence: a skewed-chapter source can lose
+  its chapter track with NO muxer warning at all — absence of the warning
+  is not absence of the risk, which is why the post-build check below stays
+  mandatory for any chaptered output past ~5965 s.
+
+```
+# sweep rig (this bench) — cheap 6200 s chaptered master:
+ffmpeg -f lavfi -i color=s=64x36:r=5 -f lavfi -i anullsrc=r=48000:cl=mono -t 6200 \
+       -c:v libx264 -preset ultrafast -c:a aac -video_track_timescale 90000 base.mov
+ffmpeg -i base.mov -i ch.ffmeta -map_metadata 1 -map_chapters 1 -map 0 -c copy \
+       -t 2982 ok.mov     # no warning; mvhd v0, duration=2147051520 (< INT32_MAX)
+#      -t 2983 warn.mov   # FATAL-looking warning; v1 atoms file-wide; file fine
+#      -t 6200 long.mov   # 20 short chapters: warns, track kept (first conjunct false)
+# swap ch.ffmeta for 2 EQUAL chapters spanning 6200 s -> NO warning (suppressed:
+# first chapter 3100 s > 2^31 ticks) and the chapter track is silently DROPPED
+# post-build check for any chaptered output past ~5965 s (the drop-risk zone):
+ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 OUT.mov
+#      expect the bin_data chapter text track still listed
+ffprobe -v error -show_chapters -of csv=p=0 OUT.mov   # expect every chapter
+```
+
+- **Status: measured 2026-08-15 (macOS 26.6.1/ffmpeg 9.0.1); drop rule
+  confirmed on two independent rigs. `resync.sh` and `mov.sh` pre-announce
+  on a chaptered source past `RTM_CHAPTER_TS_WARN_SECS` (default 2900 s,
+  just under the 720000-timescale onset; the true onset is
+  2^31/movie_timescale, so a finer movie timescale needs a lower setting)
+  and add the drop-risk check past `RTM_CHAPTER_TS_DROP_SECS` (default
+  5965 s) — a duration gate that is a conservative SUPERSET of the drop
+  condition (total > 2^32 ticks is a necessary conjunct), so it can
+  over-warn on safe chapter geometries but cannot miss a drop. Announce-only
+  — no route drops or rewrites chapters; `-map_chapters -1` is the
+  deliberate alternative when chapters are dispensable.**
+
 ---
 
 ## Verified non-issues (do not "fix" these)
@@ -232,3 +367,4 @@ Side-effect of the WO 3.4 view-merge dedupe, re-measured here: on the
 2-program fixture both audio tracks landed with their PMT `eng`/`spa` tags
 intact. The TS double-listing quirk (each stream listed top-level AND
 in-program) is already handled by index-dedupe in every manifest consumer.
+

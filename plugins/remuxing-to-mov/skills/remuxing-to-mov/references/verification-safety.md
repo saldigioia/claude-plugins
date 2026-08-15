@@ -147,7 +147,7 @@ A correct mux can still fail to play; don't chase a phantom "bad mux".
 |---------|-----------------|----------------------------|
 | HEVC tagged `hev1` | Yes | No — needs `-tag:v hvc1` |
 | MPEG-2 4:2:0 | Yes | Yes |
-| MPEG-2 4:2:2 (422@HL) | Yes | Generally no |
+| MPEG-2 4:2:2 (422@HL) | Yes | Historically no; per-OS/per-file empirical since 1.11 (demoted gate — prove the finished build with `playable-check.sh`, `--fidelity` since 1.12), and tag-dependent, not codec-categorical: `m2v1` renders macroblock garbage where `xd5*` renders correctly on the same bitstream (measured 2026-08-15, macOS 26.6.1 — `ingest-compatibility.md`) |
 | Dolby Vision HEVC | Yes (ffmpeg ≥5.0, single-layer) | Device/app-dependent |
 | AC-3 | Yes | Yes on modern macOS (older: spotty) |
 | E-AC-3 (Dolby Digital Plus) | Yes | Yes — native in modern QuickTime |

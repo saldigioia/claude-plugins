@@ -302,6 +302,69 @@ if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "$PR_VCODEC" = mpeg2video ]; then
     ;;
   esac
 fi
+# --- chapter/movie-timescale pre-announce (WO 1.12-C): announced, never silent -
+# With chapters present, movenc warns once the duration passes 2^31
+# MOVIE-timescale ticks (measured 2026-08-15, macOS 26.6.1/ffmpeg 9.0.1;
+# bracketed 2982/2983 s at the broadcast-common 720000 = LCM of 90 kHz video +
+# 48 kHz audio track timescales; a finer movie timescale overflows sooner —
+# 2048000 warned at 1049 s). -video_track_timescale does NOT govern it
+# (measured at 600/30000/90000). In-band the warning is BENIGN as measured:
+# 64-bit version-1 atoms file-wide, clean decode, chapters intact. Past 2^32
+# TOTAL ticks (~5965 s at 720000) movenc can silently DROP the chapter track
+# — geometry-gated (measured 2026-08-15, two independent rigs): drop iff the
+# FIRST chapter spans > 2^31 ticks AND the total passes 2^32, and the warning
+# is SUPPRESSED whenever ANY chapter spans > 2^31 ticks, so the loss is
+# silent on exactly the geometries that drop. The tier-2 duration gate below
+# is a conservative SUPERSET of the drop condition (may over-warn, cannot
+# miss) and tells the operator to check the finished build. Announce BEFORE
+# dispatch so the warning is expected in whichever child muxes, never
+# alarming — NO behavior change, and a probe failure degrades silently
+# (announce-or-nothing, never a new exit path). Details:
+# references/known-limits.md "Chaptered MOV past ~50 min".
+. "$SELF_DIR/lib-probe.sh"   # ffp: the chapter/duration probe opens the input directly
+CH_WARN_SECS="${RTM_CHAPTER_TS_WARN_SECS:-2900}"   # just under 2^31/720000 = 2982.6 s
+case "$CH_WARN_SECS" in ''|*[!0-9]*) CH_WARN_SECS=2900;; esac
+CH_DROP_SECS="${RTM_CHAPTER_TS_DROP_SECS:-5965}"   # 2^32/720000 = 5965.2 s (contested zone)
+case "$CH_DROP_SECS" in ''|*[!0-9]*) CH_DROP_SECS=5965;; esac
+CH_N=$(ffp -v error -show_chapters -of csv=p=0 "$IN" 2>/dev/null | grep -c . || true)
+CH_DUR=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+CH_DUR_S=${CH_DUR%%.*}
+case "$CH_DUR_S" in ''|*[!0-9]*) CH_DUR_S=0;; esac
+if [ "${CH_N:-0}" -ge 1 ] && [ "$CH_DUR_S" -gt "$CH_WARN_SECS" ]; then
+  echo "** EXPECT a FATAL-looking muxer warning on this input: \"FATAL error, file"
+  echo "   duration too long for timebase ... will not be playable with QuickTime\"."
+  echo "   The source carries $CH_N chapter(s) at ~${CH_DUR_S} s: with chapters present,"
+  echo "   movenc warns once the duration passes 2^31 movie-timescale ticks —"
+  echo "   ~2983 s (~49.7 min) at the broadcast-common 720000 (the movie timescale"
+  echo "   rides the track timescales, so a finer one overflows sooner) — and"
+  echo "   -video_track_timescale does NOT govern it (measured 2026-08-15). In-band"
+  echo "   the warning is BENIGN on modern macOS as measured (2026-08-15, macOS"
+  echo "   26.6.1/ffmpeg 9.0.1): ffmpeg writes 64-bit version-1 atoms file-wide;"
+  echo "   decode, scrubbing and the chapter menu all verified working. Only"
+  echo "   QuickTime 7-era software reading version-1 atoms would object. If the"
+  echo "   chapters are dispensable, -map_chapters -1 drops them deliberately."
+  echo "   NOTE: if any single chapter itself spans more than 2^31 ticks (~2983 s at"
+  echo "   720000), movenc SUPPRESSES this warning entirely — no warning, same math."
+  CH_ML=""
+  if [ "$CH_DUR_S" -gt "$CH_DROP_SECS" ]; then
+    echo "** PAST ~${CH_DROP_SECS} s (2^32 total movie-timescale ticks) movenc can silently"
+    echo "   DROP the QuickTime chapter-menu track (measured 2026-08-15, two independent"
+    echo "   rigs): the drop fires iff the FIRST chapter spans more than 2^31 ticks AND"
+    echo "   the total passes 2^32 — and the warning is suppressed on exactly those"
+    echo "   skewed geometries, so the loss is silent; chapters then survive only in"
+    echo "   the Nero chpl atom. This duration gate is a conservative SUPERSET of the"
+    echo "   drop condition (it may over-warn on safe chapter layouts; it cannot miss)."
+    echo "   CHECK the finished build:"
+    echo "     ffprobe -v error -show_chapters OUT.mov            # expect every chapter"
+    echo "     ffprobe -v error -show_entries stream=codec_type -of csv=p=0 OUT.mov"
+    echo "                                       # expect the chapter data track listed"
+    echo "   ('Referenced QT chapter track not found' on open = the track WAS dropped)"
+    echo "   or drop the chapters deliberately with -map_chapters -1."
+    CH_ML=" drop_s=$CH_DROP_SECS"   # append-only field: emitted only when the tier-2 arm fires
+  fi
+  echo "MOV_CHAPTER_TS_WARN chapters=$CH_N dur_s=$CH_DUR_S limit_s=$CH_WARN_SECS$CH_ML"   # machine-readable (additive, WO 1.12-C)
+fi
+
 # WO 4.1: "QuickTime-ready" on a contribution profile is now EARNED, not
 # assumed — the DONE line below is only reachable when the post-build
 # playability check returned ok (fail/skip demote to 10 REVIEW first)
@@ -507,8 +570,19 @@ case "$o" in *">> OK"*) rc=0;; *">> REVIEW"*) rc=10;; *) rc=1;; esac
 # never a silent OK; the verdict self-dates its macOS via playable-check.sh
 # (Ground Rule 6).
 if [ "$PLAYCHECK_DUE" -eq 1 ] && [ "$rc" -ne 1 ] && [ -f "$OUT" ]; then
-  echo "-- playability ($PLAYCHECK_WHY: prove, don't guess) --"
-  playability_verdict "$OUT"
+  # WO-B (2026-08-15): a contribution profile gets the FIDELITY storey on top of
+  # the thumbnail floor — two real broadcast 4:2:2 masters false-greened the
+  # thumbnail-only check on macOS 26.6.1 (rendered, destroyed); renders !=
+  # renders correctly, so this class compares the AVFoundation render against
+  # the ffmpeg reference (SSIM). The PR_VNATIVE variant/no arms stay thumbnail-only.
+  PC_FID=""
+  if [ "$PLAYCHECK_WHY" = "contribution profile" ]; then PC_FID="--fidelity"; fi
+  if [ -n "$PC_FID" ]; then
+    echo "-- playability ($PLAYCHECK_WHY: prove, don't guess — thumbnail floor + AVFoundation-vs-ffmpeg fidelity SSIM) --"
+  else
+    echo "-- playability ($PLAYCHECK_WHY: prove, don't guess) --"
+  fi
+  playability_verdict "$OUT" ${PC_FID:+"$PC_FID"}
   case "$PLAY_VERDICT" in
     fail)
       rc=10

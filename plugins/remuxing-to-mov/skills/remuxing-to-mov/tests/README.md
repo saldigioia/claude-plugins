@@ -103,25 +103,48 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     (21/22), gate-(f)-only escalation + source gap budget (23/24), seam-check
     on ffmpeg 9 (25), pcm_bluray routing (31), per-track `auto` + keep-all
     default + language dedupe/curation (32–35), verify gate (g) (36), `--drc`
-    (37), the 4:2:2 empirical demotion (41), rot demotion (42), the
-    native-codec matrix (51), unroutable-codec refusals (52), qt-groups
-    (53), and the WO 5.4 probe advisory surfaces (54: the multi-program-TS
-    NOTE with its measured PAT-order routing basis, and the >24 h / 33-bit
-    PTS-wrap horizon NOTE; the mid-stream SPS-change class from the same 5.4
-    pass has **no warning surface to pin** — known-limits.md records it as
-    detect-and-warn candidate, not implemented), and the 1.11 adversarial-
-    review fix round (60: qt-groups maps verify's TEXT verdict so REVIEW
-    propagates as 10; verify `--audio` tolerates the automatic ADTS→ASC
-    reframing on a dual-track AAC original with a wrong-source negative
-    control; unroutable-codec refusal parity at auto.sh/remux.sh/batch.sh —
-    exit 11, `MOV_REFUSED`, no `.part` litter, batch REFUSED row; batch
-    sidecar `PROV_RUNG=S` for uppercase rungs; the non-audio-drop WARN +
-    `RMX_PLAN unmapped=`; the >16-bit PCM-access depth WARN). Corpus
-    discipline (6.3):
-    before the sub-suites run, every member of `make-fixtures.sh`'s ALL list
-    that is missing is healed in ONE up-front call, so the sub-suites' own
-    self-heal blocks (kept for standalone invocation) are no-ops inside a
-    suite run and regeneration happens exactly once per run.
+    (37), the 4:2:2 empirical demotion (41), rot demotion (42), the 1.12
+    fidelity↔retag pair (43), the native-codec matrix (51), unroutable-codec
+    refusals (52), qt-groups (53), and the WO 5.4 probe advisory surfaces
+    (54: the multi-program-TS NOTE with its measured PAT-order routing basis,
+    and the >24 h / 33-bit PTS-wrap horizon NOTE; the mid-stream SPS-change
+    class from the same 5.4 pass has **no warning surface to pin** —
+    known-limits.md records it as detect-and-warn candidate, not
+    implemented), and the 1.11 adversarial-review fix round (60: qt-groups
+    maps verify's TEXT verdict so REVIEW propagates as 10; verify `--audio`
+    tolerates the automatic ADTS→ASC reframing on a dual-track AAC original
+    with a wrong-source negative control; unroutable-codec refusal parity at
+    auto.sh/remux.sh/batch.sh — exit 11, `MOV_REFUSED`, no `.part` litter,
+    batch REFUSED row; batch sidecar `PROV_RUNG=S` for uppercase rungs; the
+    non-audio-drop WARN + `RMX_PLAN unmapped=`; the >16-bit PCM-access depth
+    WARN). Corpus discipline (6.3): before the sub-suites run, every member
+    of `make-fixtures.sh`'s ALL list that is missing is healed in ONE
+    up-front call, so the sub-suites' own self-heal blocks (kept for
+    standalone invocation) are no-ops inside a suite run and regeneration
+    happens exactly once per run.
+28. **The fidelity↔retag pair (1.12, `regression.d/43-fidelity-retag.sh`)** —
+    one synthetic MPEG-2 4:2:2 clip, two stream-copy builds (`-c copy` → stsd
+    `m2v1`; `-c copy -tag:v xd5b` → the XDCAM HD422 entry), pinning WO-A (the
+    retag route) and WO-B (the fidelity gate) against each other so neither
+    silently regresses: the tags land as built and the video packet hash is
+    identical across source/m2v1/xd5b (the retag is provably lossless);
+    `probe.sh` fires `PR_TAG_ADVICE=xd5b` (kv) / `tag_advice` (json) on the
+    m2v1 build only — NOT on the already-retagged xd5b build (idempotent, no
+    advisory loop) and NOT on a 4:2:0 MOV carrying the very same `m2v1` stsd
+    (the pix_fmt discriminator is pinned, not assumed); the
+    `playable-check.sh --fidelity` flag surface never exits 2/unknown-option
+    and always announces its `PLAYCHECK_FIDELITY` machine line. On a macOS
+    bench the xd5b build proves `verdict=ok` with SSIM ≥ threshold, the m2v1
+    build is asserted *verdict-following* (exit code follows whatever verdict
+    this macOS measures — drift-proof), and `RTM_FIDELITY_SSIM=0.99` over the
+    healthy build forces the documented `verdict=fail reason=fidelity` exit 1
+    (the gate CAN fail); off-macOS those halves are announced SKIPs naming
+    what was not proven. SYNTHESIS LIMIT: the synthetic clip does NOT
+    reproduce the consumer-decoder corruption (evidence bench macOS 26.6.1 /
+    ffmpeg 9.0.1, 2026-08-15: SSIM ~0.95 as m2v1, fidelity=ok) — the
+    destroyed-render half is operator-verified (2026-08-15, two real
+    1080i59.94 broadcast masters, off-repo) and recorded as a residual on the
+    sub-suite's closing line, never faked into a green.
 
 ## Synthesis limit (why some things aren't tested directly)
 
@@ -140,6 +163,15 @@ Section 19 pins its mechanisms through the same injection-hook style the other
 un-mintable classes use (`PF_PKT_FILE`, `PF_PKT_TICKS_FILE`,
 `RTM_MUX_LOG_APPEND`), and the pairfill E2E run uses a fully-timestamped source
 (where the fill is a no-op by design) to prove the plumbing and gates.
+
+The **destroyed consumer-decoder render** of real 4:2:2 broadcast masters (the
+1.12 fidelity motive) is likewise un-mintable: the synthetic `m2v1` 4:2:2 clip
+decodes cleanly through the consumer path (SSIM ~0.95 on the 2026-08-15
+bench), so `regression.d/43-fidelity-retag.sh` asserts the synthesizable
+mechanism halves (lossless retag, advisory surface, flag surface, healthy
+`verdict=ok`, threshold-forced `verdict=fail reason=fidelity`) and records the
+destroyed-render half as an operator-verified residual (2026-08-15, two real
+1080i59.94 masters), never a fake pass.
 
 The same applies to the **open-GOP seam glitch**: libx264/x265 won't emit true
 leading B-frames on synthetic content, so `gop-probe.sh`'s detector is unit-tested

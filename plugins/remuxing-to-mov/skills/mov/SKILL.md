@@ -89,8 +89,11 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
   `yuv422p*` source (any bit depth: MPEG-2 4:2:2, H.264 Hi422/AVC-Intra, HEVC
   Rext) prints an advisory (`contribution profile <codec>/<pix_fmt> —
   playability will be verified post-build`), builds losslessly, then the
-  finished output is tested with `playable-check.sh` and the machine line
-  `MOV_PLAYABILITY os=… verdict=ok|fail|skip` is emitted. Verdict `fail` →
+  finished output is tested with `playable-check.sh` — with `--fidelity` since
+  1.12 on this 4:2:2 contribution class (SSIM vs the ffmpeg reference decode:
+  renders ≠ renders correctly, measured 2026-08-15 macOS 26.6.1) — and the
+  machine line `MOV_PLAYABILITY os=… verdict=ok|fail|skip fidelity=ok|fail|skip`
+  is emitted. Verdict `fail` →
   exit 10 REVIEW naming the Rung-4 route (the file is still a verified
   lossless master); no macOS/qlmanage → exit 10 REVIEW, "playability
   unverified on this platform". (The old categorical refusal was falsified on
