@@ -177,7 +177,9 @@ for spec in $ASPECS; do
   [ "$rs_i" -lt "${RS_NA:-0}" ] || continue
   RS_N=$((RS_N+1)); RS_C="$RS_C,$PCM"
 done
-if ! mux_census "$PART" "$RS_N" "$RS_C" resync; then
+census_rc=0
+mux_census "$PART" "$RS_N" "$RS_C" resync "$IN" || census_rc=$?
+if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
   echo "   NOT blessing the output; kept at $PART."
   exit 1
 fi
@@ -192,7 +194,14 @@ set +e
 o=$(bash "$SELF_DIR/verify.sh" "$IN" "$OUT" --silence 2>&1); set -e
 printf '%s\n' "$o" | sed 's/^/   /'
 case "$o" in
-  *">> OK"*)     echo ">> DONE: $OUT — video bit-identical, audio re-timed to the picture."; exit 0 ;;
+  *">> OK"*)     echo ">> DONE: $OUT — video bit-identical, audio re-timed to the picture."
+                 # REVIEW propagation (1.14): an unexpected-surplus census still
+                 # blesses the complete artifact and exits 10 ("look"), never 1.
+                 if [ "${census_rc:-0}" -eq 10 ]; then
+                   echo ">> REVIEW: the census flagged an unexpected surplus stream (see RMX_CENSUS above)."
+                   exit 10
+                 fi
+                 exit 0 ;;
   *">> REVIEW"*) echo ">> REVIEW: $OUT written; see the sync/parity note above (a tail residual can remain — confirm against the source)."; exit 10 ;;
   *)             echo ">> FAIL: see verify output above. Source untouched; $OUT is unverified."; exit 1 ;;
 esac

@@ -14,10 +14,16 @@
 #                                     PAFF/half-timestamped profile says keep the
 #                                     real PTS; NEVER plain-copy (the MOV muxer
 #                                     invents timing — the hard-stop class)
-#             backward/duplicate DTS (rot) -> pairfill/rebuild by profile;
-#                                     mpegts/mpeg2video + forward gaps = the
-#                                     backhaul rot class (mov.sh WARNs + builds,
-#                                     MOV_ROT_WARN; verify judges the result)
+#             backward/duplicate DTS (rot) -> routed by MEASURED profile (WO 1.14
+#                                     Phase 4): pairfill (half-timestamped PAFF),
+#                                     derive-dts.sh Rung 3-DERIVE (PTS-complete
+#                                     reordered, ANY codec — the rotten DTS is
+#                                     discarded and re-derived), rebuild (H.264,
+#                                     no surviving reorder — H.264-only, as is
+#                                     pairfill); mpegts/mpeg2video + forward
+#                                     gaps = the backhaul rot class (mov.sh
+#                                     WARNs + builds, MOV_ROT_WARN; verify
+#                                     judges the result)
 #             forward gaps         -> resync.sh when raw PCM rides along
 #                                     (gap-collapse desync); plain copy is safe
 #                                     for compressed-audio-only shapes
@@ -165,9 +171,12 @@ if [ "$tloss" -gt 0 ]; then
 fi
 if [ "${V_NAPTS:-0}" -gt 0 ] || [ "${V_NADTS:-0}" -gt 0 ]; then
   eval "$(pf_detect "$IN")"   # windowed, cheap: picks the right missing-ts repair
-  if [ "$PF_PAFF" = yes ] || [ "$PF_HALF_TS" = yes ]; then
+  if { [ "$PF_PAFF" = yes ] || [ "$PF_HALF_TS" = yes ]; } && [ "${vcodec:-na}" = h264 ]; then
     finding timeline "video missing timestamps (N/A PTS=$V_NAPTS DTS=$V_NADTS; PAFF/half_ts=$PF_HALF_TS)" \
-      "scripts/pairfill-paff.sh (keeps real PTS). NEVER plain-copy — the MOV muxer invents timing (hard-stop class)"
+      "scripts/pairfill-paff.sh (keeps real PTS; H.264-only). NEVER plain-copy — the MOV muxer invents timing (hard-stop class)"
+  elif [ "$PF_PAFF" = yes ] || [ "$PF_HALF_TS" = yes ]; then
+    finding timeline "video missing timestamps (N/A PTS=$V_NAPTS DTS=$V_NADTS; PAFF-shaped profile but codec=${vcodec:-?})" \
+      "pairfill-paff.sh is H.264-only (it refuses this codec, exit 3) — Rung 2 genpts (remux.sh --genpts), verify-gated; scripts/diagnose.sh reads the full profile. NEVER plain-copy (the MOV muxer invents timing)"
   else
     finding timeline "video missing timestamps (N/A PTS=$V_NAPTS DTS=$V_NADTS)" \
       "Rung 2 genpts (remux.sh --genpts), verify-gated; escalate per diagnose.sh if it still glitches"
@@ -176,13 +185,28 @@ fi
 if [ "${V_BACK:-0}" -gt 0 ] || [ "${V_DUP:-0}" -gt 0 ]; then
   if [ "$vcodec" = mpeg2video ] && [ "${V_GAPS:-0}" -gt 0 ]; then
     case "$container" in *mpegts*)
-      finding timeline "DTS rot (backward=$V_BACK duplicate=$V_DUP) + $V_GAPS forward gap(s) on mpegts/mpeg2video" \
-        "the backhaul rot class — mov.sh WARNs and builds (MOV_ROT_WARN); the verdict is measured (mux-confession hard stop + verify.sh), expect REVIEW/FAIL. Honest routes stay: keep the .ts / lossless MKV / rung4.sh";;
+      # P1.4: this finding quoted V_GAPS raw even when V_NADTS > 0 — the very
+      # condition the gap finding twenty lines below refuses to report a gap
+      # count under, because deltas measured across missing timestamps span the
+      # holes. Same guard, same words, applied here: the rot half stands on its
+      # own counters, the gap half is named unreliable instead of asserted.
+      if [ "${V_NADTS:-0}" -gt 0 ]; then
+        finding timeline "DTS rot (backward=$V_BACK duplicate=$V_DUP) on mpegts/mpeg2video, plus $V_GAPS APPARENT forward gap(s) measured ACROSS $V_NADTS missing timestamp(s) — the gap count is unreliable until the timestamps are repaired" \
+          "repair the missing timestamps first (route above), then re-run this scan; the rot itself routes via scripts/diagnose.sh. Do not spend the apparent gap seconds as a tolerance budget anywhere"
+      else
+        finding timeline "DTS rot (backward=$V_BACK duplicate=$V_DUP) + $V_GAPS forward gap(s) on mpegts/mpeg2video" \
+          "the backhaul rot class — mov.sh WARNs and builds (MOV_ROT_WARN); the verdict is measured (mux-confession hard stop + verify.sh), expect REVIEW/FAIL. Honest routes stay: keep the .ts / lossless MKV / rung4.sh"
+      fi;;
       *) finding timeline "DTS rot (backward=$V_BACK duplicate=$V_DUP)" "scripts/diagnose.sh routes the repair by timestamp profile";;
     esac
   else
+    # WO 1.14 Phase 4: the old route here said "pairfill or rebuild; lossless
+    # either way" — struck. The rungs are only lossless IN PRESENTATION when
+    # they match the measured profile (a constant-rate rebuild of a reordered
+    # stream plays decode order), and both are H.264-only; the PTS-complete
+    # reordered class (DTS absent/reconstructed/rotten alike) is derive-dts.
     finding timeline "DTS rot (backward=$V_BACK duplicate=$V_DUP)" \
-      "scripts/diagnose.sh routes by profile: pairfill-paff.sh (reorder/half-ts) or rebuild-paff.sh; lossless either way"
+      "scripts/diagnose.sh routes by MEASURED profile: pairfill-paff.sh (half-timestamped PAFF), scripts/derive-dts.sh Rung 3-DERIVE (PTS-complete reordered, any codec — the rotten DTS column is discarded and re-derived from the sorted PTS), rebuild-paff.sh (H.264, no surviving reorder). The rung must match the profile — the wrong one is NOT lossless in presentation order"
   fi
 fi
 if [ "${V_GAPS:-0}" -gt 0 ] && [ "${V_BACK:-0}" -eq 0 ] && [ "${V_DUP:-0}" -eq 0 ]; then

@@ -54,7 +54,8 @@ eval "$(pf_reorder_scan "$IN")"
 if [ "$PF_REORDER" = yes ] && [ "$FORCE" -ne 1 ]; then
   eval "$(pf_detect "$IN")"
   echo ">> REFUSING: the source's surviving timestamps show a reorder pyramid" >&2
-  echo "   (pts!=dts on $PF_PTSNEDTS pkt(s), $PF_BACKPTS backward PTS step(s), max offset $PF_MAXOFF_TICKS ticks)." >&2
+  DTSQ=""; [ "${PF_DTS_SOURCE:-carried}" = reconstructed ] && DTSQ=" (demuxer-reconstructed — not a source property)"
+  echo "   (pts!=dts on $PF_PTSNEDTS pkt(s), $PF_BACKPTS backward PTS step(s), max offset $PF_MAXOFF_TICKS ticks${DTSQ})." >&2
   echo "   A constant-rate restamp sets PTS=DTS and would play pictures in DECODE" >&2
   echo "   order — motion shuffled, and invisible to the default verify tier." >&2
   if [ "${PF_HALF_TS:-no}" = yes ]; then
@@ -62,9 +63,11 @@ if [ "$PF_REORDER" = yes ] && [ "$FORCE" -ne 1 ]; then
     echo "   every real PTS and fills the pair-mates:" >&2
     echo "     scripts/pairfill-paff.sh \"$IN\" \"$OUT\"" >&2
   else
-    echo "   Real PTS survives — keep it (plain copy, or pairfill-paff.sh to clean the" >&2
-    echo "   DTS ramp) instead of flattening it. --force overrides ONLY if you have" >&2
-    echo "   proven decode order == display order." >&2
+    echo "   Real PTS survives — keep it. A PTS-complete reordered stream is the" >&2
+    echo "   Rung 3-DERIVE class: scripts/derive-dts.sh \"$IN\" \"$OUT\" derives the DTS" >&2
+    echo "   column from the sorted PTS (codec-agnostic, video bits untouched) — that," >&2
+    echo "   or a scrub-gated plain copy, never this flattening restamp. --force" >&2
+    echo "   overrides ONLY if you have proven decode order == display order." >&2
   fi
   exit 3
 fi
@@ -152,7 +155,9 @@ fi
 # stream; every audio track is pcm_s16le by construction.
 RB_C="$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)"   # the SOURCE codec, not the artifact reading itself
 i=0; while [ "$i" -lt "$NA" ]; do RB_C="$RB_C,pcm_s16le"; i=$((i+1)); done
-if ! mux_census "$PART" "$((1 + NA))" "$RB_C" rebuild-paff; then
+census_rc=0
+mux_census "$PART" "$((1 + NA))" "$RB_C" rebuild-paff "$IN" || census_rc=$?
+if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
   echo "   NOT blessing the output; kept at $PART (log: $MUXLOG; intermediates in $WORK)."
   exit 1
 fi
@@ -161,3 +166,6 @@ mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
 echo "verify with: scripts/verify.sh \"$IN\" \"$OUT\""
 echo "if verify passes, remove intermediates by hand: rm -rf \"$WORK\""
+# REVIEW propagation (1.14): an unexpected-surplus census blesses the complete
+# artifact and exits 10 ("look"), never 1 — nothing planned is missing.
+exit "$census_rc"

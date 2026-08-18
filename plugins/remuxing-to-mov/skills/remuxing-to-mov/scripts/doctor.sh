@@ -53,6 +53,19 @@ HWA=""; [ "$FFMPEG" = yes ] && HWA=$(ffmpeg -hide_banner -hwaccels 2>/dev/null |
 VTB=no; grep -qiw videotoolbox <<<"$HWA" && VTB=yes
 T_MINFO=$(have_bin mediainfo); T_MP4BOX=$(have_bin MP4Box); T_MP4DUMP=$(have_bin mp4dump)
 T_AVCONV=$(have_bin avconvert)   # macOS: AVFoundation's own transcoder (QTFF audit 5-5d)
+# PyAV venv (Rung 3-DERIVE, WO 1.14 Phase 3) — report-only, same doctrine as the
+# Bento4/mp4dump line: an optional dependency degrades exactly one script
+# (derive-dts.sh, which prints its own bootstrap and exits 10 when this is
+# absent), never the verdict here. ${CLAUDE_PLUGIN_DATA} is the documented
+# persistent home for plugin-owned deps; the fallback path is spelled out
+# because the variable was not observed set in this bench's live runtime
+# (measured 2026-08-16; see derive-dts.sh's header note).
+PYAV_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/remuxing-to-mov}"
+PYAV=no; PYAV_VER=""
+if [ -x "$PYAV_DATA/venv/bin/python" ]; then
+  PYAV_VER=$("$PYAV_DATA/venv/bin/python" -c 'import av; print(av.__version__)' 2>/dev/null || true)
+  [ -n "$PYAV_VER" ] && PYAV=yes
+fi
 
 # REQUIRED to do anything useful; RECOMMENDED degrades a specific check if absent.
 required_ok=yes
@@ -65,10 +78,11 @@ status=READY; [ "$required_ok" = yes ] || status=BLOCKED
 { [ "$status" = READY ] && { [ "$vcl_ok" = no ] || [ "$MUX_SHASH" = no ]; }; } && status=DEGRADED
 
 if [ "$KV" -eq 1 ]; then
-  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_BSF_SETTS=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\nDOC_MUX_MP4=%s\nDOC_ISO_PCM=%s\n' \
+  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_BSF_SETTS=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\nDOC_MUX_MP4=%s\nDOC_ISO_PCM=%s\nDOC_PYAV=%s\nDOC_PYAV_VER=%s\n' \
     "$FFMPEG" "$FFPROBE" "${VER:-na}" "$MUX_MOV" "$MUX_NULL" "$MUX_SHASH" "$MUX_FMD5" \
     "$BSF_FU" "$BSF_H264" "$BSF_HEVC" "$BSF_SETTS" "$vcl_ok" "$dv_copy" \
-    "$OS" "$ARCH" "$VTB" "$T_MINFO" "$T_MP4BOX" "$T_MP4DUMP" "$status" "$MUX_MP4" "$ISO_PCM"
+    "$OS" "$ARCH" "$VTB" "$T_MINFO" "$T_MP4BOX" "$T_MP4DUMP" "$status" "$MUX_MP4" "$ISO_PCM" \
+    "$PYAV" "${PYAV_VER:-na}"
   [ "$required_ok" = yes ] || exit 1
   exit 0
 fi
@@ -115,6 +129,13 @@ echo "  mediainfo        : $([ "$T_MINFO" = yes ] && echo present || echo absent
 echo "  MP4Box (GPAC)    : $([ "$T_MP4BOX" = yes ] && echo present || echo absent)   [optional: container validate/inspect]"
 echo "  mp4dump (Bento4) : $([ "$T_MP4DUMP" = yes ] && echo present || echo absent)   [optional: atom dump]"
 [ "$T_AVCONV" = yes ] && echo "  avconvert        : present   [optional: AVFoundation ground truth for Rung-4 comparisons — one video + one audio track survive, extension picks output type, no protected content]"
+if [ "$PYAV" = yes ]; then
+  echo "  PyAV venv        : present ($PYAV_VER at $PYAV_DATA/venv)   [optional: derive-dts.sh, Rung 3-DERIVE]"
+else
+  echo "  PyAV venv        : absent   [optional: needed ONLY by derive-dts.sh (Rung 3-DERIVE); it"
+  echo "                     exits 10 with this bootstrap until installed — never auto-installed:"
+  echo "                     python3 -m venv \"$PYAV_DATA/venv\" && \"$PYAV_DATA/venv/bin/pip\" install av]"
+fi
 echo
 case "$status" in
   READY)    echo ">> READY — all required and recommended capabilities present." ;;

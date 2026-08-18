@@ -109,8 +109,10 @@ IDR_PTS="${tti_kpts:-na}"
 if [ "$IDR_PTS" = "N/A" ] || [ -z "$IDR_PTS" ]; then IDR_PTS="${tti_kdts:-na}"; fi
 if [ "$IDR_PTS" = "N/A" ] || [ -z "$IDR_PTS" ] || [ "$IDR_PTS" = na ]; then
   echo ">> FAIL: the first keyframe packet carries no timestamp at all — the" >&2
-  echo "   missing-timestamp class. Repair the timestamps FIRST (diagnose.sh routes:" >&2
-  echo "   pairfill-paff.sh / remux.sh --genpts), then re-run the trim." >&2
+  echo "   missing-timestamp class. Repair the timestamps FIRST (diagnose.sh routes by" >&2
+  echo "   measured profile: pairfill-paff.sh for half-timestamped H.264 PAFF /" >&2
+  echo "   derive-dts.sh for PTS-complete reordered, any codec / remux.sh --genpts" >&2
+  echo "   otherwise), then re-run the trim." >&2
   exit 1
 fi
 echo "   mid-GOP head: $tti_pre pre-keyframe packet(s); first keyframe @ ${IDR_PTS}s (packet size ${tti_ksize:-0} B)"
@@ -216,7 +218,9 @@ fi
 TTI_C=$(ffp -v error -show_entries stream=index,codec_name -of csv=p=0 "$IN" 2>/dev/null | \
         awk -F, 'NF{ if(seen[$1]++) next; printf "%s%s", s, $2; s="," }')
 TTI_N=$(printf '%s' "$TTI_C" | awk -F, '{print ($0=="" ? 0 : NF)}')
-if ! mux_census "$PART" "$TTI_N" "$TTI_C" trim-to-idr; then
+census_rc=0
+mux_census "$PART" "$TTI_N" "$TTI_C" trim-to-idr "$IN" || census_rc=$?
+if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
   echo "   NOT blessing the cut; kept at $PART." >&2
   exit 1
 fi
@@ -226,4 +230,6 @@ echo "   kept region: every packet at/after the IDR, stream-copied byte-identica
 echo "   removed: ONLY the undecodable pre-roll, from BOTH tracks (A/V parity kept)."
 echo "   Verify any downstream .mov against THIS file, not the untrimmed capture."
 echo "TTI_SUMMARY prekey=${tti_pre:-0} idr_pts=$IDR_PTS ss_rel=$REL out=$OUT"   # machine-readable
-exit 0
+# REVIEW propagation (1.14): an unexpected-surplus census blesses the complete
+# cut and exits 10 ("look"), never 1 — nothing planned is missing.
+exit "$census_rc"

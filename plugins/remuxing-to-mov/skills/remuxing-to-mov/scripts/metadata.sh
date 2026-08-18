@@ -69,7 +69,9 @@ ffmpeg -nostdin -y -v error -fflags +bitexact "${FF_INPUT_OPTS[@]}" -i "$IN" \
 MD_C=$(ffp -v error -show_entries stream=index,codec_type,codec_name -of csv=p=0 "$IN" 2>/dev/null | \
        awk -F, 'NF{ if(seen[$1]++) next; if($3=="data") next; printf "%s%s", s, $2; s="," }')
 MD_N=$(printf '%s' "$MD_C" | awk -F, '{print ($0=="" ? 0 : NF)}')
-if ! mux_census "$PART" "$MD_N" "$MD_C" metadata; then
+census_rc=0
+mux_census "$PART" "$MD_N" "$MD_C" metadata "$IN" || census_rc=$?
+if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
   echo "   NOT blessing the tagged output; kept at $PART (the untagged input is untouched)." >&2
   exit 1
 fi
@@ -87,4 +89,10 @@ for kv in "${KV[@]}"; do
   else echo "   !!  $k did not round-trip (got '${got:-<none>}', want '$v')"; miss=1; fi
 done
 [ "$miss" -eq 0 ] || { echo ">> REVIEW: some keys did not round-trip (see above)."; exit 1; }
+# REVIEW propagation (1.14): an unexpected-surplus census still blesses the
+# complete artifact and exits 10 ("look"), never 1.
+if [ "${census_rc:-0}" -eq 10 ]; then
+  echo ">> REVIEW: metadata embedded, but the census flagged an unexpected surplus stream (see RMX_CENSUS above)."
+  exit 10
+fi
 echo ">> OK: metadata embedded in QuickTime format; source untouched."

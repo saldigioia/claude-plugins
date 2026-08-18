@@ -108,12 +108,27 @@ vnative () {
   esac
 }
 
+# --- Rung 3-DERIVE first-rung signature (WO 1.14 Phase 4) -----------------------
+# The auto-proceed derive profile, mirroring derive-dts.sh's own signature gate
+# (it proceeds WITHOUT --force exactly here): PTS-complete (nopts_frac ~ 0),
+# reorder pyramid present, and the DTS column provably short — depth class
+# match-field/understated, or PF_DTS_SHORT=yes (measured depth exceeds the
+# declared packet delay, which survives PF_PPF=unknown). A healthy reordered
+# stream (match-frame, dts_short=no) stays on its old rung: the reconstruction
+# accounts for the depth, so a plain copy is not provably wrong.
+pr_derive_sig () {
+  [ "${PF_REORDER:-no}" = yes ] || return 1
+  awk "BEGIN{exit !((${PF_NOPTS_FRAC:-1})+0 <= 0.001)}" || return 1
+  case "${PF_DEPTH_CLASS:-unknown}" in match-field|understated) return 0;; esac
+  [ "${PF_DTS_SHORT:-unknown}" = yes ]
+}
+
 # Structured output for auto.sh / batch.sh. The recommended rung is a FIRST guess
 # from codec/PAFF/audio only; timestamp-driven escalation (Rung 2/3 on non-PAFF)
 # happens reactively in auto.sh from the verify verdict.
 probe_struct () {
   local mode="$1" q="ffp -v error -select_streams"
-  local container vcodec vtag isavc acodec aaction rung cmd cp ct cs cr pixfmt vnat
+  local container vcodec vtag isavc acodec aaction rung rung_json cmd cp ct cs cr pixfmt vnat
   local tag_advice tagadv_json
   container=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
@@ -126,7 +141,9 @@ probe_struct () {
   cs=$($q v:0 -show_entries stream=color_space -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   cr=$($q v:0 -show_entries stream=color_range -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   eval "$(pf_detect "$IN")"
-  eval "$(pf_reorder_scan "$IN")"
+  # PF_PPF_IN passes pf_detect's measured essence result down so the bounded
+  # decode probe runs once per probe pass, not once per function that wants it.
+  eval "$(PF_PPF_IN="${PF_PPF:-}" pf_reorder_scan "$IN")"
   ms_tb_scan
   mp4_atom_scan "$container" "$vtag"
   vnat=$(vnative "$vcodec" "$pixfmt")
@@ -187,22 +204,41 @@ probe_struct () {
                                                  # pre-5.1 it was misfiled pcm)
                                                  # + ac3 (see WHY above)
   esac
-  # PAFF repair routed by timestamp profile (post-mortem 2026-07-25): a pair-
-  # timestamped or reordered stream must KEEP its real PTS (pairfill); the
-  # constant-rate rebuild is only safe when no reorder pyramid survives.
+  # Repair routed by timestamp profile (post-mortem 2026-07-25; corrected split
+  # WO 1.14 Phase 4): the pair-timestamped class keeps its real PTS via pairfill;
+  # a PTS-COMPLETE reordered stream whose DTS column is provably short is the
+  # Rung 3-DERIVE class (additive PR_REC_RUNG value 3-derive — the old doctrine
+  # routed it into pairfill's exit 3); the constant-rate rebuild is only safe
+  # when no reorder pyramid survives. Existing profiles keep their old values.
   if [ "$PF_PAFF" = yes ]; then
     rung=3
-    if [ "$PF_HALF_TS" = yes ] || [ "$PF_REORDER" = yes ]; then cmd="pairfill-paff.sh IN OUT.mov"
+    if [ "$PF_HALF_TS" = yes ]; then cmd="pairfill-paff.sh IN OUT.mov"
+    elif pr_derive_sig; then rung=3-derive; cmd="derive-dts.sh IN OUT.mov"
+    elif [ "$PF_REORDER" = yes ]; then cmd="pairfill-paff.sh IN OUT.mov"
     else cmd="rebuild-paff.sh IN OUT.mov $PF_FIELD_RATE $PF_TIMESCALE"; fi
+  elif pr_derive_sig; then         rung=3-derive; cmd="derive-dts.sh IN OUT.mov"
   elif [ "$aaction" = pcm ]; then rung=1; cmd="remux.sh IN OUT.mov --audio pcm"
   else                            rung=0; cmd="remux.sh IN OUT.mov"; fi
+  # rec_rung stays a bare number for the legacy numeric values; the additive
+  # 3-derive value is quoted so the JSON stays parseable (append-only API).
+  rung_json="$rung"; case "$rung" in *[!0-9]*) rung_json="\"$rung\"";; esac
   if [ "$mode" = "--json" ]; then
-    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","vnative":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s"%s}\n' \
-      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd" "$tagadv_json"
+    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","vnative":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s","coded_rate_span":"%s","rate_method":"%s","ratio":"%s","ratio_hyp":"%s","ppf":"%s","depth_pics":"%s","depth_ts":"%s","decl_depth":"%s","depth_expected":"%s","depth_class":"%s","dts_short":"%s","dts_source":"%s"%s}\n' \
+      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung_json" "$cmd" \
+      "$PF_CODED_RATE_SPAN" "$PF_RATE_METHOD" "$PF_RATIO" "$PF_RATIO_HYP" "$PF_PPF" "$PF_DEPTH_PICS" "$PF_DEPTH_TS" "$PF_DECL_DEPTH" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_CLASS" "${PF_DTS_SHORT:-unknown}" "$PF_DTS_SOURCE" "$tagadv_json"
   else
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
     printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_VNATIVE=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
       "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    # P1.1/P1.2/P1.5 — additive only: the unit-aware reorder depth, which ratio
+    # hypothesis decided PAFF, the essence-measured pictures-per-frame, and the
+    # legacy span-derived rate beside the modal one. Nothing above was renamed.
+    printf 'PF_CODED_RATE_SPAN=%s\nPF_RATE_METHOD=%s\nPF_RATIO=%s\nPF_RATIO_HYP=%s\nPF_PPF=%s\n' \
+      "$PF_CODED_RATE_SPAN" "$PF_RATE_METHOD" "$PF_RATIO" "$PF_RATIO_HYP" "$PF_PPF"
+    # PF_DTS_SHORT (F3) is the field a repair ROUTES on — D > declared depth, in
+    # packets — which the class label only implies. Additive, like the rest.
+    printf 'PF_DEPTH_PICS=%s\nPF_DEPTH_TS=%s\nPF_DECL_DEPTH=%s\nPF_SPS_NOISE=%s\nPF_DEPTH_EXPECTED=%s\nPF_DEPTH_CLASS=%s\nPF_DTS_SHORT=%s\nPF_DTS_SOURCE=%s\n' \
+      "$PF_DEPTH_PICS" "$PF_DEPTH_TS" "$PF_DECL_DEPTH" "$PF_SPS_NOISE" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_CLASS" "${PF_DTS_SHORT:-unknown}" "$PF_DTS_SOURCE"
     aud_manifest_kv                                                       # 5-2a
     printf 'PR_MS_TB=%s\nPR_TS_HINT=%s\n' "$MS_TB" "${TS_HINT:-none}"    # 5-4e
     printf 'PR_GAMA=%s\nPR_STSD_ENTRY=%s\nPR_STSD_DV=%s\n' \
@@ -374,7 +410,14 @@ ffp -v error -select_streams a -show_entries \
 # noise is the signature. grep -c consumes to EOF (grep -q would SIGPIPE ffp
 # under pipefail — the verify.sh herestring lesson); ||true guards the
 # no-match rc under set -e.
-dbe_n=$(ffp -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$IN" 2>/dev/null | grep -c '^dolby_e' || true)
+# DISTINCT index,codec_name PAIRS (P1c): $IN is routinely a .ts, and a
+# program-bearing container emits every stream section TWICE (nested under the
+# program and again at top level) — so a plain line count printed ONE Dolby E
+# track as "2 track(s)" to the operator. `sort -u` on codec_name alone is not the
+# fix (a codec legitimately repeats across tracks, and two real Dolby E tracks
+# must still read 2); pairing the index with the codec kills the listing
+# duplicate and keeps genuine repeats.
+dbe_n=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$IN" 2>/dev/null | LC_ALL=C sort -u | grep -c ',dolby_e' || true)
 if [ "${dbe_n:-0}" -gt 0 ]; then
   echo "   WARN Dolby E ($dbe_n track(s)): broadcast mezzanine, up to 8 programs per"
   echo "        AES3 pair. NOT MOV-carriable, and PCM-treating it yields full-scale"
@@ -393,18 +436,38 @@ esac
 
 echo "-- field structure & timestamp profile --"
 eval "$(pf_detect "$IN")"
-eval "$(pf_reorder_scan "$IN")"
+eval "$(PF_PPF_IN="${PF_PPF:-}" pf_reorder_scan "$IN")"
+# P1.3: PF_PTSNEDTS and PF_MAXOFF_TICKS come off the demuxer's dts column. Where
+# the container stores no DTS that column is a reconstruction, so the annotation
+# corrects the ATTRIBUTION while the numbers stay exactly as measured.
+DTSQ=""
+[ "${PF_DTS_SOURCE:-carried}" = reconstructed ] && DTSQ=" (demuxer-reconstructed — not a source property)"
 echo "field_order=$PF_FIELD  (tt/bb = interlaced; progressive/unknown = usually no field concern)"
-echo "coded-picture rate=${PF_CODED_RATE}/s  vs  frame rate=${PF_NOMINAL_FPS}/s  (ratio=${PF_RATIO})"
-echo "untimestamped packets: fraction=${PF_NOPTS_FRAC} (half_ts=$PF_HALF_TS)   reorder pyramid: $PF_REORDER (max PTS-DTS ${PF_MAXOFF_TICKS} ticks)"
+echo "coded-picture rate=${PF_CODED_RATE}/s  vs  container rate=${PF_NOMINAL_FPS}/s  (ratio=${PF_RATIO}, method=${PF_RATE_METHOD}, legacy span-derived rate=${PF_CODED_RATE_SPAN}/s)"
+echo "coded pictures per frame (essence probe)=${PF_PPF}   DTS provenance=${PF_DTS_SOURCE}"
+echo "untimestamped packets: fraction=${PF_NOPTS_FRAC} (half_ts=$PF_HALF_TS)   reorder pyramid: $PF_REORDER (max PTS-DTS ${PF_MAXOFF_TICKS} ticks${DTSQ})"
+echo "reorder depth: ${PF_DEPTH_PICS} coded picture(s) vs declared ${PF_DECL_DEPTH} frame(s) x ${PF_PPF} = ${PF_DEPTH_EXPECTED}  -> ${PF_DEPTH_CLASS}  (dts-short=${PF_DTS_SHORT:-unknown})"
+pf_depth_note "$PF_DEPTH_CLASS" "$PF_DEPTH_PICS" "$PF_DECL_DEPTH" "$PF_PPF" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_TS"
+pf_hyp_note "${PF_RATIO_HYP:-none}" "${PF_RATIO:-0}" "${PF_PPF:-unknown}" "${PF_NOMINAL_FPS:-0}" "${PF_FIELD_RATE:-unknown}"
 if [ "$PF_PAFF" = yes ]; then
   echo "   >> FIELD-CODED (PAFF) H.264: coded-picture rate ~2x the frame rate."
   echo "      This is the fragile profile and the one that silently corrupts."
   echo "      genpts (Rung 2) is GUILTY-UNTIL-PROVEN here: it can pass the strict"
   echo "      MKV-mux test yet leave a timeline that tears when a player scrubs."
-  if [ "$PF_HALF_TS" = yes ] || [ "$PF_REORDER" = yes ]; then
-    echo "      Timestamp profile says KEEP the real PTS (pair-timestamped and/or"
-    echo "      reordered — a constant-rate rebuild would play fields in decode order):"
+  if [ "$PF_HALF_TS" = yes ]; then
+    echo "      Timestamp profile says KEEP the real PTS (pair-timestamped — the mate of"
+    echo "      each timestamped field is filled at +1 field; a constant-rate rebuild"
+    echo "      would play fields in decode order):"
+    echo "         scripts/pairfill-paff.sh \"$IN\" OUT.mov"
+  elif pr_derive_sig; then
+    echo "      Timestamp profile: PTS-COMPLETE (nopts_frac=$PF_NOPTS_FRAC) + reorder pyramid"
+    echo "      with a provably short DTS column (depth_class=$PF_DEPTH_CLASS,"
+    echo "      dts_short=${PF_DTS_SHORT:-unknown}, dts_source=$PF_DTS_SOURCE) -> Rung 3-DERIVE:"
+    echo "      derive DTS from the sorted PTS column (codec-agnostic; video bits untouched):"
+    echo "         scripts/derive-dts.sh \"$IN\" OUT.mov"
+  elif [ "$PF_REORDER" = yes ]; then
+    echo "      Timestamp profile says KEEP the real PTS (reordered with partial"
+    echo "      timestamps — a constant-rate rebuild would play fields in decode order):"
     echo "         scripts/pairfill-paff.sh \"$IN\" OUT.mov"
   elif [ "$PF_FIELD_RATE" = unknown ]; then
     echo "      Go to the field-rate rebuild (Rung 3):"
@@ -419,27 +482,40 @@ if [ "$PF_PAFF" = yes ]; then
 else
   echo "   NOTE: not field-coded by the rate test (ratio ~1x; the rate counts ALL"
   echo "   packets, untimestamped ones included — the old timestamped-only count"
-  echo "   false-read 1x on pair-timestamped PAFF). If mediainfo says 'Separated"
-  echo "   fields' or playback still tears on scrub, treat as PAFF anyway;"
-  echo "   see references/timeline-repair.md."
+  echo "   false-read 1x on pair-timestamped PAFF). Since P1.2 the ~1x reading is"
+  echo "   ALSO tested as H2 (container declaring the FIELD rate, the mkvmerge"
+  echo "   shape) — see the hypothesis line above for why it was or was not"
+  echo "   accepted. If mediainfo says 'Separated fields' or playback still tears"
+  echo "   on scrub, treat as PAFF anyway; see references/timeline-repair.md."
+  if pr_derive_sig; then
+    echo "   >> Rung 3-DERIVE profile even so: PTS-COMPLETE (nopts_frac=$PF_NOPTS_FRAC) reorder"
+    echo "      pyramid whose DTS column is provably short (depth_class=$PF_DEPTH_CLASS,"
+    echo "      dts_short=${PF_DTS_SHORT:-unknown}, dts_source=$PF_DTS_SOURCE) — a plain copy would carry"
+    echo "      the broken column into stts/ctts. Derive it from the sorted PTS instead:"
+    echo "         scripts/derive-dts.sh \"$IN\" OUT.mov"
+  fi
 fi
 
 echo "-- discontinuities (forward timestamp gaps) --"
 eval "$(disc_scan "$IN")"
-if [ "${DISC_COUNT:-0}" -gt 0 ]; then
-  echo "   >> ${DISC_COUNT} forward gap(s), first @ ${DISC_FIRST}s (~${DISC_MISSING}s dropped)."
+# P1.4: the presentation-order census is the timeline claim; the coded-order
+# (dts-column) census is reported beside it as the comparison it now is.
+if [ "${DISC_P_COUNT:-0}" -gt 0 ] || [ "${DISC_COUNT:-0}" -gt 0 ]; then
+  echo "   >> presentation order: ${DISC_P_COUNT:-0} forward gap(s), first @ ${DISC_P_FIRST:-na}s (~${DISC_P_MISSING:-0}s dropped)."
+  echo "      coded order (dts column): ${DISC_COUNT:-0} gap(s), first @ ${DISC_FIRST}s (~${DISC_MISSING}s)${DTSQ}"
+  disc_budget_note "${DISC_P_NA:-0}" "${DISC_P_COUNT:-0}"
   echo "      Present + monotonic, so the mux 'succeeds' — but a blind -c copy COLLAPSES"
   echo "      these in raw PCM audio and desyncs it. Use scripts/resync.sh, then verify."
 else
-  echo "   none (video DTS gap-free on the timing axis; safe to plain-copy)."
+  echo "   none (video timeline gap-free in both presentation and coded order; safe to plain-copy)."
 fi
 if [ "${DISC_BACK:-0}" -gt 0 ] || [ "${DISC_DUP:-0}" -gt 0 ]; then
   # 1.11 (WO 4.2 demotion; wording fixed in the WO 5.2 messaging pass): the
   # pre-1.11 text called this "the unbuildable BACKHAUL class — mov.sh refuses
   # it early (exit 11)". The refusal is gone; the verdict belongs to the
   # measured gates on the actual build.
-  echo "   >> whole-file DTS rot: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0} (the windowed"
-  echo "      5000-packet scan can miss these mid-file). Combined with forward gaps on an"
+  echo "   >> whole-file DTS rot: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0}${DTSQ} (the windowed"
+  echo "      ${PF_SCAN_WINDOW}-packet scan can miss these mid-file). Combined with forward gaps on an"
   echo "      mpegts/mpeg2video source this is the BACKHAUL rot class — since 1.11 mov.sh"
   echo "      WARNS and builds it (MOV_ROT_WARN + the three routes): the mux-confession"
   echo "      gate hard-stops invented timing and verify.sh judges the finished timeline."

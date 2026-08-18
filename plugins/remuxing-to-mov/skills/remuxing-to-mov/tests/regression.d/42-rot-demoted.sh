@@ -32,6 +32,23 @@
 #      — the demotion touched only the rot verdict.
 #   4. the mux-confession hard stop still fires (injected confession log,
 #      the suite's RTM_MUX_LOG_APPEND hook): exit 1, output NOT blessed.
+#   2a. F1/P1.4 ON THE /mov PATH — the arm mov.sh used to SHADOW. mov.sh once
+#      carried an inline copy of this warning that triggered on the CODED-order
+#      DISC_COUNT and emitted a MOV_ROT_WARN line with no disc_p= / disc_p_na=
+#      fields; because mov.sh exports RTM_BACKHAUL_GATED=1 the shared gate
+#      returned early, so on /mov the copy was the ONLY implementation that ever
+#      ran. Nothing pinned any of it: a mutation reverting the trigger to
+#      DISC_COUNT and deleting disc_p=/disc_p_na= passed the whole suite (P1c).
+#      Pinned here, both halves, through mov.sh itself:
+#        (i)  the FIELDS and the numbers they carry. On rot.ts the two censuses
+#             disagree — coded 1 gap / 17.960 s, presentation 2 gaps / 15.960 s
+#             — so the WARN's dropped-time claim and disc_p= must read the
+#             PRESENTATION figures while disc= keeps its original coded meaning
+#             (append-only: a field never changes what it counts).
+#        (ii) the TRIGGER, on a shape that can only be armed one way: an injected
+#             census with 59 coded-order gaps + 40 backward DTS steps and ZERO
+#             presentation-order gaps. The coded trigger would WARN on it; the
+#             presentation trigger must decline and print "backhaul scan clear".
 #   5. diagnose.sh's rot verdict routes "build + verify will judge (warn)" —
 #      no "refuses it up front", no pre-build exit-11 claim — and still
 #      warns off resync.sh (the incident-derived advice stays).
@@ -103,6 +120,53 @@ case "$rc" in
       || no "rc=1 without evidence, or a failed build was blessed" ;;
   *) no "exit $rc outside the contract (want 0|10|1 with evidence)" ;;
 esac
+
+echo
+echo "== 2a. /mov: the PRESENTATION-order arm — fields, numbers, and the trigger =="
+# (i) the machine line. Parsed field-by-field, never as one frozen string, so an
+# append-only addition cannot break the pin — but a DELETION or a re-pointed
+# field does. Values are the measured rot.ts census (bench 2026-08-16,
+# ffmpeg 9.0.1): coded 1 gap / 17.960 s, presentation 2 gaps / 15.960 s.
+rw=$(printf '%s\n' "$o" | grep '^MOV_ROT_WARN ' | head -1)
+rwf () { printf '%s\n' "$rw" | tr ' ' '\n' | awk -F= -v k="$1" '$1==k{print $2; exit}'; }
+[ -n "$rw" ] && ok "MOV_ROT_WARN line present on the /mov path" \
+  || no "no MOV_ROT_WARN line from mov.sh — the shared warning did not run"
+[ "$(rwf disc_p)"    = 2 ] && ok "disc_p=2 — the PRESENTATION-order forward-gap count (the field P1.4 appended)" \
+  || no "disc_p=$(rwf disc_p), want 2 (deleted, or pointed at the coded census)"
+[ "$(rwf disc_p_na)" = 0 ] && ok "disc_p_na=0 — the no-PTS guard field is emitted" \
+  || no "disc_p_na=$(rwf disc_p_na), want 0 (deleted?)"
+[ "$(rwf disc)"      = 1 ] && ok "disc=1 — the coded-order field keeps its ORIGINAL meaning (append-only)" \
+  || no "disc=$(rwf disc), want 1 (a field may never change what it counts)"
+[ "$(rwf disc)" != "$(rwf disc_p)" ] \
+  && ok "and the two arms really do disagree on this fixture ($(rwf disc) coded vs $(rwf disc_p) presentation) — the pin can't pass by coincidence" \
+  || no "coded and presentation counts are equal here; this fixture no longer discriminates the two arms"
+[ "$(rwf profile)" = timeline-rot ] && ok "profile=timeline-rot unchanged" || no "profile=$(rwf profile)"
+[ "$(rwf vcodec)"  = mpeg2video ]   && ok "vcodec=mpeg2video unchanged"    || no "vcodec=$(rwf vcodec)"
+# the human sentence must quote the PRESENTATION numbers — that is the arm whose
+# seconds are a claim about the program's timeline
+has   "$o" "BACKHAUL TIMELINE ROT — 2 forward gap(s) in presentation order" \
+  "the WARN headline quotes the PRESENTATION count (2), not the coded one (1)"
+has   "$o" "~15.960s dropped" "the dropped-time claim is the presentation figure"
+hasnt "$o" "17.960s dropped"  "the coded-order seconds are NEVER claimed as dropped"
+has   "$o" "comparison: 1 gap(s), ~17.960s" "…and the coded-order census is still printed beside it, unhidden"
+
+# (ii) THE TRIGGER, isolated. A census with plenty of coded-order gaps and DTS
+# rot but ZERO presentation-order gaps: the coded trigger fires on it, the
+# presentation trigger must not. Injected through disc_scan's documented
+# DISC_DTS_FILE hook (two-column pts,dts) — a reorder pyramid over a COMPLETE
+# presentation ramp, which is the real reconstructed-DTS shape, not a synthetic
+# curiosity. Measured on this shape: DISC_COUNT=59 DISC_BACK=40 DISC_P_COUNT=0.
+awk 'BEGIN{ o[1]=1;o[2]=5;o[3]=3;o[4]=2;o[5]=4
+  for(g=0; g<20; g++) for(k=1;k<=5;k++){ t=(g*5+o[k]-1)*0.04; printf "%.6f,%.6f\n", t, t } }' \
+  > "$WORK/pyr_nogap.csv"
+oi=$(DISC_DTS_FILE="$WORK/pyr_nogap.csv" DISC_FRAMEDUR_IN=0.04 \
+     bash "$SC/mov.sh" "$FIX/rot.ts" "$WORK/rot_inj.mov" 2>&1)
+has   "$oi" "backhaul scan clear (presentation gaps=0, coded-order gaps=59" \
+  "coded gaps + DTS rot but ZERO presentation gaps -> /mov declines to warn (the trigger is the PRESENTATION census)"
+hasnt "$oi" "** WARN: BACKHAUL TIMELINE ROT" \
+  "no rot WARN on a clear presentation timeline (a coded-order trigger would have fired here)"
+hasnt "$oi" "MOV_ROT_WARN" \
+  "and no MOV_ROT_WARN machine line either"
 
 echo
 echo "== 3. corrupt.ts diagnosis unchanged (damage stays damage) =="

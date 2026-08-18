@@ -264,22 +264,12 @@ esac
 #   Forward gaps ALONE never warned and still don't — that class rebuilds
 #   (the 2008 recovery); and an H.264 TS with gaps still rides the existing
 #   PAFF/resync machinery.
-backhaul_routes () {
-  echo "   Honest routes out (the source stays TS/MKV — health-checked, never doomed):"
-  echo "     keep     the source as-is — it is already the archival master; prove its"
-  echo "              health: scripts/ts-health.sh IN  (transport, timestamps, seek)"
-  echo "     playback ffmpeg -i IN -map 0:v:0 -map '0:a?' -c copy OUT.mkv"
-  echo "              (lossless; Matroska stores per-block timestamps, so the timeline"
-  echo "               survives honestly; plays in IINA/VLC/mpv) — then"
-  echo "              scripts/ts-health.sh OUT.mkv to prove the copy's timeline intact"
-  echo "     mp4swap  scripts/mp4-swap.sh SOURCE — lossless CONTAINER swap (same"
-  echo "              bitstream, .mp4, sample entry mp4v+esds). Measured 2026-08-15:"
-  echo "              an MPEG-2 4:2:2 capture QuickTime destroyed as .mov rendered"
-  echo "              correctly as .mp4, SSIM 0.9175+ on the same timestamps"
-  echo "     rung4    scripts/rung4.sh — operator-attested re-encode, the LAST"
-  echo "              route (it is the only one that stops being lossless)"
-  echo "   Skip this scan+warning (the build runs either way): --force-backhaul"
-}
+#   F1 (2026-08-16): the rot warning, its routes and its MOV_ROT_WARN line all
+#   come from lib-paff.sh now (backhaul_rot_warn + backhaul_gate_routes). The
+#   local backhaul_routes() printer that used to live here was deleted with the
+#   inline warning it served: a second routes text with no caller is the seam a
+#   future edit re-diverges along, and the routes are part of the warning's
+#   voice, not mov.sh's.
 # WO 4.1: the pix_fmt arm announces and defers to the post-build proof (the
 # shared advisory + predicate live in lib-paff.sh so no entry point diverges)
 . "$SELF_DIR/lib-paff.sh"   # qt_contribution_profile, contribution_advisory, playability_verdict, disc_scan
@@ -302,21 +292,18 @@ if [ "$FORCE_BACKHAUL" -eq 0 ] && [ "$PR_VCODEC" = mpeg2video ]; then
   case "${PR_CONTAINER:-}" in *mpegts*)
     echo "   mpegts/mpeg2video -> backhaul timeline scan (whole file, demux-only)..."
     . "$SELF_DIR/lib-paff.sh"
-    eval "$(disc_scan "$IN")"
-    if [ "${DISC_COUNT:-0}" -ge 1 ] && [ $(( ${DISC_BACK:-0} + ${DISC_DUP:-0} )) -ge 1 ]; then
-      # WO 4.2: warn, don't refuse — the demoted gate keeps the refusal's full
-      # voice (evidence + the same three routes) but the verdict now belongs to
-      # measurement: the mux-confession hard stop + verify on the actual build.
-      echo "** WARN: BACKHAUL TIMELINE ROT — ${DISC_COUNT} forward timestamp gap(s)"
-      echo "   (~${DISC_MISSING}s dropped, first @ ${DISC_FIRST}s) PLUS non-monotonic DTS"
-      echo "   (whole-file: backward=${DISC_BACK:-0} duplicate=${DISC_DUP:-0}). Building anyway — the"
-      echo "   verdict belongs to measurement, not prediction (WO 4.2): the mux-confession"
-      echo "   gate hard-stops if the muxer invents timing, and verify.sh judges the"
-      echo "   finished timeline with evidence. Expect REVIEW/FAIL on this class."
-      backhaul_routes
-      echo "MOV_ROT_WARN profile=timeline-rot vcodec=$PR_VCODEC disc=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}"   # machine-readable (additive, WO 4.2)
-    else
-      echo "   backhaul scan clear (gaps=${DISC_COUNT:-0} back=${DISC_BACK:-0} dup=${DISC_DUP:-0}) -> continuing."
+    # F1: this used to be an inline COPY of the shared rot warning, and the copy
+    # is the one that ran — mov.sh exports RTM_BACKHAUL_GATED=1 further down, on
+    # which the shared backhaul_gate returns early, so the P1.4 presentation
+    # census never executed on the /mov path at all. The copy also triggered on
+    # the coded-order DISC_COUNT and emitted a MOV_ROT_WARN line missing the
+    # disc_p= / disc_p_na= fields: one line name, two schemas, two triggers.
+    # There is now exactly ONE implementation (lib-paff.sh backhaul_rot_warn)
+    # and it eval's its scan into this shell, so the clear-scan line below still
+    # prints the numbers from the very same pass. The routes come from the
+    # shared backhaul_gate_routes with the warning that owns them.
+    if ! backhaul_rot_warn "$IN" "$PR_VCODEC" "${PR_CONTAINER:-}"; then
+      echo "   backhaul scan clear (presentation gaps=${DISC_P_COUNT:-0}, coded-order gaps=${DISC_COUNT:-0}, back=${DISC_BACK:-0} dup=${DISC_DUP:-0}) -> continuing."
     fi
     ;;
   esac

@@ -64,7 +64,9 @@ fi
 # the contract, and the per-script allowlist (the three suite-pinned legacy 3s)
 CONTRACT="0 1 2 10 11"
 allowed () { case "$1" in
-  pairfill-paff|rebuild-paff|playable-check) echo "$CONTRACT 3";;
+  # derive-dts joined the documented-3 family in 1.14 (Phase 3, decision Q1):
+  # signature refusals exit 3 like its sibling rungs; venv-absent is 10.
+  pairfill-paff|rebuild-paff|playable-check|derive-dts) echo "$CONTRACT 3";;
   *) echo "$CONTRACT";;
 esac; }
 in_set () { # in_set RC "C C C..."
@@ -97,7 +99,7 @@ echo
 echo "== 2. every entry point: forced failures return only documented codes =="
 # 6.3 fold-in: qt-groups (WO 5.3) and trim-to-idr (WO 2.2) postdate the loop's
 # WO 1.4 birth — every entry point means every entry point, new ones included
-ENTRY="auto batch diagnose doctor dual-track gop-probe metadata mov pairfill-paff playable-check probe qt-groups rebuild-paff remux resync rung4 seam-check trim-to-idr ts-health verify waiver"
+ENTRY="auto batch derive-dts diagnose doctor dual-track gop-probe metadata mov pairfill-paff playable-check probe qt-groups rebuild-paff remux resync rung4 seam-check trim-to-idr ts-health verify waiver"
 # playable-check's qlmanage render is deadline-bounded (WO 1.4: it hangs forever
 # on undecodable garbage); keep the garbage case fast here, and pin the knob.
 export RTM_QL_TIMEOUT=10

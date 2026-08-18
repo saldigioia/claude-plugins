@@ -22,7 +22,10 @@
 # deletes the source; output is written atomically by the sub-scripts.
 # Exit: 0 = verified OK; 10 = REVIEW (written, needs a human look — includes a
 #       contribution-profile build whose post-build playability check FAILed or
-#       could not run on this platform, WO 4.1); 1 = FAIL;
+#       could not run on this platform, WO 4.1; also the Rung 3-DERIVE
+#       dependency REVIEW: the measured route needs the PyAV venv, it is
+#       absent, the bootstrap was printed and nothing was written — WO 1.14
+#       Phase 4); 1 = FAIL;
 #       11 = REFUSED (since 1.11 the backhaul gate refuses NOTHING here: the
 #       4:2:2 profile builds and is playability-tested after (WO 4.1), and
 #       timeline rot WARNS + builds + lets the mux-confession hard stop and
@@ -113,6 +116,7 @@ rung_desc () { case "$1" in
   0) echo "Rung 0 (pure copy)";; 1) echo "Rung 1 (copy video + PCM audio)";;
   2) echo "Rung 2 (copy + genpts)";; 3) echo "Rung 3 (field-rate rebuild @ $RB_RATE)";;
   P) echo "Rung 3-PAIR (pair-mate PTS fill — keeps every real PTS)";;
+  3-derive) echo "Rung 3-DERIVE (derive-dts.sh — DTS derived from the sorted PTS column; PTS-complete reordered, codec-agnostic)";;
   S) echo "Rung 3-SYNC (resync.sh — video copy, audio re-timed to the picture)";; esac; }
 run_rung () { case "$1" in
   0) bash "$SELF_DIR/remux.sh" "$IN" "$OUT" ${AUDIO:+--audio "$AUDIO"} $ALLAUD;;
@@ -120,7 +124,19 @@ run_rung () { case "$1" in
   2) bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --genpts ${AUDIO:+--audio "$AUDIO"} $ALLAUD;;
   3) bash "$SELF_DIR/rebuild-paff.sh" "$IN" "$OUT" "$RB_RATE" "$RB_TS";;
   P) bash "$SELF_DIR/pairfill-paff.sh" "$IN" "$OUT";;
+  3-derive) bash "$SELF_DIR/derive-dts.sh" "$IN" "$OUT";;
 esac; }
+
+# Rung 3-DERIVE escalation signature (WO 1.14 Phase 4): PTS-complete
+# (nopts_frac ~ 0) + reorder pyramid + depth class NOT unknown (an unparseable
+# SPS is never restamped automatically — derive-dts.sh itself refuses that
+# class without --force, and match-frame is left to its gate too: a failed
+# attempt is settled by the best-artifact machinery, never a cascade).
+derive_sig_esc () {
+  [ "${PF_REORDER:-no}" = yes ] || return 1
+  awk "BEGIN{exit !((${PF_NOPTS_FRAC:-1})+0 <= 0.001)}" || return 1
+  [ "${PF_DEPTH_CLASS:-unknown}" != unknown ]
+}
 
 RESULT=FAIL; USED_RUNG=""
 # WO 2.3 (escalation honesty; measured on the trimmed BBC build): verify failed
@@ -184,6 +200,29 @@ attempt () {  # $1 = rung; sets RESULT to OK|REVIEW|FAIL (+ GATE_F_ONLY on the g
   esac
   settle_best "$1"
 }
+DERIVE_BOOT=0; DERIVE_TRIED=0
+attempt_derive () {  # Rung 3-DERIVE — special-cased for its exit-10 dependency REVIEW
+  USED_RUNG=3-derive; GATE_F_ONLY=0; DERIVE_TRIED=1
+  echo "-- attempting $(rung_desc 3-derive) --"
+  save_best
+  local rc=0 o
+  o=$(bash "$SELF_DIR/derive-dts.sh" "$IN" "$OUT" 2>&1) || rc=$?
+  printf '%s\n' "$o" | sed 's/^/   /'
+  if [ "$rc" -eq 0 ] && [ -f "$OUT" ]; then
+    local v
+    v=$(bash "$SELF_DIR/verify.sh" "$IN" "$OUT" $FULL 2>&1) || true
+    printf '%s\n' "$v" | sed 's/^/   verify: /'
+    case "$v" in *">> OK"*) RESULT=OK;; *">> REVIEW"*) RESULT=REVIEW;; *) RESULT=FAIL;; esac
+  elif [ "$rc" -eq 10 ] && [ ! -f "$OUT" ]; then
+    # venv absent (the rung printed its one-line bootstrap + manual recipe
+    # above): a missing OPTIONAL dependency is a human item — the ladder's
+    # verdict surfaces it as REVIEW below, never a crash and never a bare FAIL.
+    DERIVE_BOOT=1; RESULT=FAIL
+  else
+    RESULT=FAIL      # signature refusal (exit 3) or a failed gate: settled below
+  fi
+  settle_best 3-derive
+}
 attempt_resync () {  # gate-(f)-only escalation: the remedy verify itself named
   USED_RUNG=S; GATE_F_ONLY=0
   echo "-- attempting $(rung_desc S) --"
@@ -217,8 +256,15 @@ if [ "$DRY" -eq 1 ]; then
         || echo "   escalation if verify is not OK: Rung 3 (rebuild @ $RB_RATE — no reorder survives)."
     elif [ "${PF_REORDER:-no}" = yes ]; then
       echo "   plan: $(rung_desc "$BASE_RUNG")  [full-TS reordered PAFF: a copy KEEPS the true pyramid; scrub-gated]"
-      echo "   escalation if verify is not OK: gate-(f)-only gap-collapse -> resync.sh (audio"
-      echo "   re-timed, REVIEW-grade); otherwise $(rung_desc P). Never the flattening rebuild."
+      if derive_sig_esc; then
+        echo "   escalation if verify is not OK: gate-(f)-only gap-collapse -> resync.sh (audio"
+        echo "   re-timed, REVIEW-grade); otherwise $(rung_desc 3-derive)"
+        echo "   [pairfill signature absent (half_ts=no); derive signature measured: nopts_frac=${PF_NOPTS_FRAC:-?}"
+        echo "   + reorder, depth_class=${PF_DEPTH_CLASS:-?}]. Never the flattening rebuild."
+      else
+        echo "   escalation if verify is not OK: gate-(f)-only gap-collapse -> resync.sh (audio"
+        echo "   re-timed, REVIEW-grade); otherwise $(rung_desc P). Never the flattening rebuild."
+      fi
     else
       echo "   plan: $(rung_desc 3)  [field-coded, no reorder -> genpts is guilty-until-proven]"
       echo "   cmd : rebuild-paff.sh \"$IN\" \"$OUT\" $RB_RATE $RB_TS"
@@ -226,8 +272,20 @@ if [ "$DRY" -eq 1 ]; then
   else
     echo "   plan: $(rung_desc "$PR_REC_RUNG")"
     echo "   cmd : $PR_REC_CMD"
-    echo "   escalation if verify is not OK: gate-(f)-only gap-collapse -> resync.sh (audio"
-    echo "   re-timed, REVIEW-grade); otherwise Rung 2 (genpts) -> Rung 3 (rebuild @ $RB_RATE; refuses reordered streams)."
+    if [ "$PR_REC_RUNG" = 3-derive ]; then
+      echo "   [probe measured the derive profile: nopts_frac=${PF_NOPTS_FRAC:-?} (PTS-complete) + reorder,"
+      echo "   depth_class=${PF_DEPTH_CLASS:-?}, dts_short=${PF_DTS_SHORT:-?}]"
+      echo "   escalation if verify is not OK: copy ladder fallback (Rung 0, scrub-gated);"
+      echo "   venv-absent exit 10 surfaces the rung's bootstrap as REVIEW."
+    elif derive_sig_esc; then
+      echo "   escalation if verify is not OK: gate-(f)-only gap-collapse -> resync.sh (audio"
+      echo "   re-timed, REVIEW-grade); otherwise Rung 2 (genpts) -> $(rung_desc 3-derive)"
+      echo "   [derive signature measured: nopts_frac=${PF_NOPTS_FRAC:-?} + reorder, depth_class=${PF_DEPTH_CLASS:-?}]"
+      echo "   -> Rung 3 (rebuild @ $RB_RATE; refuses reordered streams)."
+    else
+      echo "   escalation if verify is not OK: gate-(f)-only gap-collapse -> resync.sh (audio"
+      echo "   re-timed, REVIEW-grade); otherwise Rung 2 (genpts) -> Rung 3 (rebuild @ $RB_RATE; refuses reordered streams)."
+    fi
   fi
   echo "   then: verify.sh \"$IN\" \"$OUT\" $FULL  (re-encode/Rung 4 is never automatic)"
   exit 0
@@ -238,9 +296,16 @@ rm -f "$BEST_SAVE"   # a stale park from a killed earlier run must never be "res
 if [ "$PF_PAFF" = yes ]; then
   if [ "${PF_HALF_TS:-no}" = yes ]; then
     attempt P                                  # pair class: keep real PTS, fill mates
-    if [ "$RESULT" != OK ] && [ "${PF_REORDER:-no}" = no ]; then
-      echo "-- verdict $RESULT and no reorder pyramid -> field-rate rebuild --"
-      attempt 3
+    if [ "$RESULT" != OK ]; then
+      if [ "${PF_REORDER:-no}" = no ]; then
+        echo "-- verdict $RESULT and no reorder pyramid -> field-rate rebuild --"
+        attempt 3
+      elif derive_sig_esc; then
+        # WO 1.14 Phase 4: pair-fill did not verify (or refused, exit 3) and
+        # the derive signature holds — the rung between 3-PAIR and terminal.
+        echo "-- verdict $RESULT + derive signature (nopts_frac=${PF_NOPTS_FRAC:-?}, reorder=yes, depth_class=${PF_DEPTH_CLASS:-?}) -> Rung 3-DERIVE --"
+        attempt_derive
+      fi
     fi
   elif [ "${PF_REORDER:-no}" = yes ]; then
     attempt "$BASE_RUNG"                       # full-TS pyramid: copy keeps the truth; scrub-gated
@@ -252,11 +317,31 @@ if [ "$PF_PAFF" = yes ]; then
       echo "-- verify failed ONLY gate (f) (gap-collapse) -> resync.sh, not pair-fill --"
       attempt_resync
     elif [ "$RESULT" != OK ]; then
-      echo "-- verdict $RESULT -> pair-fill (keeps real PTS; never the flattening rebuild) --"
-      attempt P
+      if derive_sig_esc; then
+        # WO 1.14 Phase 4: the pairfill SIGNATURE is absent here (half_ts=no —
+        # pairfill's own precondition names derive for exactly this shape) and
+        # the derive signature is measured, so the ladder goes straight to it.
+        echo "-- verdict $RESULT; pairfill signature absent (half_ts=no) + derive signature (nopts_frac=${PF_NOPTS_FRAC:-?}, reorder=yes, depth_class=${PF_DEPTH_CLASS:-?}) -> Rung 3-DERIVE --"
+        attempt_derive
+      else
+        echo "-- verdict $RESULT -> pair-fill (keeps real PTS; never the flattening rebuild) --"
+        attempt P
+      fi
     fi
   else
     attempt 3                                  # no reorder survives: constant-rate rebuild is safe
+  fi
+elif [ "$PR_REC_RUNG" = 3-derive ]; then
+  # WO 1.14 Phase 4: probe measured the auto-proceed derive profile (PTS-complete
+  # + reorder + provably short DTS column) — Rung 3-DERIVE is the first rung.
+  attempt_derive
+  if [ "$RESULT" != OK ] && [ "$DERIVE_BOOT" -eq 0 ]; then
+    echo "-- verdict $RESULT -> copy ladder fallback (Rung 0; scrub-gated) --"
+    attempt 0
+    if [ "$RESULT" = REVIEW ] && [ "$GATE_F_ONLY" -eq 1 ]; then
+      echo "-- verify failed ONLY gate (f) (gap-collapse) -> resync.sh, not a timestamp rung --"
+      attempt_resync
+    fi
   fi
 else
   attempt "$PR_REC_RUNG"                       # Rung 0/1
@@ -269,9 +354,17 @@ else
     if [ "$RESULT" = REVIEW ] && [ "$GATE_F_ONLY" -eq 1 ]; then
       echo "-- genpts left ONLY the gate-(f) gap-collapse -> resync.sh --"
       attempt_resync
-    elif [ "$RESULT" != OK ] && [ "$RB_RATE" != unknown ]; then
-      echo "-- verdict $RESULT -> escalating (field-rate rebuild) --"
-      attempt 3                                # refuses by itself on a reordered stream
+    elif [ "$RESULT" != OK ]; then
+      # WO 1.14 Phase 4: the derive rung sits between the timestamp rungs and
+      # the rebuild/terminal advice — attempted once, on measured evidence.
+      if [ "$DERIVE_TRIED" -eq 0 ] && derive_sig_esc; then
+        echo "-- verdict $RESULT + derive signature (nopts_frac=${PF_NOPTS_FRAC:-?}, reorder=yes, depth_class=${PF_DEPTH_CLASS:-?}) -> Rung 3-DERIVE --"
+        attempt_derive
+      fi
+      if [ "$RESULT" != OK ] && [ "$RB_RATE" != unknown ]; then
+        echo "-- verdict $RESULT -> escalating (field-rate rebuild) --"
+        attempt 3                              # refuses by itself on a reordered stream
+      fi
     fi
   fi
 fi
@@ -279,6 +372,13 @@ fi
 # WO 2.3: the final verdict is the grade of the artifact actually at OUT — the
 # best verified attempt — never the last (possibly failed) escalation's verdict.
 RESULT="$BEST_RESULT"
+# WO 1.14 Phase 4: when Rung 3-DERIVE was the measured route but could not run
+# for want of its announced OPTIONAL dependency (PyAV venv, exit 10 — bootstrap
+# printed by the rung), and nothing else verified, the honest ladder outcome is
+# REVIEW with the remedy named — never a bare FAIL and never a crash.
+if [ "$DERIVE_BOOT" -eq 1 ] && [ "$RESULT" = FAIL ] && [ ! -f "$OUT" ]; then
+  RESULT=REVIEW
+fi
 
 # --- post-build playability (WO 4.1): prove, don't guess -------------------
 # Runs when the source is the 4:2:2 contribution class (the demoted gate's
@@ -343,6 +443,13 @@ echo "AUTO_SUMMARY result=$RESULT best_rung=$BEST_RUNG best_result=$BEST_RESULT 
 case "$RESULT" in
   OK)     echo ">> DONE: $OUT — verified lossless + timeline-clean."; exit 0;;
   REVIEW)
+    if [ "$DERIVE_BOOT" -eq 1 ] && [ ! -f "$OUT" ]; then
+      echo ">> REVIEW: Rung 3-DERIVE is the measured route for this stream (PTS-complete +"
+      echo "   reorder pyramid), but its PyAV venv is absent — nothing was written. The"
+      echo "   one-line bootstrap and the manual recipe are printed above (derive-dts.sh"
+      echo "   pre-flight); install the venv and re-run. Source untouched."
+      exit 10
+    fi
     if [ "$BEST_RUNG" = S ]; then
       echo ">> REVIEW: $OUT written — video BIT-IDENTICAL (lossless proven), audio RE-TIMED to"
       echo "   the picture (resync gap-fill; NOT a bit-exact copy of the source audio — that"

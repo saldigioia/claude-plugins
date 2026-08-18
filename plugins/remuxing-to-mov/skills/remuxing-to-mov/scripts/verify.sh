@@ -56,7 +56,8 @@
 #                 durations matching. This gate compares long-window silence
 #                 (>= RTM_SIL_MIN s at RTM_SIL_DB, defaults 5s / -50dB) source vs
 #                 output; output silence beyond the source total + the source's
-#                 legitimate gap-fill budget (disc_scan DISC_MISSING) + RTM_SIL_TOL
+#                 legitimate gap-fill budget (disc_scan DISC_P_MISSING, the
+#                 presentation-order census — P1.4) + RTM_SIL_TOL
 #                 FAILs the file. Costs a full audio decode of both files —
 #                 opt-in, wired into resync.sh. Never waivable (content gate).
 #
@@ -375,7 +376,7 @@ EOF
       note="${note:+$note }Scrub-gate lines reproduce on the untouched source under identical accurate seeks (decoder source: $b_dec / output: $o_dec; muxer-stage source: $b_mux / output: $o_mux; deterministic -threads 1 counts) with a clean (d) timeline — capture-inherited decode noise / harness-stage artifacts, not a torn timeline. The timeline is independently proven by (d); complete the proof set (MKV strict-mux + --full presentation order) for archival sign-off."
     else
       verdict=FAIL; e_failed=1
-      note="${note:+$note }Scrub gate: $o_tot deterministic decode error(s) on off-keyframe seeks (decoder delta $d_dec, muxer-stage delta $d_mux vs source; (d) clean=${DCLEAN:-0}) — the timeline tears on scrub (silent-corruption signature). Route via diagnose.sh (pairfill-paff.sh for half-timestamped PAFF, rebuild-paff.sh otherwise). NEVER explain this away by replicating the errors on the source alone: two independent defects share this symptom, and inherent decode noise MASKS a broken container timeline (post-mortem 2026-07-25). The timeline must be independently proven — gate (d) above, MKV strict-mux, framemd5 presentation order (--full)."
+      note="${note:+$note }Scrub gate: $o_tot deterministic decode error(s) on off-keyframe seeks (decoder delta $d_dec, muxer-stage delta $d_mux vs source; (d) clean=${DCLEAN:-0}) — the timeline tears on scrub (silent-corruption signature). Route via diagnose.sh by MEASURED profile (pairfill-paff.sh for half-timestamped H.264 PAFF; derive-dts.sh for a PTS-complete reordered stream, any codec; rebuild-paff.sh for H.264 with no surviving reorder — pairfill/rebuild are H.264-only). NEVER explain this away by replicating the errors on the source alone: two independent defects share this symptom, and inherent decode noise MASKS a broken container timeline (post-mortem 2026-07-25). The timeline must be independently proven — gate (d) above, MKV strict-mux, framemd5 presentation order (--full)."
     fi
   fi
 fi
@@ -403,7 +404,7 @@ echo "-- (f) A/V duration parity (sync) --"
 # Δ from −2.2s to +1.9s — aresample overfill on multi-gap sources. An audio-LONG
 # delta is called out by direction wherever it lands (inside or beyond budget).
 sdur () { ffp -v error -select_streams "$1" -show_entries stream=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1; }
-vdur=$(sdur v:0); naud=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | grep -c . || true)
+vdur=$(sdur v:0); naud=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
 SYNC_TOL="${RTM_SYNC_TOL:-0.25}"
 if [ "${naud:-0}" -eq 0 ] || [ -z "$vdur" ] || [ "$vdur" = N/A ]; then
   echo "   no audio or no stream durations — sync parity N/A."
@@ -436,8 +437,27 @@ else
     esac
     if [ -z "$gap_budget" ]; then
       eval "$(disc_scan "$SRC")"
-      gap_budget="${DISC_MISSING:-0}"
-      gap_from="measured on the source: disc_scan found ${DISC_COUNT:-0} forward gap(s)"
+      # P1.4: a BUDGET must come from the presentation-order census. The
+      # coded-order figure is an adjacent-dts_time delta sum, and on any
+      # container whose DTS is reconstructed that is the artifact, not the
+      # program. INCIDENT TESTIMONY, not a local measurement (the 54.6 GB 2023
+      # VMA capture is not on this machine and cannot be re-measured here):
+      # ~5,475 s of phantom "loss" reported on a 10,944 s program, against a
+      # real loss of 4.58 s — see lib-paff.sh disc_scan for the mechanism, which
+      # IS reproducible in the suite on constructed shapes. And this number does
+      # not merely get printed, it WIDENS the gate. A phantom budget hides a real desync, so the tolerance now widens
+      # only by presentation-order loss. Direction of travel: this NARROWS the
+      # gate, which is the point. A genuinely gappy source still widens it by
+      # its REAL measured loss (the gap.ts pin).
+      # And a census taken across missing PTS buys nothing at all: disc_budget_secs
+      # returns 0 there and disc_budget_note says why (the ts-health V_NADTS rule).
+      gap_budget=$(disc_budget_secs "${DISC_P_NA:-0}" "${DISC_P_MISSING:-0}")
+      gap_from="measured on the source: disc_scan found ${DISC_P_COUNT:-0} forward gap(s) in presentation order"
+      # the evidence prints whenever the scan runs, pass or flag — a budget that
+      # is spent silently is how the phantom one went unnoticed
+      echo "   source gap census: ${DISC_P_COUNT:-0} gap(s) / ${DISC_P_MISSING:-0}s in presentation order;"
+      echo "   coded-order census (dts column, comparison only): ${DISC_COUNT:-0} gap(s) / ${DISC_MISSING:-0}s. Budget spent: ${gap_budget}s."
+      disc_budget_note "${DISC_P_NA:-0}" "${DISC_P_COUNT:-0}"
     fi
     eff_tol=$(awk "BEGIN{printf \"%.3f\", ($SYNC_TOL)+($gap_budget)}")
     if awk "BEGIN{exit !(($gap_budget) > 0 && ($worst) <= ($eff_tol))}"; then
@@ -507,22 +527,201 @@ echo "-- (g) audio playability (QTFF sample-entry allowlist + bounded decode) --
 #      count re-runs and keeps the minimum, so load strays never FAIL.
 # Never waivable (other_failed): a dead audio track is an essence defect,
 # not a count signature — "independent proofs pass" cannot hold for it.
-g_naud=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | grep -c . || true)
+#
+# --- P1.6: the decode half was not measuring audio decode --------------------
+# It counted EVERY stderr line of the whole invocation (`grep -c .`, no -vn, no
+# stream scoping, no source baseline, no inherited-noise path) and charged the
+# total to each audio track in turn. Deterministic OPEN-TIME video notices land
+# in that count: measured on this bench 2026-08-16 (macOS 26.6.1, ffmpeg 9.0.1),
+# a bounded AUDIO-ONLY decode of tests/fixtures/late-sps.ts — `-map 0:a:0 -vn
+# -t 10` — emits 306 `-v error` lines, every one of them the h264 parser
+# complaining about a head no audio sample has anything to do with. So the
+# number was not "audio decode errors" at all: a wrong MEASUREMENT, not a wrong
+# inference — and it set an UNWAIVABLE other_failed.
+# Three layers, none of which hide the raw count:
+#   1. -vn on the decode. Belt and braces (the -map is already audio-only, so no
+#      video is decoded at the OUTPUT stage) but it states the scope in the
+#      command, and it costs nothing.
+#   2. SOURCE-BASELINE SUBTRACTION, the same move gates (c)/(e) already make:
+#      run the identical bounded decode against $SRC and difference it. Only
+#      paid when the raw count is nonzero, exactly like gate (c).
+#   3. An INHERITED-CLASSIFICATION path: delta <= 0 means the output reproduces
+#      what the source already does, so it is inherited/open-time noise ->
+#      REVIEW, never other_failed. A genuine audio-decode delta (net > 0) keeps
+#      today's FAIL + other_failed.
+# EXIT-CONTRACT NOTE: this moves one false-positive class from FAIL (1) to
+# REVIEW (10 at the caller). A file whose SOURCE audio is as broken as the
+# output's now reads inherited -> REVIEW. That is correct by this plugin's own
+# inherited-damage doctrine — a remux cannot fix source damage, and claiming it
+# caused it is the accusation gates (c)/(e) were rebuilt to stop making — and it
+# is exactly how (c)/(e) already behave on the same evidence.
+g_naud=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
+# the pre-correction figure, kept ONLY so the correction can announce itself
+# (P1c): the census fix silently moved a program-bearing OUT from FAIL to OK by
+# retiring a phantom track, and a FAIL->OK move may never be silent.
+g_naud_raw=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | grep -c . || true)
 g_ofmt=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
 g_qtff=0; case ",$g_ofmt," in *,mov,*|*,mp4,*) g_qtff=1;; esac
 if [ "${g_naud:-0}" -eq 0 ]; then
   echo "   no audio tracks in the output — gate N/A."
 else
   [ "$g_qtff" -eq 1 ] || echo "   output container '$g_ofmt' has no QTFF sample entries — tag allowlist N/A; the decode half still applies."
-  g_dec () {  # $1 track index -> error-line count of a bounded head decode (confirm-min)
-    local i="$1" n m t
-    n=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$OUT" -map "0:a:$i" -t "$WIN" -f null - 2>&1 | grep -c . || true)
-    t=0
+  # NEVER SILENT (P1c): announce the census correction wherever it actually bites.
+  # A program-bearing OUT used to be probed for a track that does not exist —
+  # ffprobe reports `tag='n/a' (codec )` for it, the bounded decode of a
+  # non-existent ordinal emits error lines, and gate (g) FAILed the file on them.
+  # Retiring the phantom is a FAIL -> OK move, so it is announced with both
+  # numbers rather than just quietly reading one track fewer.
+  if [ "${g_naud_raw:-0}" -ne "${g_naud:-0}" ]; then
+    echo "   audio census: $g_naud distinct track index(es); ffprobe listed ${g_naud_raw} stream"
+    echo "        section(s) because this output carries PROGRAMS and every stream is emitted"
+    echo "        twice (nested under the program and again at top level). The surplus is a"
+    echo "        LISTING artifact, not a track: this gate probes $g_naud track(s). Before the"
+    echo "        census fix it probed the phantom ordinal(s) too — tag='n/a' (codec ) — and"
+    echo "        FAILed on their decode lines."
+  fi
+  # DISTINCT indices, not lines. On a container that carries PROGRAMS (every
+  # mpegts source this plugin exists for), `-show_entries stream=` selects the
+  # stream section in BOTH places ffprobe emits it — once nested under the
+  # program and once at top level — so a plain line count reads DOUBLE: 2 for
+  # tests/fixtures/m2v420.ts's single audio track, 4 for a two-track TS. This
+  # count is the source-track census the baseline matcher enumerates over, so a
+  # doubled count invents phantom tracks to compare against. (The identical
+  # probe against $OUT elsewhere in this file is safe — a .mov has no programs
+  # — which is why the defect only appeared once a SOURCE was probed this way.)
+  g_srcaud=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$SRC" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)
+  g_dec1 () {  # $1 file, $2 track index -> one bounded head decode's error-line count
+    ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map "0:a:$2" -vn -t "$WIN" -f null - 2>&1 | grep -c . || true
+  }
+  g_dec () {  # $1 file, $2 track index -> error-line count (confirm-min)
+    local f="$1" i="$2" n m t
+    n=$(g_dec1 "$f" "$i"); t=0
     while [ "$n" -ne 0 ] && [ "$t" -lt 2 ]; do
-      m=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$OUT" -map "0:a:$i" -t "$WIN" -f null - 2>&1 | grep -c . || true)
-      [ "$m" -lt "$n" ] && n=$m; t=$((t+1))
+      m=$(g_dec1 "$f" "$i"); [ "$m" -lt "$n" ] && n=$m; t=$((t+1))
     done
     printf '%s' "$n"
+  }
+  # --- F2: the baseline is chosen by EVIDENCE, never by ordinal ---------------
+  # The previous g_srcmap mapped output audio ordinal -> source audio ordinal
+  # POSITIONALLY (with a clamp at the source's last track for access-track
+  # layouts). That is only correct when the output's audio tracks correspond
+  # 1:1, in order, to the source's — and the plugin's own dual-track builder
+  # violates it by construction: dual-track.sh maps `0:a:0` TWICE (a PCM access
+  # copy plus the preserved original), so on a source with >=2 audio tracks the
+  # second output track was baselined against source a:1, a completely
+  # different stream. Reproduced: source with a damaged a:0 and a clean a:1,
+  # output = two copies of source a:0 ->
+  #     a:0  source: 2 / output: 2 / delta: 0   -> REVIEW
+  #     a:1  source: 0 / output: 2 / delta: 2   -> FAIL + other_failed
+  # Two byte-identical output tracks, opposite verdicts, and the FAIL is the
+  # UNWAIVABLE kind. A false accusation manufactured entirely by the mapping.
+  #
+  # Correspondence is now established from observable stream properties, in
+  # descending order of how hard they are to fake:
+  #   1. channels + sample_rate — the pair that survives a format conversion.
+  #      The dual-track ACCESS track is a DECODED copy, so its codec cannot
+  #      match by construction; its channel count and rate still do.
+  #   2. codec_name — separates the preserved original from the access copy.
+  #   3. language tag, then 4. title tag — the remaining tie-breakers.
+  # Each pass narrows the candidate set ONLY if at least one candidate matches
+  # (a property the output simply does not carry must not empty the set), and
+  # stops as soon as one candidate is left. A source with exactly ONE audio
+  # track therefore always resolves to it, which is the pre-F2 behavior for
+  # that case, unchanged.
+  # NOTHING sits ahead of those four passes. A provenance SHORTCUT used to: any
+  # output track titled "* (access)" / "* (original)" was hardcoded to source
+  # a:0, on the reasoning that dual-track.sh and pairfill-paff.sh build their
+  # pair from a:0 only. DELETED (P1c, 2026-08-16) — it reintroduced the exact
+  # ordinal assumption the property matcher exists to replace, and it made the
+  # answer WORSE than the evidence it preceded. Measured on this bench: a
+  # dual-track MASTER (a:0 = PCM access, a:1 = MP2 original) copied byte-for-byte
+  # with its titles intact had output a:1 baselined against source a:0 ->
+  # delta 2 -> ">> FAIL" + other_failed, a false UNWAIVABLE accusation against a
+  # `-c copy`. With the shortcut gone the codec pass resolves the same file to
+  # It was NOT latent, either: a real dual-track.sh .mov carries the pair name in
+  # the QTFF track-name atom, which ffprobe reports as TAG:name (measured
+  # 2026-08-16: `TAG:name=PCM 24-bit (access)` / `TAG:name=MP2 (original)`), and
+  # g_asig reads name as well as title precisely so that it is seen. The shortcut
+  # fired on every dual-track/pairfill build this plugin makes.
+  # WHAT ITS DELETION COSTS, measured not assumed: on a dual-track build from a
+  # >=2-audio-track source the preserved original now resolves AMBIGUOUS instead
+  # of to a:0 — and the verdict is unchanged, because the most-forgiving-candidate
+  # rule scores the delta against the very track the shortcut would have named
+  # (source a:0 carries the copied damage, so it IS the maximum). The pins in
+  # tests/regression.d/61-reorder-depth.sh section 4 cover both halves.
+  # What survives from that reasoning is the WARNING it carried: both builders
+  # WRITE language=eng onto both output tracks regardless of what the source
+  # said, so the language tag cannot separate two source tracks on that layout.
+  # That is exactly why language sits third, behind channels/rate and codec.
+  # >1 candidate left is not automatically a finding — see the ambiguity arm at
+  # the call site, which FAILs only when the delta is positive against EVERY
+  # candidate. NO source audio at all is a different thing entirely and is NOT
+  # ambiguity (there was never a candidate set): see the `none` arm there.
+  g_asig () {   # g_asig FILE ORD -> "codec|channels|rate|language|title", "-" for absent
+    # `title` AND `name`: the same metadata key lands in a different tag per
+    # container — Matroska keeps it as title, QTFF/MOV writes the track-name
+    # atom and ffprobe reports it as name. Reading only one made the title
+    # field read "-" on every .mov, which is where the provenance rule below
+    # would have silently done nothing.
+    ffp -v error -select_streams "a:$2" \
+        -show_entries stream=codec_name,channels,sample_rate:stream_tags=language,title,name \
+        -of default=nw=1 "$1" 2>/dev/null | \
+    awk -F= '{ k=$1; v=$0; sub(/^[^=]*=/,"",v)
+               if(k=="codec_name") c=v; else if(k=="channels") ch=v
+               else if(k=="sample_rate") sr=v
+               else if(tolower(k)=="tag:language") lg=v
+               else if(tolower(k)=="tag:title" || tolower(k)=="tag:name") { if(ti=="") ti=v } }
+             END{ printf "%s|%s|%s|%s|%s", (c==""?"-":c), (ch==""?"-":ch), \
+                                           (sr==""?"-":sr), (lg==""?"-":lg), (ti==""?"-":ti) }'
+  }
+  g_sigfld () { printf '%s' "$1" | awk -F'|' -v k="$2" '{printf "%s", $k}'; }
+  g_ssigs=""; g_ssigs_done=0
+  g_ssig_init () {   # lazy, like the baseline decode itself: a clean gate pays nothing
+    [ "$g_ssigs_done" -eq 1 ] && return 0
+    local j=0
+    while [ "$j" -lt "${g_srcaud:-0}" ]; do
+      g_ssigs="${g_ssigs}$(g_asig "$SRC" "$j")|
+"
+      j=$((j+1))
+    done
+    g_ssigs_done=1
+  }
+  g_ssig_get () { printf '%s\n' "$g_ssigs" | awk -v n="$(( $1 + 1 ))" 'NR==n{printf "%s", $0}'; }
+  g_srcmap () {  # g_srcmap OUT_TRACK -> three lines: MODE / WHY / CANDIDATE ORDINALS
+    # THREE LINES, not one delimited record: WHY quotes the signature, which
+    # contains the field separator. (It did, and the caller's split cut the
+    # candidate list in half — caught before this shipped, but it is exactly
+    # the class of bug that made an in-band delimiter a bad idea here.)
+    local i="$1" osig cand keep n kn j s spec fields label m k
+    if [ "${g_srcaud:-0}" -le 0 ]; then
+      printf 'none\nthe source has NO audio track to compare against\n\n'; return 0
+    fi
+    g_ssig_init
+    osig=$(g_asig "$OUT" "$i")
+    cand=""; n=0; j=0
+    while [ "$j" -lt "$g_srcaud" ]; do cand="$cand $j"; n=$((n+1)); j=$((j+1)); done
+    label="nothing (the source has $n audio track(s) and no property separated them)"
+    for spec in "2 3:channels+sample_rate" "1:codec" "4:language" "5:title"; do
+      [ "$n" -eq 1 ] && break
+      fields="${spec%%:*}"
+      keep=""; kn=0
+      for j in $cand; do
+        s=$(g_ssig_get "$j"); m=1
+        for k in $fields; do
+          [ "$(g_sigfld "$s" "$k")" = "$(g_sigfld "$osig" "$k")" ] || { m=0; break; }
+        done
+        [ "$m" -eq 1 ] && { keep="$keep $j"; kn=$((kn+1)); }
+      done
+      # narrow only on a NON-EMPTY match (a property the output does not carry
+      # must not empty the set), and only NAME the pass that actually reduced it
+      if [ "$kn" -gt 0 ]; then
+        [ "$kn" -lt "$n" ] && label="${spec#*:}"
+        cand="$keep"; n=$kn
+      fi
+    done
+    cand="${cand# }"
+    if [ "$n" -eq 1 ]; then printf 'unique\n%s\n%s\n' "$label" "$cand"
+    else printf 'ambiguous\n%s; output signature %s\n%s\n' "$label" "$osig" "$cand"; fi
   }
   # D3 (1.13) inverse-error inputs: an mp4a/.mp2 track carrying MPEG Layer II
   # is the configuration that produces NO AUDIO in AVFoundation, and the old
@@ -532,8 +731,15 @@ else
   # demuxer maps 0x69/0x6B to AV_CODEC_ID_MP3 first-match — so ffprobe LABELS
   # 48 kHz Layer II as 'mp3'. The source is the discriminator this gate has and
   # the label does not: verify.sh holds both files.
-  g_src_mp2=$(ffp -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$SRC" 2>/dev/null | grep -c '^mp2$' || true)
-  g_has_pcm=$(ffp -v error -select_streams a -show_entries stream=codec_name -of csv=p=0 "$OUT" 2>/dev/null | grep -c '^pcm_' || true)
+  # DISTINCT index,codec_name PAIRS, not lines (P1c — the census sweep missed
+  # these two). A program-bearing container emits every stream section TWICE
+  # (nested under the program and again at top level), so a plain line count
+  # reads 2 for m2v420.ts's single MP2 track. `sort -u` on codec_name ALONE is
+  # not the fix either — a codec legitimately repeats across tracks, and
+  # collapsing that would under-count a real two-MP2 source. Pairing the index
+  # with the codec dedupes the listing artifact and keeps genuine repeats.
+  g_src_mp2=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$SRC" 2>/dev/null | LC_ALL=C sort -u | grep -c ',mp2$' || true)
+  g_has_pcm=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c ',pcm_' || true)
   g_mp2_naked=0
   gi=0
   while [ "$gi" -lt "$g_naud" ]; do
@@ -548,9 +754,128 @@ else
     fi
     # ALWAYS probe (D3): the allowlist is a prior, and an off-list tag is
     # exactly the case where a measurement beats an opinion.
-    g_err=$(g_dec "$gi")
+    g_err=$(g_dec "$OUT" "$gi")
+    # P1.6 layers 2+3: only on a nonzero raw count (gate (c)'s lazy-baseline
+    # discipline — a clean gate never pays for a source decode) run the
+    # IDENTICAL bounded decode on the source and difference it. g_net is what
+    # this gate is entitled to attribute to the remux; g_err stays printed.
+    g_base=-1; g_net="${g_err:-0}"; g_bt=""; g_ambig=0
+    # P1c: a positive delta can be JUSTIFIED three different ways, and the
+    # sentence the operator reads — and the machine-consumed note the REVIEW
+    # line carries — must say WHICH one applies. These three carry that wording,
+    # reset per track; the defaults are the unique-baseline text, byte-for-byte
+    # as before. (The unique arm re-assigns g_beyond_note because it is the one
+    # arm that changes g_net AFTER this reset.)
+    g_beyond="beyond the identical decode of the source"
+    g_beyond_note="$g_net beyond the source baseline, deterministic after confirm-min"
+    g_ambig_why="candidate set left ambiguous by channels/rate/codec/language/title"
+    if [ "${g_err:-0}" -gt 0 ]; then
+      g_mm=$(g_srcmap "$gi")
+      g_mode=$(printf '%s\n' "$g_mm" | awk 'NR==1{printf "%s", $0}')
+      g_why=$(printf '%s\n'  "$g_mm" | awk 'NR==2{printf "%s", $0}')
+      g_cands=$(printf '%s\n' "$g_mm" | awk 'NR==3{printf "%s", $0}')
+      case "$g_mode" in
+        unique)
+          g_bt="$g_cands"
+          g_base=$(g_dec "$SRC" "$g_bt")
+          g_net=$((g_err - g_base))
+          g_beyond_note="$g_net beyond the source baseline, deterministic after confirm-min"
+          echo "   a:$gi source-baseline (identical bounded decode, source a:$g_bt): source: $g_base / output: $g_err / delta: $g_net"
+          echo "        baseline chosen on: $g_why"
+          ;;
+        ambiguous)
+          # F2: no unwaivable accusation without an identified baseline. House
+          # checklist test 3 — does divergence from prediction prove damage, or
+          # just surprise? With two source tracks equally consistent with this
+          # output track, a positive delta proves only that we guessed. Every
+          # candidate's raw count is printed (nothing hidden) and the delta is
+          # scored against the most forgiving of them.
+          g_ambig=1
+          echo "   a:$gi source-baseline AMBIGUOUS — matching on $g_why left source"
+          echo "        track(s) [$g_cands] equally consistent with this output track, so this gate"
+          echo "        cannot say which stream it is entitled to difference against."
+          g_base=-1
+          for g_c in $g_cands; do
+            g_cb=$(g_dec "$SRC" "$g_c")
+            echo "        candidate source a:$g_c -> $g_cb decode line(s) in the first ${WIN}s"
+            [ "${g_cb:-0}" -gt "$g_base" ] && g_base="$g_cb"
+          done
+          g_net=$((g_err - g_base))
+          echo "        output: $g_err / most forgiving candidate: $g_base / delta: $g_net"
+          # P1c: the unresolved-baseline principle is right, and it simply does
+          # not APPLY when the most forgiving candidate still leaves a positive
+          # delta. The gate already computed that number and then threw it away.
+          # delta > 0 against the BEST candidate means delta > 0 against every
+          # candidate — damage is proven WITHOUT resolving the ambiguity — so the
+          # ambiguity stops being decision-relevant here (g_ambig back to 0) and
+          # the normal damage arms below judge it exactly as they judge a unique
+          # baseline. This restores the pre-F2 exit code (1) for the ordinary
+          # broadcast main+SAP shape: two property-identical source tracks, both
+          # clean, one damaged output track. delta <= 0 keeps REVIEW.
+          if [ "$g_net" -gt 0 ]; then
+            g_ambig=0
+            g_beyond="beyond the MOST FORGIVING candidate baseline — damage exceeds every candidate baseline, proven regardless of which source track corresponds"
+            g_beyond_note="$g_net beyond the MOST FORGIVING of candidate source track(s) [$g_cands] (best candidate: $g_base) — damage exceeds every candidate baseline, proven regardless of which source track corresponds"
+            echo "        Every candidate is BELOW the output count, so the delta is positive whichever"
+            echo "        one corresponds: damage exceeds every candidate baseline — proven regardless"
+            echo "        of which source track corresponds. This does NOT need the ambiguity resolved."
+          else
+            g_ambig_why="candidate set left ambiguous by channels/rate/codec/language/title, and the most forgiving of candidate source track(s) [$g_cands] still reproduces every line (delta $g_net)"
+            echo "        An unidentified baseline cannot prove damage — REVIEW, never an unwaivable FAIL."
+          fi
+          ;;
+        none)
+          # P1c: NO source audio is maximal CERTAINTY, not maximal doubt. There
+          # was never a candidate set to be ambiguous about: every audio line in
+          # the output is new by construction, because there is no source audio
+          # for it to have been inherited from. Routed to the normal damage path
+          # (the HEAD verdict: FAIL + other_failed), with a baseline of 0 that is
+          # measured by the container census, not guessed.
+          g_base=0
+          g_net="$g_err"
+          g_beyond="new by construction — the source carries NO audio track to inherit them from"
+          g_beyond_note="all $g_net of them new by construction — the source carries NO audio track at all, so no inherited-noise explanation exists"
+          echo "   a:$gi source-baseline: $g_why, so the baseline is 0 BY CONSTRUCTION —"
+          echo "        every audio line in this output is new ($g_err line(s), delta $g_net). Attribution"
+          echo "        here is CERTAIN, not ambiguous: there was never a candidate set to choose from."
+          ;;
+        *)
+          # defensive: an unforeseen mode word. Unattributed is not proven, so
+          # REVIEW — but it must not borrow the ambiguity arm's sentence, which
+          # names a candidate set this branch never had.
+          g_ambig=1
+          g_ambig_why="no source correspondence could be established at all, so there was nothing to subtract"
+          echo "   a:$gi source-baseline: $g_why — the raw"
+          echo "        count stands unattributed ($g_err line(s)); nothing to subtract."
+          echo "        Unattributed is not proven — REVIEW, never an unwaivable FAIL."
+          ;;
+      esac
+    fi
     if [ "$g_tag_ok" -eq 0 ]; then
-      if [ "${g_err:-1}" -eq 0 ]; then
+      # F2 ORDERING: ambiguity is judged BEFORE the inherited arm. Both end at
+      # REVIEW, but the inherited arm claims "the source reproduces them", and
+      # that sentence is not available when the gate could not say WHICH source
+      # track it was differencing against.
+      if [ "${g_ambig:-0}" -eq 1 ] && [ "${g_err:-1}" -ne 0 ]; then
+        [ "$verdict" = FAIL ] || verdict=REVIEW
+        echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}): NOT on the QTFF audio"
+        echo "        allowlist, and its $g_err decode line(s) could not be ATTRIBUTED — this gate"
+        echo "        did not identify a source track to difference against (see above). Advisory,"
+        echo "        not the dead-track class."
+        echo "        Prove the render before shipping: scripts/playable-check.sh OUT"
+        note="${note:+$note }Audio track a:$gi carries the unbenched sample-entry tag '${g_tag:-none}' (codec ${g_cod:-unknown}) and shows $g_err decode line(s) that could not be attributed to a source track (no unambiguous baseline) — an advisory, not the dead-track class; prove QuickTime playback before shipping."
+      elif [ "${g_net:-1}" -le 0 ] && [ "${g_err:-1}" -ne 0 ]; then
+        # off-list AND the lines all reproduce on the source: inherited/open-time
+        # noise sitting on top of an unbenched tag. Not the dead-track class
+        # (that class is defined by lines the SOURCE does not have), so it takes
+        # the same advisory REVIEW the clean-decode arm takes — with the delta.
+        [ "$verdict" = FAIL ] || verdict=REVIEW
+        echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}): NOT on the QTFF audio"
+        echo "        allowlist, and its $g_err decode line(s) are FULLY REPRODUCED on the source"
+        echo "        (delta $g_net) — inherited/open-time noise, not a dead sample entry."
+        echo "        Prove the render before shipping: scripts/playable-check.sh OUT"
+        note="${note:+$note }Audio track a:$gi carries the unbenched sample-entry tag '${g_tag:-none}' (codec ${g_cod:-unknown}); its $g_err decode line(s) reproduce on the source under the identical bounded decode (delta $g_net), so this is inherited noise plus an unbenched tag — an advisory, not the dead-track class."
+      elif [ "${g_err:-1}" -eq 0 ]; then
         # unrecognized BUT it decodes — the ipcm class before 1.13 knew about
         # it. Advisory REVIEW: an entry this plugin has not benched is a real
         # unknown for OTHER players, but it is not a dead track and it is not
@@ -565,20 +890,41 @@ else
       else
         verdict=FAIL; other_failed=1
         echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}) — NOT on the QTFF audio allowlist"
-        echo "        AND it does not decode ($g_err error line(s) in the first ${WIN}s):"
+        echo "        AND it does not decode ($g_err error line(s) in the first ${WIN}s, $g_net $g_beyond):"
         echo "        a sample entry no decoder claims (the dead-HDMV-track class, entry 1)."
         echo "        Do not ship; rebuild the audio via mov.sh's default routing (container-"
         echo "        framed LPCM decodes to a raw-PCM access track)."
-        note="${note:+$note }Audio track a:$gi carries sample-entry tag '${g_tag:-none}' outside the QTFF allowlist AND fails to decode ($g_err error line(s)) — a dead track no decoder claims (entry 1: an 18.5 GB Blu-ray pcm_bluray copy-mux shipped 'verified' with unplayable audio, 2026-08-13); mov.sh's default routing rebuilds it as raw PCM."
+        note="${note:+$note }Audio track a:$gi carries sample-entry tag '${g_tag:-none}' outside the QTFF allowlist AND fails to decode ($g_err error line(s), $g_beyond_note) — a dead track no decoder claims (entry 1: an 18.5 GB Blu-ray pcm_bluray copy-mux shipped 'verified' with unplayable audio, 2026-08-13); mov.sh's default routing rebuilds it as raw PCM."
       fi
     else
       g_tagword="allowlisted"; [ "$g_qtff" -eq 1 ] || g_tagword="tag N/A (non-QTFF)"
       if [ "${g_err:-1}" -eq 0 ]; then
         echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_tagword; head decode clean."
+      elif [ "${g_ambig:-0}" -eq 1 ]; then
+        # F2: allowlisted tag, decode lines, no identified baseline. Ahead of
+        # the inherited arm for the same reason as above — "the source
+        # reproduces them" is a claim about a specific source track.
+        [ "$verdict" = FAIL ] || verdict=REVIEW
+        echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_tagword; $g_err decode line(s) in the"
+        echo "        first ${WIN}s that this gate could NOT attribute — no unambiguous source track to"
+        echo "        difference against (see above). REVIEW on unproven attribution, not FAIL."
+        note="${note:+$note }Audio track a:$gi shows $g_err decode line(s) in the first ${WIN}s, but gate (g) could not identify a single source track to baseline against ($g_ambig_why), so the lines are unattributed rather than proven to be remux damage — listen before archiving."
+      elif [ "${g_net:-1}" -le 0 ]; then
+        # P1.6 layer 3: the lines are all present on the SOURCE under the
+        # identical bounded decode — inherited damage or open-time parse noise
+        # (the late-sps class: 306 lines on the source and 306 on the output
+        # under this gate's own bounded decode), never remux damage. REVIEW
+        # carrying the evidence, and NOT other_failed: a remux cannot fix
+        # source damage, and this is exactly how (c)/(e) classify the shape.
+        [ "$verdict" = FAIL ] || verdict=REVIEW
+        echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_tagword; $g_err decode line(s) in the"
+        echo "        first ${WIN}s, but the IDENTICAL decode of the source reproduces them (delta"
+        echo "        $g_net) — inherited/open-time noise, not a remux defect. REVIEW, not FAIL."
+        note="${note:+$note }Audio track a:$gi shows $g_err decode line(s) in the first ${WIN}s that the source reproduces under the identical bounded decode (source: $g_base / output: $g_err / delta: $g_net) — capture-inherited damage or open-time parse noise, not remux damage; a remux cannot fix source damage. Listen before archiving."
       else
         verdict=FAIL; other_failed=1
-        echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_err decode error line(s) in the first ${WIN}s (want 0)."
-        note="${note:+$note }Audio track a:$gi does not decode cleanly ($g_err error line(s) in the first ${WIN}s, deterministic after confirm-min) — no playable-audio guarantee; do not ship."
+        echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_err decode error line(s) in the first ${WIN}s (want 0); $g_net $g_beyond."
+        note="${note:+$note }Audio track a:$gi does not decode cleanly ($g_err error line(s) in the first ${WIN}s, $g_beyond_note) — no playable-audio guarantee; do not ship."
       fi
     fi
     # the MP2-with-no-access-track signature, collected per track and judged once
@@ -609,8 +955,8 @@ if [ "$SILP" -eq 1 ]; then
   # The injected-silence signature: a re-timed build re-padded silence from t=0
   # on a filter-graph rebuild (mid-stream layout change) — hundreds of seconds of
   # silence with A/V durations still matching, so gate (f) passes it. Legitimate
-  # resync gap-fill silence is bounded by the source's forward gaps (DISC_MISSING).
-  nao=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | grep -c . || true)
+  # resync gap-fill silence is bounded by the source's forward gaps (DISC_P_MISSING).
+  nao=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
   if [ "${nao:-0}" -eq 0 ]; then
     echo "   no audio in output — silence parity N/A."
   else
@@ -621,17 +967,22 @@ if [ "$SILP" -eq 1 ]; then
         awk '{for(i=1;i<NF;i++) if($i=="silence_duration:") s+=$(i+1)} END{printf "%.3f", s+0}'
     }
     ssil=$(sil_total "$SRC"); osil=$(sil_total "$OUT")
-    eval "$(disc_scan "$SRC")"     # DISC_MISSING = the legitimate gap-fill budget
-    excess=$(awk "BEGIN{printf \"%.3f\", ($osil) - ($ssil) - (${DISC_MISSING:-0}) - ($SIL_TOL)}")
+    eval "$(disc_scan "$SRC")"
+    # P1.4: the gap-fill budget is presentation-order loss, for the same reason
+    # gate (f)'s is — this is a tolerance, and a coded-order figure inflated by a
+    # reconstructed dts column would license injected silence it cannot account for.
+    sil_budget=$(disc_budget_secs "${DISC_P_NA:-0}" "${DISC_P_MISSING:-0}")
+    excess=$(awk "BEGIN{printf \"%.3f\", ($osil) - ($ssil) - (${sil_budget:-0}) - ($SIL_TOL)}")
     echo "   long-window silence (>=${SIL_MIN}s @ ${SIL_DB}): source=${ssil}s  output=${osil}s"
-    echo "   allowed: source silence + gap-fill budget ${DISC_MISSING:-0}s + tolerance ${SIL_TOL}s"
+    echo "   allowed: source silence + gap-fill budget ${sil_budget:-0}s (presentation order; coded-order census ${DISC_MISSING:-0}s) + tolerance ${SIL_TOL}s"
+    disc_budget_note "${DISC_P_NA:-0}" "${DISC_P_COUNT:-0}"
     if awk "BEGIN{exit !(($excess) > 0)}"; then
       verdict=FAIL; other_failed=1
       echo "   >> ${excess}s of silence in the output has NO counterpart in the source —"
       echo "      the injected-silence signature (a re-timed build re-padded from t=0,"
       echo "      e.g. an aresample first_pts=0 graph rebuild on a mid-stream layout"
       echo "      change). All audio after the first injected block is out of sync."
-      note="${note:+$note }Output carries ${excess}s of long-window silence absent from the source (beyond the ${DISC_MISSING:-0}s gap-fill budget) — injected-silence signature; do not ship (resync.sh refuses layout-change sources; see timeline-repair.md)."
+      note="${note:+$note }Output carries ${excess}s of long-window silence absent from the source (beyond the ${sil_budget:-0}s gap-fill budget) — injected-silence signature; do not ship (resync.sh refuses layout-change sources; see timeline-repair.md)."
     else
       echo "   silence parity consistent (within the gap-fill budget)."
     fi
@@ -700,8 +1051,10 @@ if [ "$FULL" -eq 1 ]; then
       else
         echo "   FAIL: same frames, DIFFERENT presentation order — the output plays"
         echo "   pictures in decode order (shuffled motion). A constant-rate restamp"
-        echo "   of a reordered stream does exactly this; repair with pairfill-paff.sh"
-        echo "   (keep the real PTS), not rebuild-paff.sh."
+        echo "   of a reordered stream does exactly this; repair by MEASURED profile:"
+        echo "   derive-dts.sh when every packet still carries PTS (PF_NOPTS_FRAC=0 —"
+        echo "   any codec), pairfill-paff.sh for the half-timestamped H.264 PAFF class;"
+        echo "   never rebuild-paff.sh."
         verdict=FAIL; other_failed=1
       fi
     else
@@ -741,8 +1094,18 @@ if [ "$SIG" -eq 1 ]; then
     if [ "$a" != "$b" ]; then echo "   $k: source=$a output=$b  (DRIFT)"; sdrift=1; else echo "   $k=$a (preserved)"; fi
   done
   if [ "$PF_CODEC" = hevc ]; then
-    t=$(ffp -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
-    [ "$t" = hvc1 ] && echo "   HEVC tag=hvc1 (QuickTime-playable)" || { echo "   HEVC tag=$t — NOT hvc1; QuickTime won't play it (DRIFT)"; sdrift=1; }
+    # container-gated (1.14 / DF-14): hvc1 is a QTFF SAMPLE-ENTRY tag; a non-QTFF
+    # output (e.g. an MKV cross-check) has no such tag to assert, and calling its
+    # absence DRIFT was a false verdict. Same container test gate (g) computes
+    # (g_qtff): format_name contains mov/mp4. Non-QTFF -> announced skip.
+    sg_ofmt=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+    sg_qtff=0; case ",$sg_ofmt," in *,mov,*|*,mp4,*) sg_qtff=1;; esac
+    if [ "$sg_qtff" -eq 1 ]; then
+      t=$(ffp -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+      [ "$t" = hvc1 ] && echo "   HEVC tag=hvc1 (QuickTime-playable)" || { echo "   HEVC tag=$t — NOT hvc1; QuickTime won't play it (DRIFT)"; sdrift=1; }
+    else
+      echo "   HEVC tag: output container '$sg_ofmt' is not QTFF — hvc1 assertion skipped (tag N/A)"
+    fi
   fi
   ccs=$(ffp -v error -select_streams v:0 -show_entries stream=closed_captions -of default=nw=1:nk=1 "$SRC" 2>/dev/null | head -1)
   cco=$(ffp -v error -select_streams v:0 -show_entries stream=closed_captions -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
@@ -759,7 +1122,7 @@ fi
 
 if [ "$AUD" -eq 1 ]; then
   echo "-- (--audio) dual-track audio fidelity (PCM access + preserved original) --"
-  na=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | grep -c . || true)
+  na=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
   a0c=$(ffp -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
   if [ "${na:-0}" -lt 2 ]; then
     echo "   output has ${na:-0} audio track(s); dual-track checks need PCM access + original. Skipping."

@@ -98,20 +98,42 @@ Rung 2  Copy + rebuild timestamps   scripts/remux.sh IN OUT.mov --genpts
         forced by: missing/unset PTS. Bitstream untouched.
         GUILTY-UNTIL-PROVEN on field-coded (PAFF) H.264: genpts can pass the
         strict-mux test yet leave a timeline that tears on scrub — for PAFF use
-        Rung 3-PAIR/3, or gate the output through verify.sh's scrub test first.
+        Rung 3-PAIR/3-DERIVE/3 by measured profile, or gate the output through
+        verify.sh's scrub test first.
         NO HELP on pair-timestamped packets (PTS and DTS both absent): genpts
         has nothing to derive from — that class is Rung 3-PAIR, full stop.
 Rung 3-PAIR  Pair-mate PTS fill    scripts/pairfill-paff.sh IN OUT.mov
-        for PAFF whose pair-mates carry no timestamps (~half the packets, the
-        post-mortem class) OR whose surviving PTS shows a reorder pyramid:
-        KEEPS every real PTS, fills each mate at +1 field, synthesizes a clean
-        DTS ramp. Video bits untouched; gates its own output before blessing.
+        for H.264 PAFF whose pair-mates carry no timestamps (~half the packets,
+        strictly alternating — the post-mortem class): KEEPS every real PTS,
+        fills each mate at +1 field, synthesizes a clean DTS ramp. Video bits
+        untouched; gates its own output before blessing. H.264-only (exit 3 on
+        any other codec). A max run of exactly TWO untimestamped packets is the
+        displaced-timestamp JUNCTION class (measured 2026-08-18: the PES
+        timestamp rides the second field of a pair) — widened fill model,
+        announced, gated by a trace_headers cadence census + setts NEXT_PTS
+        feature-detect on the way in and a POC-lattice gate on the way out;
+        runs > 2 still refuse (exit 3, attested override recordable). A
+        FULLY-timestamped reordered stream is NOT this
+        class — that is Rung 3-DERIVE (the old doctrine routed it here, into
+        this rung's exit 3).
+Rung 3-DERIVE  Whole-file DTS derivation   scripts/derive-dts.sh IN OUT.mov
+        for a PTS-COMPLETE (PF_NOPTS_FRAC=0) reordered stream whose container
+        DTS is absent, demuxer-reconstructed (MKV/raw ES) or carried-but-rotten
+        — the derivation discards DTS either way and re-derives it from the
+        sorted PTS column (DTS[i] = (i-D)-th smallest PTS). Codec-agnostic
+        (mpeg2video/HEVC ride the same rung — packets copied byte-for-byte);
+        needs the PyAV venv (absent -> printed bootstrap, exit 10 REVIEW).
+        REFUSES (exit 3) outside its signature: missing PTS -> 3-PAIR;
+        duplicate PTS or depth class unknown (unparseable SPS) -> diagnosis,
+        with --force as the announced operator override.
 Rung 3  Rebuild timeline from the elementary stream
         scripts/rebuild-paff.sh IN OUT.mov FIELD_RATE [TIMESCALE]
         for field-coded (PAFF) H.264 with NO surviving reorder pyramid — it
         re-stamps at a constant rate (PTS=DTS), which plays a reordered stream
-        in DECODE order (shuffled motion), so it now REFUSES those (use 3-PAIR).
-        probe.sh/diagnose.sh route between 3-PAIR and 3 by timestamp profile.
+        in DECODE order (shuffled motion), so it REFUSES those (H.264-only;
+        the refusal names 3-DERIVE for the PTS-complete reordered class).
+        probe.sh/diagnose.sh route between 3-PAIR, 3-DERIVE and 3 by measured
+        timestamp profile.
 Rung 3-SWAP  Lossless container swap   scripts/mp4-swap.sh IN [OUT.mp4]
         when: the build verifies lossless but its post-build FIDELITY proof
         FAILs — QuickTime opens it and renders the wrong pixels. Same bitstream,
@@ -161,8 +183,14 @@ tears on scrub, it is almost always **timestamps, not the video** — run
 
 Verdict → action: damaged → re-capture; missing TS on the **pair signature**
 (~half the packets untimestamped, strictly alternating) → **Rung 3-PAIR
-(`pairfill-paff.sh`)**; other missing TS → Rung 2 then Rung 3; non-monotonic
-DTS → Rung 3-PAIR when real PTS/reorder survives, Rung 3 otherwise;
+(`pairfill-paff.sh`)**; other missing TS → Rung 2 then Rung 3; non-monotonic /
+rotten DTS routed by **measured profile**: `PF_NOPTS_FRAC≈0` ∧ reorder →
+**Rung 3-DERIVE (`derive-dts.sh`)** — DTS absent, reconstructed or
+carried-but-rotten alike, **any codec** (non-H.264 timeline rot goes here too:
+pairfill/rebuild are H.264-only); half-timestamped → Rung 3-PAIR; no surviving
+reorder → Rung 3; depth class `unknown` (unparseable SPS) ∧ reorder → **no
+automatic rung** — announced, with `derive-dts.sh --force` named as the
+operator's call;
 **discontinuous source → `scripts/resync.sh` (video bit-identical, audio
 gap-filled), then the verify parity gate**; **mpegts/MPEG-2 with gaps + rot
 (non-monotonic DTS, whole-file) → BACKHAUL TIMELINE ROT: warned with routes
@@ -173,8 +201,9 @@ rebuild left near-zero sample durations that verify gate (d) fails**.
 goes down the genpts path** — genpts is guilty-until-proven there, because the
 strict-mux test proves timestamps are *present and monotonic*, not that the
 timeline is *seekable*, and that gap is where PAFF corrupts silently. diagnose
-picks between 3-PAIR and 3 from the measured timestamp profile (untimestamped
-fraction + reorder scan). Detail and the manual commands live in
+picks between 3-PAIR, 3-DERIVE and 3 from the measured timestamp profile
+(untimestamped fraction + reorder scan + depth class), and every verdict prints
+the measurements that drove the route. Detail and the manual commands live in
 `references/timeline-repair.md`.
 
 ## Failure reporting & the Rung-4 protocol (doctrine — applies to the session running this skill)
@@ -229,10 +258,10 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 | Video plays, audio silent in QuickTime | Audio QT can't play (AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm`. **E-AC-3 (Dolby Digital Plus) plays natively — just copy it** |
 | Glitches/tears only on scrub | Timestamps, not the video → `scripts/diagnose.sh` |
 | Audio drifts out of sync over a long capture (leads/lags the picture) | Discontinuous source: dropped frames the video keeps but raw PCM collapses on copy. `scripts/diagnose.sh` finds the forward gaps → `scripts/resync.sh IN OUT.mov` (video bit-identical, audio gap-filled) → `verify.sh` parity gate confirms. resync **refuses** (exit 11) sources whose audio changes channel layout mid-stream — the filter-graph-rebuild silence-injection class — and its verify pass adds `--silence` content parity |
-| Backhaul/contribution TS (4:2:2 `yuv422p*`, **any bit depth** — MPEG-2, H.264 Hi422/AVC-Intra, HEVC Rext) | **Demoted to empirical, 1.11 (WO 4.1):** the categorical "QuickTime cannot decode 4:2:2" refusal was **falsified on macOS 26.6.1 (2026-08-13)** — both formerly-refused classes fully decoded the synthetic bench clips (qlmanage + `avconvert` whole-file; renders — correctness is per-file, see the 2026-08-15 narrowing later in this row), and the 8-bit-exact gate had let real 10-bit contribution profiles through unannounced. Now every entry point **announces** the profile (`contribution profile <codec>/<pix_fmt>`) and builds losslessly; the **driver paths** (`mov.sh`/`auto.sh`/`batch.sh`-via-auto) then **prove playability on the finished output** (`playable-check.sh` auto-run — since 1.12 with `--fidelity`, the SSIM proof it rendered *correctly*, after two real 4:2:2 masters false-greened the thumbnail-only check on 26.6.1, 2026-08-15; additive machine line `MOV_PLAYABILITY os=… verdict=ok\|fail\|skip fidelity=ok\|fail\|skip`), while a **standalone** `remux.sh`/`dual-track.sh`/`pairfill-paff.sh`/`rebuild-paff.sh` run prints the advisory telling the operator to prove it themselves (`playable-check.sh OUT.mov` — no auto-run there). Verdict `fail` → exit 10 REVIEW routed to the **container-swap rung first** (1.13 D2: `scripts/mp4-swap.sh`, or `--mp4-swap` on `mov.sh`/`auto.sh` to have it built and proven automatically), with Rung 4 named LAST (the file remains a verified lossless NLE/archival master); no macOS/qlmanage → exit 10 REVIEW, `playability unverified on this platform`. The fidelity threshold is **scan-keyed** since 1.13 (D1): 0.90 is progressive-tuned and false-FAILs healthy interlaced material — measured 0.8866–0.9684 healthy vs 0.8146–0.8471 corrupt on the field report's real 1080i59.94 capture, and 0.8669 on a healthy synthetic interlaced 4:2:2 clip on this bench — so a declared interlaced `field_order` is judged against `RTM_FIDELITY_SSIM_INTERLACED` (0.86, in the measured gap; the ~0.02 margin is a stated residual). Field normalization was tried and REJECTED, measured not assumed (bwdif/yadif on either or both sides, `setfield=prog`, `scale interl=0`, an 8-bit chroma path, neighbour scaling: every candidate moved the score ≤0.005) — the deficit is chroma-plane, not field-structure, which is why the gate now reports the **Y/U/V split** (`y=`/`u=`/`v=` on `PLAYCHECK_FIDELITY`) and NAMES a luma-survives-chroma-collapses failure instead of returning one opaque scalar. `--force-backhaul`/`RTM_FORCE_BACKHAUL` stay API (no-ops for this arm — nothing refuses on pix_fmt). Separately, on MPEG-2 TS, gaps **plus** non-monotonic DTS (timeline rot, whole-file scan) now **warn + build** too (1.11, WO 4.2 — additive `MOV_ROT_WARN` machine line, the old refusal's same three routes, every entry point): the mux-confession hard stop refuses invented timing at the mux, and `verify.sh` judges the finished timeline (bench 2026-08-14: the constructed rot fixture built and drew an evidence-bearing dual-track-misalignment REVIEW, not an exit 11); gaps ALONE rebuild fine (the 2008 recovery) |
-| Field-coded (PAFF) H.264 (coded-pic rate ≈ 2× frame rate — the rate counts ALL packets, untimestamped included) | genpts is guilty-until-proven → pair-timestamped/reordered: `scripts/pairfill-paff.sh` (keeps real PTS); no reorder: `scripts/rebuild-paff.sh`; confirm with `scripts/verify.sh` (timeline + scrub gates) |
+| Backhaul/contribution TS (4:2:2 `yuv422p*`, **any bit depth** — MPEG-2, H.264 Hi422/AVC-Intra, HEVC Rext) | **Demoted to empirical, 1.11 (WO 4.1):** the categorical "QuickTime cannot decode 4:2:2" refusal was **falsified on macOS 26.6.1 (2026-08-13)** — both formerly-refused classes fully decoded the synthetic bench clips (qlmanage + `avconvert` whole-file; renders — correctness is per-file, see the 2026-08-15 narrowing later in this row), and the 8-bit-exact gate had let real 10-bit contribution profiles through unannounced. Now every entry point **announces** the profile (`contribution profile <codec>/<pix_fmt>`) and builds losslessly; the **driver paths** (`mov.sh`/`auto.sh`/`batch.sh`-via-auto) then **prove playability on the finished output** (`playable-check.sh` auto-run — since 1.12 with `--fidelity`, the SSIM proof it rendered *correctly*, after two real 4:2:2 masters false-greened the thumbnail-only check on 26.6.1, 2026-08-15; additive machine line `MOV_PLAYABILITY os=… verdict=ok\|fail\|skip fidelity=ok\|fail\|skip`), while a **standalone** `remux.sh`/`dual-track.sh`/`pairfill-paff.sh`/`rebuild-paff.sh` run prints the advisory telling the operator to prove it themselves (`playable-check.sh OUT.mov` — no auto-run there). Verdict `fail` → exit 10 REVIEW routed to the **container-swap rung first** (1.13 D2: `scripts/mp4-swap.sh`, or `--mp4-swap` on `mov.sh`/`auto.sh` to have it built and proven automatically), with Rung 4 named LAST (the file remains a verified lossless NLE/archival master); no macOS/qlmanage → exit 10 REVIEW, `playability unverified on this platform`. The fidelity threshold is **scan-keyed** since 1.13 (D1): 0.90 is progressive-tuned and false-FAILs healthy interlaced material — measured 0.8866–0.9684 healthy vs 0.8146–0.8471 corrupt on the field report's real 1080i59.94 capture, and 0.8669 on a healthy synthetic interlaced 4:2:2 clip on this bench — so a declared interlaced `field_order` is judged against `RTM_FIDELITY_SSIM_INTERLACED` (0.86, in the measured gap; the ~0.02 margin is a stated residual). Field normalization was tried and REJECTED, measured not assumed (bwdif/yadif on either or both sides, `setfield=prog`, `scale interl=0`, an 8-bit chroma path, neighbour scaling: every candidate moved the score ≤0.005) — the deficit is chroma-plane, not field-structure, which is why the gate now reports the **Y/U/V split** (`y=`/`u=`/`v=` on `PLAYCHECK_FIDELITY`) and NAMES a luma-survives-chroma-collapses failure instead of returning one opaque scalar. `--force-backhaul`/`RTM_FORCE_BACKHAUL` stay API and nothing refuses on pix_fmt anywhere — but they are **not** no-ops for this arm, and the claim that they were is **corrected (P1c, measured 2026-08-16)**: both short-circuit the whole shared `backhaul_gate`, the contribution advisory included, so a **standalone** `remux.sh <4:2:2 source>` prints **1** advisory line plain and **0** with `RTM_FORCE_BACKHAUL=1` (same 1 → 0 on `dual-track.sh`). What *is* true is the narrower statement about **`mov.sh`'s front door**: `mov.sh` prints the advisory itself, before and independently of that gate, so `mov.sh IN OUT` and `mov.sh IN OUT --force-backhaul` both print it (2 lines each) — on `/mov` the flag really does leave the pix_fmt arm untouched. The flags change what is **announced** at the child entry points, never what is built. Separately, on MPEG-2 TS, gaps **plus** non-monotonic DTS (timeline rot, whole-file scan) now **warn + build** too (1.11, WO 4.2 — additive `MOV_ROT_WARN` machine line, the old refusal's same three routes, every entry point): the mux-confession hard stop refuses invented timing at the mux, and `verify.sh` judges the finished timeline (bench 2026-08-14: the constructed rot fixture built and drew an evidence-bearing dual-track-misalignment REVIEW, not an exit 11); gaps ALONE rebuild fine (the 2008 recovery) |
+| Field-coded (PAFF) H.264 (coded-pic rate ≈ 2× frame rate — the rate counts ALL packets, untimestamped included) | genpts is guilty-until-proven → pair-timestamped (~half untimestamped): `scripts/pairfill-paff.sh` (keeps real PTS); PTS-complete + reordered: `scripts/derive-dts.sh` (Rung 3-DERIVE); no reorder: `scripts/rebuild-paff.sh`; confirm with `scripts/verify.sh` (timeline + scrub gates) |
 | Mux log says `pts has no value` / `Timestamps are unset` / `Non-monotonic DTS` on a copy mux | **HARD STOP — the muxer invented the timeline.** Never ship it, whatever verify says about the essence. remux.sh/dual-track.sh refuse automatically; run `scripts/diagnose.sh` for the repair |
-| Repair looks fine but motion is subtly shuffled | Constant-rate restamp flattened a reorder pyramid (PTS=DTS = decode order). `verify.sh --full` compares framemd5 presentation ORDER; repair with `pairfill-paff.sh`, never `rebuild-paff.sh` |
+| Repair looks fine but motion is subtly shuffled | Constant-rate restamp flattened a reorder pyramid (PTS=DTS = decode order). `verify.sh --full` compares framemd5 presentation ORDER; repair by measured profile — `derive-dts.sh` when every packet still carries PTS (any codec), `pairfill-paff.sh` for the half-timestamped PAFF class — never `rebuild-paff.sh` |
 | DV / MJPEG / MPEG-4 ASP / ProRes source ("do I need to convert this?") | **No — measured QT-native** (F8 bench 2026-08-14, macOS 26.6.1/ffmpeg 9.0.1): mpeg4(`mp4v`), MJPEG **4:2:0** (`jpeg`), DV (`dvcp`), ProRes (`apcn`) each mux `-c copy` into MOV and fully decode in AVFoundation — `mov.sh` says so and copies losslessly. Non-4:2:0 MJPEG is the C63 measured-DROP class (`PR_VNATIVE=variant`): still copied, playability proven post-build. Codecs outside the matrix (`PR_VNATIVE=no`, e.g. ffv1): copy + post-build proof, never assumed |
 | Blu-ray/DVD LPCM audio (`pcm_bluray`/`pcm_dvd`) | **Container-framed LPCM, NOT raw PCM** (WO 3.1): a MOV "copy" muxes into an HDMV-tagged track NO decoder claims — even ffmpeg can't decode the file it just wrote (real 18.5 GB Blu-ray case). Routed to a **PCM access track** by `mov.sh`/`remux.sh --audio auto`; verify gate (g)'s sample-entry allowlist FAILs any shipped dead track. The access track is `pcm_s16le`: a >16-bit source (s32 — 24-bit HDMV LPCM) **loses bit depth there, announced with a WARN** since the 1.11 fix round (single-track MODE=pcm has no preserved original; depth-aware access encoding is a recorded 1.12 candidate — known-limits.md) |
 | Mux fails `Could not find tag for codec …` | A subtitle/data stream MOV can't carry (subrip, DVB, teletext, SCTE) — map explicitly `-map 0:v:0 -map 0:a`; text subs → sidecar or `mov_text` (verified 8.1.1: `-map 0` copy with SRT fails at header write) |
@@ -341,8 +370,10 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 **Exit contract** (every script, enforced by `lib-exit.sh`'s ERR trap so no
 stray code escapes): `0` DONE · `10` REVIEW · `1` FAIL · `2` usage · `11`
 REFUSED. **Documented legacy exceptions** (pre-contract, suite-pinned, each
-widening its own allowlist): `pairfill-paff.sh` and `rebuild-paff.sh` REFUSE
-with exit **3** (precondition/reorder refusals), and `playable-check.sh` exits
+widening its own allowlist): `pairfill-paff.sh`, `rebuild-paff.sh` and
+`derive-dts.sh` REFUSE
+with exit **3** (precondition/reorder/signature refusals — derive-dts adopts
+the family's documented 3, suite-pinned in `14-exit-codes.sh`), and `playable-check.sh` exits
 **3** for SKIP (not macOS / no qlmanage; in `--fidelity` mode also when
 avconvert/ffmpeg are missing — each cause announced). **`verify.sh` never emits 10**: its
 verdict is its printed text — `>> OK` and `>> REVIEW` **both exit 0**,
@@ -377,7 +408,7 @@ renamed — Ground Rule 4):
 | `AUTO_SUMMARY` | `auto.sh` | `result= best_rung= best_result= rung=` — the additive `best_*` pair (WO 2.3) sits **before** `rung=` on purpose (batch.sh's greedy `.*rung=` parse) |
 | `MOV_PLAYABILITY` | driver post-build check (`lib-paff.sh`) | `os=<macOS\|na> verdict=ok\|fail\|skip fidelity=ok\|fail\|skip` (WO 4.1; self-dating, Ground Rule 6; `fidelity=` appended 1.12 WO-B — `skip` when the mode wasn't requested or couldn't measure) |
 | `PLAYCHECK_FIDELITY` | `playable-check.sh --fidelity` (1.12 WO-B) | `verdict=ok\|fail\|skip reason=none\|fidelity\|convert-hang\|convert-fail\|compare-fail\|<skip-cause> ssim=<worst\|na> os=<macOS\|na> y= u= v= scan=interlaced\|progressive\|unknown thresh= mp4_swap=untried` — the five trailing fields appended 1.13 (D1/D2, Ground Rule 4): the per-plane split of the worst sample, the scan the threshold was keyed off, the threshold in force, and `mp4_swap=untried` (this script sees only the OUTPUT, never the source, so it can name the container-swap rung but not run it). SSIM below the in-force threshold → `verdict=fail reason=fidelity` + exit 1 |
-| `MOV_ROT_WARN` | `mov.sh` + shared `backhaul_gate` | `profile=timeline-rot vcodec= disc= back= dup=` (WO 4.2 — warn + build, never a refusal) |
+| `MOV_ROT_WARN` | shared `backhaul_rot_warn` (`lib-paff.sh`; called by `mov.sh` + `backhaul_gate` — one implementation, F1 2026-08-16) | `profile=timeline-rot vcodec= disc= back= dup= disc_p= disc_p_na=` (WO 4.2 — warn + build, never a refusal; `disc_p=`/`disc_p_na=` appended P1.4, Ground Rule 4 — the presentation-order forward-gap count (`DISC_P_COUNT`, the field that carries the dropped-time claim on reordered sources) and the no-PTS packet count that guards it (`DISC_P_NA`)) |
 | `MOV_CHAPTER_TS_WARN` | `mov.sh` + `resync.sh` | `chapters= dur_s= limit_s= [drop_s=]` (1.12 WO-C — announce-only chaptered movie-timescale-overflow pre-announce, never a refusal; `drop_s=` appended only when the tier-2 silent-drop arm fires; thresholds `RTM_CHAPTER_TS_WARN_SECS` (2900) / `RTM_CHAPTER_TS_DROP_SECS` (5965)) |
 | `MOV_REFUSED` | shared unroutable pre-flight (`lib-paff.sh`; emitted by `mov.sh`/`auto.sh`/`remux.sh` — WO 5.2, parity closed in the 1.11 fix round) | `profile=unroutable-vcodec vcodec=` / `profile=dolby-e-audio track=a:<N>`. The 1.8.0–1.10.0 backhaul values (`qt-undecodable-*`, rot) are **retired — no longer emitted, reserved, never reused** |
 | `RMX_CENSUS` | every builder, post-mux, pre-bless (`lib-mux.sh`) | `stage=remux\|dual-track\|resync\|rebuild-paff\|pairfill-paff\|trim-to-idr\|metadata\|rung4 planned=<N> written=<M> codecs=ok\|mismatch\|na match=ok\|MISMATCH` (D5, 1.13 — the plan-vs-file reconciliation; MISMATCH is exit 1 with the artifact kept as `.part`) |

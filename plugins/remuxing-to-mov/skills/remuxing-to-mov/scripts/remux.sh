@@ -423,21 +423,39 @@ fi
 # timeline. The video bits can be perfect while the written timing is garbage —
 # the shipped-broken files rendered thumbnails and passed the essence checks.
 # Never bless such an output, regardless of what any later check says.
-conf=$(mux_confessions "$MUXLOG")
+# Stream-scoped (1.14 / DF-10): ffmpeg attributes its confessions ([vost#/
+# [aost#/[sost# tags on 6+; "in output stream 0:N" / "for stream N" on 4.4-era
+# logs — both matched). VIDEO confessions, and unattributable lines (the
+# conservative default), keep the hard stop verbatim. Audio/subtitle-only DTS
+# nudges are the ms-quantization class — announced + REVIEW, never a silent
+# pass, never a false video hard stop.
+eval "$(mux_confessions_scoped "$MUXLOG" 0)"   # video is output stream 0:0 (mapped first)
+conf=${MC_VIDEO:-0}
 if [ "${conf:-0}" -gt 0 ]; then
   echo ">> HARD STOP: the muxer logged $conf timeline confession(s):"
-  grep -iE 'pts has no value|timestamps are unset|non-?monotonic dts' "$MUXLOG" | sort | uniq -c | sort -rn | head -4 | sed 's/^/   /'
+  grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sort | uniq -c | sort -rn | head -4 | sed 's/^/   /'
   echo "   The muxer invented timing for packets the source never timestamped."
   echo "   NOT blessing the output (kept at $PART; log: $MUXLOG)."
-  echo "   Run scripts/diagnose.sh \"$IN\" — half-timestamped PAFF routes to"
-  echo "   scripts/pairfill-paff.sh; timestamp-free streams to scripts/rebuild-paff.sh."
+  echo "   Run scripts/diagnose.sh \"$IN\" — it routes by MEASURED profile:"
+  echo "   half-timestamped PAFF -> scripts/pairfill-paff.sh; PTS-complete reordered"
+  echo "   (any codec — DTS absent/reconstructed/rotten alike) -> scripts/derive-dts.sh;"
+  echo "   timestamp-free H.264 -> scripts/rebuild-paff.sh (pairfill/rebuild are H.264-only)."
   exit 1
+fi
+RMX_CONF_REVIEW=0
+if [ "${MC_AUDSUB:-0}" -gt 0 ]; then
+  echo ">> REVIEW: $MC_AUDSUB audio DTS nudges (ms-quantization class) — not video timing"
+  echo "   invention; verify gates (f)/(g) judge audio. Building on; exit will say 10."
+  echo "RMX_CONFESS stage=remux video=0 audsub=${MC_AUDSUB} unattr=${MC_UNATTR:-0}"   # machine-readable (additive, DF-10 1.14)
+  RMX_CONF_REVIEW=10
 fi
 rm -f "$MUXLOG"
 # POST-MUX CENSUS (D5): reconcile the plan against the FILE before blessing it.
 # RMX_PLAN above is a plan printed BEFORE the mux; nothing used to check the
 # muxer honored it, and a silently dropped stream shipped green.
-if ! mux_census "$PART" "$((1 + outi))" "$vcodec$CENSUS_C" remux; then
+census_rc=0
+mux_census "$PART" "$((1 + outi))" "$vcodec$CENSUS_C" remux "$IN" || census_rc=$?
+if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
   echo "   NOT blessing the output; kept at $PART."
   echo "   Re-run with -v verbose to see what the muxer said about the missing stream,"
   echo "   or map it by hand (references/known-limits.md)."
@@ -446,3 +464,8 @@ fi
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
 echo "verify with: scripts/verify.sh \"$IN\" \"$OUT\""
+# REVIEW propagation (1.14): an unexpected-surplus census or an audio/subtitle
+# confession class blesses the complete artifact and exits 10 ("look"), never
+# 1 ("broken") — every planned stream is present and the notes above say where.
+if [ "$census_rc" -eq 10 ] || [ "${RMX_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
+exit 0

@@ -149,13 +149,22 @@ build_from () {  # build_from SRC  -- decode a:0 to PCM (track1, default) + copy
   fi
   [ -s "$MUXLOG" ] && sed 's/^/   mux: /' "$MUXLOG" | tail -6
   # HARD STOP: mux-log timeline confessions mean the muxer invented timing —
-  # never bless that output (post-mortem 2026-07-25)
-  conf=$(mux_confessions "$MUXLOG")
+  # never bless that output (post-mortem 2026-07-25). Stream-scoped (1.14 /
+  # DF-10): only VIDEO (or unattributable) confessions hard-stop; audio/
+  # subtitle DTS nudges are the ms-quantization class -> announced + REVIEW.
+  eval "$(mux_confessions_scoped "$MUXLOG" 0)"   # video is output stream 0:0 (mapped first)
+  conf=${MC_VIDEO:-0}
   if [ "${conf:-0}" -gt 0 ]; then
     echo ">> HARD STOP: mux log shows $conf timeline confession(s) (pts has no value /"
     echo "   Timestamps are unset / non-monotonic DTS). NOT blessing the output;"
     echo "   kept at $PART (log: $MUXLOG). Run scripts/diagnose.sh \"$IN\" first."
     exit 1
+  fi
+  if [ "${MC_AUDSUB:-0}" -gt 0 ]; then
+    echo ">> REVIEW: $MC_AUDSUB audio DTS nudges (ms-quantization class) — not video timing"
+    echo "   invention; verify gates (f)/(g) judge audio. Building on; exit will say 10."
+    echo "RMX_CONFESS stage=dual-track video=0 audsub=${MC_AUDSUB} unattr=${MC_UNATTR:-0}"   # machine-readable (additive, DF-10 1.14)
+    DT_CONF_REVIEW=10
   fi
   rm -f "$MUXLOG"
 }
@@ -210,7 +219,9 @@ fi
 # POST-MUX CENSUS (D5, 1.13): the dual-track contract IS a stream count — video
 # + PCM access + preserved original. A silently dropped track here is the whole
 # deliverable's promise gone, and nothing checked it before this.
-if ! mux_census "$PART" 3 "$vcodec,$PCMC,$acodec" dual-track; then
+census_rc=0
+mux_census "$PART" 3 "$vcodec,$PCMC,$acodec" dual-track "$IN" || census_rc=$?
+if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
   echo "   NOT blessing the output; kept at $PART. The access+original pair is the"
   echo "   contract of this tool — a missing track means the promise was not kept."
   exit 1
@@ -220,3 +231,7 @@ echo "wrote: $OUT"
 echo "VERIFY (alignment): decode track 2 with the SAME params and md5-compare to track 1, e.g."
 echo "  a=\$(ffmpeg -v error ${DRC:+$DRC }-i \"$OUT\" -map 0:a:0 -f ${PCMC#pcm_} - | md5sum)"
 echo "  b=\$(ffmpeg -v error ${DRC:+$DRC }-i \"$OUT\" -map 0:a:1 -c:a $PCMC -f ${PCMC#pcm_} - | md5sum); [ \"\$a\" = \"\$b\" ] && echo ALIGNED"
+# REVIEW propagation (1.14): an unexpected-surplus census or an audio/subtitle
+# confession class blesses the complete artifact and exits 10 ("look"), never 1.
+if [ "$census_rc" -eq 10 ] || [ "${DT_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
+exit 0

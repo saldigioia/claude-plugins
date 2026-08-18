@@ -109,7 +109,9 @@ fi
 # video + best audio, so the plan is 1 + (1 if the source has audio).
 R4_NA=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
 R4_N=1; [ "${R4_NA:-0}" -gt 0 ] && R4_N=2
-if ! mux_census "$PART" "$R4_N" "" rung4; then
+census_rc=0
+mux_census "$PART" "$R4_N" "" rung4 "$IN" || census_rc=$?
+if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
   echo ">> NOT blessing the re-encode; kept at $PART for inspection." >&2
   exit 1
 fi
@@ -130,3 +132,6 @@ done
 [ "$miss" -eq 0 ] || { echo ">> FAIL: provenance did not round-trip — the derivative is unmarked. Do not keep it beside masters."; exit 1; }
 echo ">> DONE: derivative written + provenance stamped. This file must never be"
 echo "   presented as a master; the lossless original remains the archival copy."
+# REVIEW propagation (1.14): an unexpected-surplus census still blesses the
+# complete derivative and exits 10 ("look"), never 1.
+exit "${census_rc:-0}"

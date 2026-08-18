@@ -25,9 +25,26 @@
 # PRECONDITIONS (checked against the WHOLE file; any miss aborts with exit 3):
 #   1. the first video packet carries a real PTS (the fill anchors to it);
 #   2. untimestamped packets never occur back-to-back (strict pair alternation —
-#      each one's mate is the timestamped packet immediately before it);
+#      each one's mate is the timestamped packet immediately before it).
+#      WIDENED 2026-08-18 (PROVENANCE record: 23.7 GB PAFF 1080i25, 451,071
+#      coded pictures, 11 junctions): a max run of exactly TWO untimestamped
+#      packets is the DISPLACED-TIMESTAMP class — the PES timestamp rides the
+#      SECOND field of a pair instead of the first; nothing is missing and the
+#      clock never jumps. That class routes to the JUNCTION MODEL (announced):
+#      a trace_headers census must prove uniform field cadence (no pic_struct
+#      repeat/doubling) and the running ffmpeg's setts must carry the
+#      NEXT_PTS/NEXT_DTS + PREV_IN* expression variables; the widened fill then
+#      hands each displaced timestamp back to its owner and fills the vacated
+#      slot one field later. Runs > 2 still refuse (exit 3), now naming the
+#      recorded attestation route (lib-attest.sh precond_attest);
 #   3. the stream timebase and field rate yield whole-tick pair durations
 #      (90 kHz @ 59.94 -> 1501/1502; @ 50 -> 1800/1800).
+#
+# JUNCTION-MODEL OUTPUT GATE (in addition to every existing gate): the
+# POC lattice — per IDR-delimited sequence, every picture's OUTPUT PTS must sit
+# exactly on  base + pic_order_cnt_lsb * half_interval  (the record's local
+# gate 2; 451,071/451,071 on-slot on the proving job). Any off-lattice picture
+# is FAIL exit 1 with the artifact kept as .part.
 #
 # setts LESSONS BAKED IN (each cost a broken build in the incident):
 #   * unset timestamps reach setts expressions as INT64_MIN, NOT NaN — test
@@ -66,6 +83,7 @@ esac; done
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"
 . "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
+. "$SELF_DIR/lib-attest.sh" # precond_attest: recorded operator override of a precondition
 
 # backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
 # defers to the post-build proof, rot WARNs and builds) — this script writes a
@@ -80,9 +98,26 @@ eval "$(pf_detect "$IN")"
 echo "   coded-pic rate=${PF_CODED_RATE}/s  untimestamped fraction=${PF_NOPTS_FRAC} (half_ts=$PF_HALF_TS)"
 
 # --- field rate -> whole-tick pair duration in the stream timebase ---
+PP_ATTESTED=""   # set by any precond_attest override below; appended to PP_CENSUS
 [ -n "$RATE" ] || RATE="$PF_FIELD_RATE"
 if [ "$RATE" = unknown ] || [ -z "$RATE" ]; then
-  echo "cannot map a field rate (measured ${PF_CODED_RATE}/s); pass --rate, e.g. 60000/1001" >&2; exit 3
+  # attested override (2026-08-18): the operator with independent evidence that
+  # the rate TABLE is wrong for this file proceeds on the measured coded rate,
+  # rounded to a whole per-second value — announced, sidecar-recorded, and the
+  # whole-tick pair-duration check below still applies (evidence never skipped).
+  if precond_attest pf-rate-map pairfill-paff.sh "$OUT" \
+       "PF_CODED_RATE=${PF_CODED_RATE:-0}" "PF_FIELD_RATE=${PF_FIELD_RATE:-unknown}" "PF_RATIO=${PF_RATIO:-0}"; then
+    PP_ATTESTED=pf-rate-map
+    RATE=$(awk "BEGIN{printf \"%d\", int(${PF_CODED_RATE:-0}+0.5)}")
+    [ "${RATE:-0}" -gt 0 ] 2>/dev/null || { echo "measured coded rate ${PF_CODED_RATE}/s unusable even under attestation" >&2; exit 3; }
+    echo "** attested rate-map override: using the measured coded rate rounded to ${RATE}/s"
+    echo "**   as the field rate (the table could not map ${PF_CODED_RATE}/s; the operator's"
+    echo "**   recorded evidence decides). Every output gate below still runs."
+  else
+    echo "cannot map a field rate (measured ${PF_CODED_RATE}/s); pass --rate, e.g. 60000/1001" >&2
+    precond_attest_route pf-rate-map pairfill-paff.sh >&2
+    exit 3
+  fi
 fi
 TB=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 TBDEN=${TB##*/}; case "$TBDEN" in ''|*[!0-9]*) echo "unusable stream time_base '$TB'" >&2; exit 3;; esac
@@ -103,24 +138,113 @@ echo "   timebase=1/$TBDEN  field rate=$RATE  pair=${PAIR} ticks (fields ${A}/${
 #     measures how far the reorder pyramid pushes presentation ahead of the
 #     cadence — the exact amount the output's PTS-DTS offsets will exceed the
 #     pre-roll by (the filled DTS ramp is uniform; the kept real PTS are not) ---
-eval "$(ffp -v error -select_streams v:0 -show_entries packet=pts,dts -of csv=p=0 "$IN" 2>/dev/null | \
+# PP_RUN2 (2026-08-18): the count of runs of EXACTLY two consecutive
+# untimestamped packets — the junction census the widened branch announces.
+# Test hook: PP_SCAN_FILE=<csv of pts,dts lines> bypasses ffprobe (the suite
+# pins the branch on injected scan profiles the sandbox encoders cannot mint).
+eval "$( { if [ -n "${PP_SCAN_FILE:-}" ]; then cat "$PP_SCAN_FILE"; else
+             ffp -v error -select_streams v:0 -show_entries packet=pts,dts -of csv=p=0 "$IN" 2>/dev/null; fi; } | \
   awk -F, -v pair="$PAIR" 'NF{
       n++; p=$1; d=$2
       unset=(p=="N/A"||p=="")
       if(n==1) first_ok=(unset?0:1)
-      if(unset){ miss++; run++; if(run>mxrun) mxrun=run } else run=0
+      if(unset){ miss++; run++; if(run>mxrun) mxrun=run } else { if(run==2) r2++; run=0 }
       if(!unset){ if(ti==0) fp=p+0; exc=(p+0)-(fp+ti*pair); if(exc>emax)emax=exc; if(exc<emin)emin=exc; ti++ }
       if(!unset && d!="N/A" && d!=""){ both++; off=p-d; if(off>mxoff) mxoff=off }
     }
-    END{ printf "PP_N=%d PP_FIRST_OK=%d PP_MISS=%d PP_MAXRUN=%d PP_BOTH=%d PP_MAXOFF=%d PP_EXC=%d PP_EXC_MIN=%d\n",
-         n+0, first_ok+0, miss+0, mxrun+0, both+0, mxoff+0, emax+0, emin+0 }')"
-echo "   packets=$PP_N  untimestamped=$PP_MISS  max consecutive untimestamped=$PP_MAXRUN  max PTS-DTS=$PP_MAXOFF ticks"
+    END{ if(run==2) r2++
+         printf "PP_N=%d PP_FIRST_OK=%d PP_MISS=%d PP_MAXRUN=%d PP_RUN2=%d PP_BOTH=%d PP_MAXOFF=%d PP_EXC=%d PP_EXC_MIN=%d\n",
+         n+0, first_ok+0, miss+0, mxrun+0, r2+0, both+0, mxoff+0, emax+0, emin+0 }')"
+echo "   packets=$PP_N  untimestamped=$PP_MISS  max consecutive untimestamped=$PP_MAXRUN (2-runs: ${PP_RUN2:-0})  max PTS-DTS=$PP_MAXOFF ticks"
 # bash 3.2 can't parse $(cmd "...\"...\"...") inside a double-quoted string — precompute
 EXC_PAIRS=$(awk "BEGIN{printf \"%.2f\", ${PP_EXC:-0}/$PAIR}")
 echo "   PTS excursion vs pair-cadence ramp: +${PP_EXC}/${PP_EXC_MIN} ticks ($EXC_PAIRS pairs of pyramid depth)"
 [ "${PP_N:-0}" -gt 0 ] || { echo "no video packets read" >&2; exit 3; }
 [ "${PP_FIRST_OK:-0}" -eq 1 ] || { echo ">> PRECONDITION FAIL: first video packet has no PTS — nothing to anchor the fill to. Use rebuild-paff.sh (no real timing survives to preserve)." >&2; exit 3; }
-[ "${PP_MAXRUN:-9}" -le 1 ] || { echo ">> PRECONDITION FAIL: $PP_MAXRUN consecutive untimestamped packets — not strict pair alternation; the +1-field fill would be wrong. Diagnose by hand (references/timeline-repair.md)." >&2; exit 3; }
+# --- fill model dispatch (2026-08-18): strict pair alternation keeps today's
+# rule byte-identical; a max run of exactly 2 is the measured displaced-
+# timestamp class and triggers the JUNCTION MODEL (announced; census + setts
+# feature-detect below are its own preconditions); anything deeper refuses as
+# before, now naming the recorded attestation route.
+PP_MODEL=strict
+if [ "${PP_MAXRUN:-9}" -le 1 ]; then
+  : # strict pair alternation — the existing class, zero behavior change
+elif [ "${PP_MAXRUN:-9}" -eq 2 ]; then
+  PP_MODEL=junction
+  echo ">> ${PP_RUN2:-0} junction(s) with a 2-run of untimestamped packets — the displaced-timestamp class (measured 2026-08-18): widening the fill model; census required"
+  echo "   (at each junction the PES timestamp is attached to the SECOND field of its"
+  echo "    pair instead of the first — nothing missing, no clock jump. The widened rule"
+  echo "    hands the displaced timestamp back to its owner via NEXT_PTS/NEXT_DTS and"
+  echo "    moves the displaced one forward one field.)"
+else
+  if precond_attest pf-maxrun pairfill-paff.sh "$OUT" \
+       "PP_MAXRUN=$PP_MAXRUN" "PP_RUN2=${PP_RUN2:-0}" "PP_MISS=$PP_MISS" "PP_N=$PP_N"; then
+    PP_ATTESTED=pf-maxrun
+    PP_MODEL=junction
+    echo "** attested past the strict-alternation precondition (max run $PP_MAXRUN > 2):"
+    echo "**   proceeding on the widened junction model; its census precondition and every"
+    echo "**   output gate (POC lattice included) still run — evidence is never skipped."
+  else
+    echo ">> PRECONDITION FAIL: $PP_MAXRUN consecutive untimestamped packets — not strict pair alternation; the +1-field fill would be wrong. If this stream is fully-timestamped and reordered — the derive-dts route (scripts/derive-dts.sh, Rung 3-DERIVE) is the repair; pairfill only applies to half-timestamped pair sources." >&2
+    precond_attest_route pf-maxrun pairfill-paff.sh >&2
+    exit 3
+  fi
+fi
+
+if [ "$PP_MODEL" = junction ]; then
+  # --- junction precondition 1: the widened rule's setts expression variables.
+  # NEXT_PTS/NEXT_DTS and PREV_INPTS/PREV_INDTS do not exist on old ffmpeg
+  # (4.4 measured: option-parse rejection) — probed with a tiny synthetic
+  # invocation (pf_setts_probe, lib-paff.sh), never a read of the source.
+  PP_JEXPR="if(lt(PTS\,-8000000000000000000)\,if(lt(PREV_INPTS\,-8000000000000000000)\,NEXT_PTS\,PREV_OUTPTS+${A})\,if(eq(PTS\,PREV_OUTPTS)\,PTS+${A}\,PTS))"
+  if ! pf_setts_probe "$PP_JEXPR"; then
+    echo ">> JUNCTION MODEL REFUSED: this ffmpeg's setts lacks the NEXT_PTS/NEXT_DTS (and/or"
+    echo "   PREV_INPTS/PREV_INDTS) expression variables the widened fill needs — an ffmpeg"
+    echo "   >= 5.x with the full setts variable set is required (probed with a synthetic"
+    echo "   invocation; never build unproven). The strict pair rule cannot repair a 2-run,"
+    echo "   so nothing was built; the source is untouched."
+    exit 3
+  fi
+  echo "   setts NEXT_PTS/NEXT_DTS support: probed OK"
+  # --- junction precondition 2 (the operator's 2026-08-18 WARNING): the fixed
+  # field interval is only valid when the cadence is uniform fields. A whole-
+  # file trace_headers census proves it: no pic_struct in {0,5,6,7,8}
+  # (frame/repeat/doubling), and the field/frame split feeds the widened
+  # duration-histogram gate below. Head feature-probe first: a trace_headers
+  # that parses nothing on this ffmpeg/file must refuse BEFORE the whole-file
+  # pass (never build unproven), not after it.
+  if [ -z "${PF_TRACE_FILE:-}" ]; then
+    pp_headpics=$(ffmpeg -nostdin -hide_banner -nostats ${FF_INPUT_OPTS[@]+"${FF_INPUT_OPTS[@]}"} \
+        -i "$IN" -map 0:v:0 -c copy -frames:v 40 -bsf:v trace_headers -f null - 2>&1 | \
+      awk '{ for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"){ if($NF+0==0) n++; break } } END{ print n+0 }')
+    if [ "${pp_headpics:-0}" -eq 0 ]; then
+      echo ">> JUNCTION MODEL REFUSED: trace_headers on this ffmpeg parsed no coded picture"
+      echo "   from the stream head — the census cannot be taken, and the junction fill is"
+      echo "   never built unproven. Nothing was built; the source is untouched."
+      exit 3
+    fi
+  fi
+  echo "-- junction census (whole-file trace_headers; demux + header parse, no decode) --"
+  eval "$(pf_trace_census "$IN")"
+  if [ "${PC_OK:-no}" != yes ]; then
+    echo ">> JUNCTION MODEL REFUSED: the whole-file trace_headers census parsed no coded"
+    echo "   pictures — unprovable cadence, nothing built."
+    exit 3
+  fi
+  echo "   pictures=$PC_PICS  field pictures=$PC_FIELDS  frame pictures=$PC_FRAMES  pic_struct histogram: $PC_STRUCT_HIST"
+  if [ "${PC_STRUCT_BAD:-1}" -ne 0 ]; then
+    echo ">> JUNCTION MODEL REFUSED: $PC_STRUCT_BAD picture(s) carry pic_struct in {0,5,6,7,8}"
+    echo "   (frame/repeat/doubling) — the cadence is NOT uniform fields, so the fixed field"
+    echo "   interval the junction fill assumes is unproven for this file."
+    echo "   pic_struct histogram: $PC_STRUCT_HIST"
+    exit 3
+  fi
+  [ "$PC_STRUCT_HIST" = none ] && \
+    echo "   note: no pic_timing pic_struct carried — no repeat/doubling signaled; the census stands on the field/frame split"
+  [ "${PC_PICS:-0}" -eq "${PP_N:-0}" ] || \
+    echo "   note: census pictures ($PC_PICS) != demux packets ($PP_N) — multi-slice or non-VCL framing; the duration gate still judges the written timeline"
+  echo "PP_CENSUS pics=$PC_PICS fields=$PC_FIELDS frames=$PC_FRAMES pic_struct_bad=${PC_STRUCT_BAD:-0}${PP_ATTESTED:+ attested=$PP_ATTESTED}"   # machine-readable (additive, 2026-08-18)
+fi
 
 # --- DTS pre-roll: the pyramid depth, rounded up to whole pairs ---
 if [ -z "$PREROLL" ]; then
@@ -189,7 +313,23 @@ MOVFLAGS="+faststart"; { [ -n "$cprim" ] && [ "$cprim" != unknown ]; } && MOVFLA
 
 # The repair itself. lt(x,-8e18) is the unset test (INT64_MIN, not NaN); the DTS
 # ramp anchors to the FIRST REAL PTS (domain-relative) and alternates A/B ticks.
-SETTS="setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+${A}\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS-${PREROLL}\,PREV_OUTDTS+${A}+${AB}*mod(N\,2))"
+if [ "$PP_MODEL" = junction ]; then
+  # The widened rule, exactly as proven on the 2026-08-18 job (whole-file
+  # timeline clean; POC lattice 451,071/451,071 on-slot; VCL bit-identical):
+  #   pts = if(lt(PTS, -8e18),
+  #            if(lt(PREV_INPTS, -8e18), NEXT_PTS, PREV_OUTPTS + FIELD),
+  #            if(eq(PTS, PREV_OUTPTS), PTS + FIELD, PTS))
+  #   dts = same shape with DTS/PREV_INDTS/NEXT_DTS/PREV_OUTDTS
+  # Read plainly: real timestamp -> keep; first untimestamped of a pair ->
+  # previous output + one field (today's rule); SECOND of a run of two -> take
+  # the FOLLOWING packet's value (it belongs to this packet — the displaced-
+  # timestamp case); real timestamp equal to what was just emitted -> it is the
+  # displaced one, move it forward one field. FIELD is the per-file field
+  # interval already computed above (${A}); never hardcoded.
+  SETTS="setts=pts=${PP_JEXPR}:dts=if(lt(DTS\,-8000000000000000000)\,if(lt(PREV_INDTS\,-8000000000000000000)\,NEXT_DTS\,PREV_OUTDTS+${A})\,if(eq(DTS\,PREV_OUTDTS)\,DTS+${A}\,DTS))"
+else
+  SETTS="setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+${A}\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS-${PREROLL}\,PREV_OUTDTS+${A}+${AB}*mod(N\,2))"
+fi
 PART="$(rtm_part "$OUT")"; MUXLOG="$(mktemp)"   # extension-keeping (D6)
 echo "-- muxing (video bits copied untouched; timeline pair-filled) --"
 pf_mux () {  # pf_mux INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
@@ -215,12 +355,23 @@ if ! pf_mux "${FF_INPUT_OPTS[@]}"; then
     pf_mux_fail
   fi
 fi
-conf=$(mux_confessions "$MUXLOG")
+# Stream-scoped (1.14 / DF-10): only VIDEO (or unattributable) confessions
+# hard-stop; audio/subtitle DTS nudges are the ms-quantization class ->
+# announced + REVIEW (the fill only ever touched v:0's timeline anyway).
+eval "$(mux_confessions_scoped "$MUXLOG" 0)"   # video is output stream 0:0 (mapped first)
+conf=${MC_VIDEO:-0}
 if [ "${conf:-0}" -gt 0 ]; then
   echo ">> HARD STOP: the muxer logged $conf timeline confession(s) (pts has no value /"
   echo "   Timestamps are unset / non-monotonic DTS) — it invented timing despite the fill."
-  grep -iE 'pts has no value|timestamps are unset|non-?monotonic dts' "$MUXLOG" | sort | uniq -c | sort -rn | head -4 | sed 's/^/   /'
+  grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sort | uniq -c | sort -rn | head -4 | sed 's/^/   /'
   echo "   NOT blessing the output. Kept: $PART (log: $MUXLOG)"; exit 1
+fi
+PF_CONF_REVIEW=0
+if [ "${MC_AUDSUB:-0}" -gt 0 ]; then
+  echo ">> REVIEW: $MC_AUDSUB audio DTS nudges (ms-quantization class) — not video timing"
+  echo "   invention; verify gates (f)/(g) judge audio. Building on; exit will say 10."
+  echo "RMX_CONFESS stage=pairfill-paff video=0 audsub=${MC_AUDSUB} unattr=${MC_UNATTR:-0}"   # machine-readable (additive, DF-10 1.14)
+  PF_CONF_REVIEW=10
 fi
 
 # --- gate the OUTPUT's timeline before blessing it (never trust the exit code) ---
@@ -237,21 +388,31 @@ fi
 #     still refuse the wrong-cadence class;
 #   * the decode span (last DTS - first DTS) must equal the presentation span
 #     (max PTS - min PTS) within 2 pairs.
+# Junction model (2026-08-18): the census counted frame pictures (field_pic_flag
+# =0), each worth TWO field intervals — the expected histogram is then
+# fields x FIELD + frames x 2FIELD (the record's proof read 450878x1800 +
+# 193x3600). jm=1 admits the ${PAIR}-tick duration and counts it separately
+# (PG_PAIRDUR, matched against the census below); jm=0 leaves the strict-path
+# arithmetic byte-for-byte as before (a PAIR duration is off-histogram).
+PP_JM=0; [ "$PP_MODEL" = junction ] && PP_JM=1
 echo "-- output timeline gates (want: 0 N/A, strictly monotonic DTS, only ${A}/${B}-tick durations, bounded PTS-DTS) --"
+[ "$PP_JM" -eq 1 ] && echo "   (junction model: ${PAIR}-tick frame-picture durations admitted — census expects ${PC_FIELDS:-0} x field + ${PC_FRAMES:-0} x pair)"
 eval "$(ffp -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 "$PART" 2>/dev/null | \
-  awk -F, -v a="$A" -v b="$B" 'NF{
+  awk -F, -v a="$A" -v b="$B" -v pair="$PAIR" -v jm="$PP_JM" 'NF{
       n++
       if($1=="N/A"||$1==""){ nap++ } else { p=$1+0; if(!havp){mnp=mxp=p; havp=1} else {if(p<mnp)mnp=p; if(p>mxp)mxp=p} }
       if($2=="N/A"||$2==""){ nad++ } else { d=$2+0; if(!havd){fd=d} else { if(d<pd) back++; else if(d==pd) dup++ }; pd=d; havd=1
         if($1!="N/A" && $1!="" ){ off=($1+0)-d; if(off>mxo) mxo=off } }
-      if($3!="N/A" && $3!=""){ h[$3]++; if($3+0!=a && $3+0!=b) od++ }
+      if($3!="N/A" && $3!=""){ h[$3]++
+        if($3+0!=a && $3+0!=b){ if(jm && $3+0==pair) pd2++; else od++ } }
     }
     END{
       pspan=(havp?mxp-mnp:0); dspan=(havd?pd-fd:0); skew=pspan-dspan; if(skew<0)skew=-skew
-      printf "PG_N=%d PG_NAPTS=%d PG_NADTS=%d PG_BACK=%d PG_DUP=%d PG_OFFHIST=%d PG_MAXOFF=%d PG_SKEW=%d\n", \
-        n+0, nap+0, nad+0, back+0, dup+0, od+0, mxo+0, skew+0
+      printf "PG_N=%d PG_NAPTS=%d PG_NADTS=%d PG_BACK=%d PG_DUP=%d PG_OFFHIST=%d PG_PAIRDUR=%d PG_MAXOFF=%d PG_SKEW=%d\n", \
+        n+0, nap+0, nad+0, back+0, dup+0, od+0, pd2+0, mxo+0, skew+0
     }')"
 echo "   packets=$PG_N  N/A-PTS=$PG_NAPTS  N/A-DTS=$PG_NADTS  backward-DTS=$PG_BACK  duplicate-DTS=$PG_DUP  off-histogram durations=$PG_OFFHIST"
+[ "$PP_JM" -eq 1 ] && echo "   pair-tick (frame-picture) durations=$PG_PAIRDUR (census counted ${PC_FRAMES:-0} frame picture(s))"
 echo "   max PTS-DTS=$PG_MAXOFF (derived limit $MAXOFF_LIMIT)  presentation-vs-decode span skew=$PG_SKEW ticks (limit $((2 * PAIR)))"
 gates_ok=1
 [ "${PG_NAPTS:-1}" -eq 0 ] || gates_ok=0
@@ -261,6 +422,12 @@ gates_ok=1
 [ "${PG_OFFHIST:-9}" -le 2 ] || gates_ok=0   # first/last sample may legitimately stray
 [ "${PG_MAXOFF:-999999999}" -le "$MAXOFF_LIMIT" ] || gates_ok=0
 [ "${PG_SKEW:-999999999}" -le $((2 * PAIR)) ] || gates_ok=0
+if [ "$PP_JM" -eq 1 ]; then
+  # the written pair-tick durations must match the census's frame-picture count
+  # (same first/last-sample tolerance the off-histogram check has always had)
+  pp_fdiff=$((PG_PAIRDUR - ${PC_FRAMES:-0})); [ "$pp_fdiff" -ge 0 ] || pp_fdiff=$((-pp_fdiff))
+  [ "$pp_fdiff" -le 2 ] || { echo "   junction histogram mismatch: $PG_PAIRDUR pair-tick durations written vs $PC_FRAMES frame pictures counted"; gates_ok=0; }
+fi
 if [ "$gates_ok" -ne 1 ]; then
   echo ">> TIMELINE GATES FAILED — the written timeline is not the derived one."
   echo "   NOT blessing the output. Kept: $PART (log: $MUXLOG)"
@@ -270,9 +437,51 @@ if [ "$gates_ok" -ne 1 ]; then
   exit 1
 fi
 rm -f "$MUXLOG"
+# --- POC-lattice output gate (junction model ONLY; the record's local gate 2,
+# the strongest correctness evidence a field fill can carry): extract per-
+# picture pic_order_cnt_lsb from the OUTPUT via trace_headers (already proven
+# available by the census precondition) and per-picture output PTS via ffprobe;
+# per IDR-delimited sequence, fit base = PTS - POC x half_interval from the
+# first pictures and assert EVERY picture sits on its slot (pf_poc_lattice,
+# lib-paff.sh). Any off-lattice picture: FAIL exit 1, artifact kept as .part.
+if [ "$PP_JM" -eq 1 ]; then
+  echo "-- POC-lattice gate (junction model): every picture on its presentation slot --"
+  PP_POCA="$(mktemp)"; PP_POCB="$(mktemp)"; PP_POCT="$(mktemp)"
+  ffmpeg -nostdin -hide_banner -nostats -i "$PART" -map 0:v:0 -c copy \
+      -bsf:v trace_headers -f null - 2>&1 | \
+    awk '{ name=""
+           for(i=1;i<=NF;i++) if($i=="nal_unit_type"||$i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"){ name=$i; break }
+           if(name=="") next
+           v=$NF+0
+           if(name=="nal_unit_type"){ nal=v; next }
+           if(name=="first_mb_in_slice"){ if(v==0){ pend=1; idr=(nal==5)?1:0 }; next }
+           if(pend){ printf "%d,%d\n", idr, v; pend=0 } }' > "$PP_POCA"
+  ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$PART" 2>/dev/null | \
+    awk -F, 'NF && $1!="N/A"{ print $1+0 }' > "$PP_POCB"
+  pp_na=$(grep -c . "$PP_POCA" || true); pp_nb=$(grep -c . "$PP_POCB" || true)
+  if [ "${pp_na:-0}" -eq 0 ] || [ "${pp_na:-0}" -ne "${pp_nb:-1}" ]; then
+    echo ">> POC-LATTICE GATE FAILED — POC not extractable or picture/packet counts differ"
+    echo "   (POC rows=$pp_na, timestamped packets=$pp_nb; pic_order_cnt_type != 0 streams"
+    echo "    carry no pic_order_cnt_lsb and the lattice cannot be proven — never blessed"
+    echo "    unproven). Kept: $PART"
+    rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT"; exit 1
+  fi
+  paste -d, "$PP_POCA" "$PP_POCB" > "$PP_POCT"
+  eval "$(pf_poc_lattice "$PP_POCT")"
+  rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT"
+  echo "   on_slot=$PL_ON/$PL_TOTAL  off_lattice=$PL_OFF  (IDR sequences=$PL_SEQS)"
+  echo "PP_POC_LATTICE on_slot=$PL_ON total=$PL_TOTAL off=$PL_OFF"   # machine-readable (additive, 2026-08-18)
+  if [ "${PL_OFF:-1}" -ne 0 ]; then
+    echo ">> POC-LATTICE GATE FAILED — $PL_OFF picture(s) off their presentation slot:"
+    echo "   the written timeline is not the derived lattice. NOT blessing. Kept: $PART"
+    exit 1
+  fi
+fi
 # POST-MUX CENSUS (D5, 1.13): the timeline gates above judge v:0 only — an audio
 # track the muxer quietly dropped would sail past every one of them.
-if ! mux_census "$PART" "$PF_CENSUS_N" "$PF_CENSUS_C" pairfill-paff; then
+census_rc=0
+mux_census "$PART" "$PF_CENSUS_N" "$PF_CENSUS_C" pairfill-paff "$IN" || census_rc=$?
+if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
   echo "   NOT blessing the output. Kept: $PART"
   exit 1
 fi
@@ -284,3 +493,7 @@ echo "sign-off: scripts/verify.sh \"$IN\" \"$OUT\"$AUDFLAG"
 echo "  (the scrub gate + A/V parity there are still required — these gates prove the"
 echo "   container timeline, not the decode; a FAIL there is a defect until every gate"
 echo "   is individually explained)"
+# REVIEW propagation (1.14): an unexpected-surplus census or an audio/subtitle
+# confession class blesses the complete artifact and exits 10 ("look"), never 1.
+if [ "$census_rc" -eq 10 ] || [ "${PF_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
+exit 0

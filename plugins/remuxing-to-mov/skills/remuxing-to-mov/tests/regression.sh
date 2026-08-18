@@ -951,10 +951,15 @@ if [ -f "${H422:-}" ]; then
     *) no "backhaul_gate still refuses 4:2:2 [$go]";; esac
   case "$go" in *"contribution profile"*) ok "shared gate prints the contribution advisory";; \
     *) no "shared gate advisory missing";; esac
-  # 1.11: RTM_FORCE_BACKHAUL stays API (now a no-op for pix_fmt) — still builds
+  # 1.11: RTM_FORCE_BACKHAUL stays API — still BUILDS. It is NOT a no-op for the
+  # pix_fmt arm, and this comment used to say it was (corrected P1c, measured
+  # 2026-08-16): it short-circuits the whole shared backhaul_gate, contribution
+  # advisory included, so a standalone remux.sh prints 1 advisory line plain and
+  # 0 forced. Nothing refuses on pix_fmt either way — the flag changes what is
+  # ANNOUNCED here, never what is built, which is what this probe asserts.
   RTM_FORCE_BACKHAUL=1 bash "$SC/remux.sh" "$H422" "$WORK/gp_forced.mov" >/dev/null 2>&1; rc=$?
   { [ "$rc" -eq 0 ] && [ -f "$WORK/gp_forced.mov" ]; } \
-    && ok "RTM_FORCE_BACKHAUL=1 still builds (env is API; no-op for pix_fmt)" || no "forced env broken (rc=$rc)"
+    && ok "RTM_FORCE_BACKHAUL=1 still builds (env is API; it silences the advisory, it refuses nothing)" || no "forced env broken (rc=$rc)"
   # 1.11: 4:2:2 demoted — batch classifies the build normally, never REFUSED
   o=$(bash "$SC/batch.sh" "$H422" --out "$WORK/gp_batch" 2>&1); rc=$?
   { [ "$rc" -eq 0 ] && case "$o" in *"REFUSED=1"*) false;; *) true;; esac && [ -f "$WORK/gp_batch/$(basename "${H422%.ts}").mov" ]; } \
