@@ -63,7 +63,12 @@ never touching the original. Origin: the 2019-VMA `feed.ts` cleanup case file.
   dropped: the supported floor is 6.1** — 4.4 failed 20 assertions across a
   dozen sub-suites because that 2021 build predates surfaces the plugin
   legitimately depends on; below the floor the claims are benched for, green
-  would have meant papering over, not proving.
+  would have meant papering over, not proving. One real behavioral finding
+  came out of the same run: **ffmpeg 6.1/7.1 movenc rounds a ms-quantized
+  source's alternating 41/42 ms deltas into a uniform duration table on a
+  `--timescale` remux** — the C68 "alternation survives, source-baked, not
+  smoothed" claim holds on ≥8.x only, and the suite now says so per version
+  instead of asserting one bench's truth everywhere.
 
 ## 1.14.0 — the reorder-DTS round (2026-08-16..24)
 
