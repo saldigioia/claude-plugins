@@ -108,9 +108,8 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     refusals (52), qt-groups (53), and the WO 5.4 probe advisory surfaces
     (54: the multi-program-TS NOTE with its measured PAT-order routing basis,
     and the >24 h / 33-bit PTS-wrap horizon NOTE; the mid-stream SPS-change
-    class from the same 5.4 pass has **no warning surface to pin** —
-    known-limits.md records it as detect-and-warn candidate, not
-    implemented), and the 1.11 adversarial-review fix round (60: qt-groups
+    class from the same 5.4 pass gained its detection surface in 1.15 —
+    `dim-scan.sh`, pinned by 71), the 1.11 adversarial-review fix round (60: qt-groups
     maps verify's TEXT verdict so REVIEW propagates as 10; verify `--audio`
     tolerates the automatic ADTS→ASC reframing on a dual-track AAC original
     with a wrong-source negative control; unroutable-codec refusal parity at
@@ -197,6 +196,35 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     now REVIEWs ("no PCM access track") while the dual-track pair does not,
     and the dead-HDMV-track class still FAILs — the allowlist demotion did not
     weaken it.
+32. **The source clinic (1.15, `regression.d/66-72`)** — the same-container
+    storey, end-to-end on constructed fixtures: `66-verify-source.sh` pins the
+    identity battery (a plain TS→TS re-wrap verifies OK; a declared
+    deterministic cut verifies OK against its OWN filters with the expected
+    census MEASURED from the filtered source; one packet dropped beyond the
+    plan FAILs, as does a cut verified without its filters; MP4-family
+    outputs are refused toward verify.sh; `RTM_SRCV_DUR_TOL` is proven
+    wired). `67-clock.sh` pins the player-clock translation arithmetic on a
+    10 s-offset fixture (raw == player + start_time, keyframes reported in
+    CONTAINER time). `68-zero-base.sh` pins the rebase (26 s → ~0 s), the
+    announced floor, predicted==observed nudges, custom PID + PMT
+    preservation, and the three pre-flight refusals (matroska → remux
+    ladder; the rot fixture → diagnose.sh, because zero-base is not a
+    timeline repair; multi-program → isolate-first). `69-lead-check.sh` pins
+    black-lead detection on a minted 1.4 s black + program splice (35 black
+    frames = splice packet index 35 — the exact address), hot-audio honesty,
+    and the Tier-2 wording; the bright control stays clean.
+    `70-surgical-cut.sh` pins the consent refusal (exit 2, nothing written),
+    the cut itself (first output packet = the target AU byte-for-byte,
+    first frame program-bright, battery green inside the run), and the
+    determinism guards. `71-dim-scan.sh` pins the mid-stream
+    resolution-change detector on known-limits' own splice recipe.
+    `72-clean.sh` pins the driver: report-only, both tiers labeled, rot
+    routed to diagnose with zero-base withheld, deep passes opt-in.
+    SYNTHESIS LIMIT: true pair-timestamped PAFF and open-GOP leading-B
+    geometries cannot be minted (the standing limits above) — the mate-fill
+    +1-tick nudge arm of the prediction contract and the leading-B
+    `--video-drop-between` arm are exercised at count 0 / mechanism level
+    here and await the next real class member for operator verification.
 
 ## Synthesis limit (why some things aren't tested directly)
 

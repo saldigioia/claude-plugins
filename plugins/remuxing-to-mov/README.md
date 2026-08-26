@@ -12,6 +12,7 @@ scripts/doctor.sh                  # one-time: is this ffmpeg capable?
 scripts/mov.sh IN.ts               # the everyday one: QuickTime-ready, dual-track only if needed, verified
 scripts/auto.sh IN.ts OUT.mov      # the lossless ladder, hands-off (copy rungs keep every audio track; PAFF repair rungs build a:0)
 scripts/batch.sh DIR --out OUTDIR  # a whole folder, with provenance + resume (ladder policy — no dual-track pair)
+scripts/clean.sh IN.ts             # the SOURCE CLINIC: integrity checks + same-container corrections, no remux at all
 ```
 
 In Claude Code these are also a slash command — **`/remuxing-to-mov:mov FILE`**
@@ -25,6 +26,16 @@ video, Dolby E audio — or a child script's own refusal).
 
 ## What it does
 
+- **The source clinic (1.15)** — checks and corrections **to the source file
+  in its own container** (`.ts`), without recoding or even remuxing:
+  `clean.sh` (the report-only driver), `clock.sh` (player-clock → container
+  address), `lead-check.sh` (black-lead detection), `dim-scan.sh` (mid-stream
+  resolution changes), `zero-base.sh` (timeline rebase to the stated floor,
+  PID layout preserved, prediction-gated), `surgical-cut.sh` (the
+  deterministic non-IDR cut — refuses without the operator's
+  `--discard-content`), all proven by `verify-source.sh`'s
+  filtered-reference identity battery. Command: `/remuxing-to-mov:clean`.
+  Doctrine: `references/source-clinic.md`.
 - **Escalation ladder** — stop at the first rung that produces a clean,
   verified file: pure copy → copy video + PCM audio → regenerate timestamps →
   timeline repair (pair-mate PTS fill for pair-timestamped/reordered PAFF, or
@@ -78,10 +89,12 @@ skills/remuxing-to-mov/
   SKILL.md                 workflow, escalation ladder, instant-answer card
   scripts/                 doctor, probe, ts-health, diagnose, mov + auto (one-shot
                            drivers), remux, trim-to-idr, pairfill-paff, rebuild-paff,
-                           resync, dual-track, mp4-swap (container-swap rung),
-                           metadata, verify, batch, gop-probe,
+                           derive-dts, resync, dual-track, mp4-swap (container-swap
+                           rung), metadata, verify, batch, gop-probe,
                            seam-check, playable-check, qt-groups (opt-in post-pass),
-                           rung4 (attested re-encode), waiver
+                           rung4 (attested re-encode), waiver;
+                           the source clinic: clean, clock, lead-check, dim-scan,
+                           zero-base, surgical-cut, verify-source
   references/              codec/container tables, timeline repair, color/HDR,
                            cutting/concat, dual-track QC, container internals
   examples/                worked driver scripts from a real broadcast job

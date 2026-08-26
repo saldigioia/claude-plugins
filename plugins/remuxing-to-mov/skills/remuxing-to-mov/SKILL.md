@@ -1,7 +1,7 @@
 ---
 name: remuxing-to-mov
 description: Losslessly remux broadcast/web video (.ts, .mpg/.vob, .mkv, broken .mov) into a QuickTime-ready .mov without re-encoding. Use when converting or remuxing a capture to .mov/QuickTime (-c copy / stream copy), fixing a glitchy, stuttering, or field-coded/interlaced (PAFF) H.264 remux, losslessly cutting/trimming/concatenating, preserving color/HDR/captions/audio through a container change, or deciding whether a re-encode is unavoidable. Default is always lossless copy, never a re-encode.
-allowed-tools: Bash Read Write
+allowed-tools: Bash, Read, Write
 ---
 
 # Remuxing to MOV (lossless-first)
@@ -9,6 +9,13 @@ allowed-tools: Bash Read Write
 Move a source into a `.mov` container **without re-encoding**. Re-encoding is a
 last resort, scoped as narrowly as possible (audio-only, or one GOP), never the
 whole video.
+
+**Path convention:** every `scripts/…` and `references/…` path in this document
+is relative to this skill's directory — invoke as
+`bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/<name>.sh" …`
+(fallback when unset: the in-repo path `skills/remuxing-to-mov/scripts/…`).
+The short form is kept in prose for readability, not as a working directory
+assumption.
 
 **Governing rule:** stay in stream copy (`-c copy`) as long as the source and
 MOV allow. Step off it only when a *named* constraint forces you to.
@@ -37,6 +44,16 @@ the retained `result=`/`rung=`). Exit 0 = verified, 10 = REVIEW, 1 = FAIL; an
 layout guard). Use the manual ladder below when you want control or hit a
 REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
 
+-1. **The SOURCE CLINIC** (1.15 — when the deliverable should STAY a `.ts`,
+   or before any remux of a suspect capture): `scripts/clean.sh INPUT
+   [--deep]` runs the integrity battery in the source's own container and
+   routes every finding to a same-container fix — `zero-base.sh` (timeline
+   rebase, Tier 1), `trim-to-idr.sh` (pre-roll, Tier 1), `surgical-cut.sh`
+   (black-lead cut, Tier 2 — refuses without the operator's
+   `--discard-content`), with `verify-source.sh` as the identity prover for
+   every same-container output and `clock.sh` translating "starts at X"
+   player-clock reports into container addresses first. Report-only; doctrine
+   in `references/source-clinic.md`.
 0. **Health-scan a fresh capture** (optional but cheap — two demux-only passes,
    no decode): `scripts/ts-health.sh INPUT` sweeps the whole file for every
    hidden-damage class at once — transport loss (continuity/TEI/PES, permanent,
@@ -245,9 +262,14 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 |---|---|
 | "Convert this to .mov" (the everyday ask) | `scripts/mov.sh IN` (or `/remuxing-to-mov:mov IN`) — copy video, dual-track audio only if QuickTime needs it, verified. `remux.sh` is the bare Rung-0 copy underneath |
 | Fresh capture — "is this TS healthy? what's hiding in it?" | `scripts/ts-health.sh IN` — whole-file, demux-only sweep: transport loss (CC/TEI/PES — **permanent**, no remux restores it), missing timestamps, DTS rot, forward gaps, 33-bit PTS wrap, mid-GOP start (lossless trim at first IDR — `trim-to-idr.sh` performs it), single-GOP unseekability, audio drift. Every finding printed with its lossless route; exit 0/10/1 |
+| "Check/clean/fix this capture but KEEP it a .ts" (no remux wanted) | **The source clinic** (1.15): `scripts/clean.sh IN [--deep]` — probe + ts-health + black-lead check (+ dim-scan/full decode on `--deep`), every route same-container: `zero-base.sh` / `trim-to-idr.sh` (Tier 1, structural) or `surgical-cut.sh` (Tier 2 — **content-discarding, refuses without the operator's `--discard-content`**; never supply that flag on your own). Outputs are siblings proven by `verify-source.sh`; the original is never touched. `references/source-clinic.md` |
+| "Video starts at X" / "the glitch is at X" (any player-time report) | **Translate the clock FIRST**: players report player-clock, ffprobe reports container time; they differ by `format.start_time`. `scripts/clock.sh IN X` prints the container address, bracketing keyframes, and per-frame luma around it — then diagnose at the RAW address (the feed.ts lesson: player 1.360 = container 1.560 on a 0.200 start) |
+| Capture opens on black (player shows black at 0:00, picture cuts in later) | The **black-lead signature** (black IDR GOP → program at the next keyframe, audio already hot): `scripts/lead-check.sh IN` measures it (luma sweep + keyframe census + gop-probe boundary + audio level) and emits the exact `surgical-cut.sh` command — a Tier-2 cut that discards real audio under the black, stated to the second, operator-gated |
+| Timeline starts at nonzero (format.start_time > 0) and the deliverable stays TS | `scripts/zero-base.sh IN OUT.ts` — lossless re-wrap to the floor (`-muxdelay 0 -muxpreload 0`, PID/program layout preserved), the floor stated up front (first frame's reorder delay; exact 0.000000 is impossible with B-frames without inventing DTS — refused on doctrine), prediction-contract gated (null-mux pre-pass count == mux-log nudges). Refuses rotten timelines toward `diagnose.sh` |
+| Precision cut needed on TS at a non-IDR boundary (the -ss forms overshoot) | Both `-ss` forms are **measured-unreliable** on TS (keyframe-hunting + index-less seek). The sanctioned recipe: census → `scripts/surgical-cut.sh` (packet-index/PTS `noise=drop` selection, `-copyts` + `-output_ts_offset`, leading-B rule applied) → filtered-reference verification. `references/source-clinic.md` |
 | Multi-program TS (`nb_programs` > 1 — probe prints the count) | v:0 = the **first video stream in PAT/PMT order** wins (measured 2026-08-14, both PAT orders) — the other programs' video is never mapped (since the 1.11 fix round the drop is **announced**: `remux.sh`'s non-audio census WARNs per unmapped stream + `RMX_PLAN unmapped=N`, covering every route that funnels through it; the PAFF builders and `dual-track.sh` standalone remain silent — known-limits.md), while **every program's audio** survives the keep-all default with its PMT language tags. Want another program: `ffmpeg -i IN -map 0:p:N -c copy PROG.ts`, then `mov.sh PROG.ts`. `references/known-limits.md` |
 | Capture runs past ~24 h (33-bit PTS horizon) | MPEG-TS PTS wraps at 2^33/90 kHz ≈ **26.5 h**; ffmpeg unwraps ONE rollover on read — remux normally and prove the output (`verify.sh` gate (d) strict monotonicity). **≥2 wraps (~53 h) = named limitation**: ambiguous epochs, no repair route — split below the horizon first. `ts-health.sh` counts observed wraps; `probe.sh` advises >24 h. `references/known-limits.md` |
-| Broadcast splice changes resolution mid-stream (new SPS / MPEG-2 sequence header) | **Named limitation — detect-and-warn candidate, not implemented** (the video parallel of resync.sh's audio layout-change refusal): the copy mux succeeds with no warning, `stsd` declares the FIRST resolution while later samples decode at the new size, and no gate catches it (measured 2026-08-14). Junction-spanning capture: check `ffprobe -show_frames -show_entries frame=width,height` around the splice and cut there first. `references/known-limits.md` |
+| Broadcast splice changes resolution mid-stream (new SPS / MPEG-2 sequence header) | **Detector implemented (1.15)**: `scripts/dim-scan.sh IN` — whole-file frame-dimension sweep (a decode pass, background-able; `clean.sh --deep` runs it) counts the changes and names each splice PTS. The downstream blindness is unchanged and measured (2026-08-14): the copy mux succeeds with no warning, `stsd` declares the FIRST resolution while later samples decode at the new size, and no mux/verify gate catches it — so the routes are source-domain: cut at the splice (`surgical-cut.sh` on TS) or do NOT remux across the junction. `references/known-limits.md` |
 | Capture starts mid-GOP (video packets before the first IDR — undecodable pre-roll) | `scripts/trim-to-idr.sh IN OUT.ts` — the trim ts-health prescribes, **implemented**: locates the first IDR (windowed scan, raised probe window), proves the boundary closed with `gop-probe.sh` (open-GOP boundary → refuses; that trade is the operator's), copy-cuts **both** tracks with `-ss` relative to `start_time` (the WO 1.3 origin, self-documented), blesses only after ts-health's own counter reads **0** pre-keyframe packets + the first output packet is the source IDR byte-for-byte; kept region stream-copied byte-identical. `mov.sh` auto-runs it when its pre-flight sees pre-roll — **announced, never silent**; `--no-idr-trim` keeps the old behavior (also announced). WHY the untrimmed build REVIEWs: ffmpeg streamcopy silently drops the video pre-roll (`-copyinkf` default) while the audio pre-roll lands — a phantom A/V-parity "desync" the trim removes at the source |
 | HEVC file won't open in QuickTime | Retag, don't re-encode: `ffmpeg -i IN -c copy -tag:v hvc1 OUT.mov` |
 | MPEG-2 4:2:2 glitches/smears in QuickTime but plays clean in IINA/VLC (the built `.mov` carries stsd `m2v1`) | Decoder **dispatch**, not damage — and a **two-step**, narrowed 2026-08-15 (D8, 1.13; the 1.12 row claimed the retag WAS the remedy). **1. Retag** (free, 4 bytes, bitstream bit-identical): `ffmpeg -i IN -map 0 -c copy -tag:v xd5b -movflags +faststart OUT.mov` — works when the stream matches the fourcc's profile contract (measured 2026-08-15 on the VMA 1080i59.94 pair: garbage as `m2v1`, frame-for-frame identical to the ffmpeg reference as `xd5b`; CBR not enforced). **2. If the retag does not fix it, swap the container:** `scripts/mp4-swap.sh IN` — same bitstream, `.mp4`, sample entry `mp4v`+`esds` (measured the same day on a 21 GB 1080i29.97 capture where **all five** tags — `m2v1`/`mp2v`/`hdv3`/`xd5b`/`xd5c` — corrupted **identically**, because movenc gives every MPEG-2 fourcc the same generic sample-description body: `glbl`+`fiel`+`colr`. The swap scored SSIM 0.9175+ on the very timestamps that failed). ffmpeg cannot write `mp4v` into a `.mov` (`Tag mp4v incompatible with output codec id '2'`) — that is a **muxer tag-table artifact**, not QTFF: Apple lists `esds` among the legal video sample-description extensions, so the entry is spec-legal in MOV and only `stsd` surgery (MP4Box/Bento4, unbenched) could put it there. Rung 4 is step 3, not step 1. `probe.sh` fires the advisory on **.ts sources too** since 1.13 (D7 — it was dead on every TS before). |
@@ -411,7 +433,14 @@ renamed — Ground Rule 4):
 | `MOV_ROT_WARN` | shared `backhaul_rot_warn` (`lib-paff.sh`; called by `mov.sh` + `backhaul_gate` — one implementation, F1 2026-08-16) | `profile=timeline-rot vcodec= disc= back= dup= disc_p= disc_p_na=` (WO 4.2 — warn + build, never a refusal; `disc_p=`/`disc_p_na=` appended P1.4, Ground Rule 4 — the presentation-order forward-gap count (`DISC_P_COUNT`, the field that carries the dropped-time claim on reordered sources) and the no-PTS packet count that guards it (`DISC_P_NA`)) |
 | `MOV_CHAPTER_TS_WARN` | `mov.sh` + `resync.sh` | `chapters= dur_s= limit_s= [drop_s=]` (1.12 WO-C — announce-only chaptered movie-timescale-overflow pre-announce, never a refusal; `drop_s=` appended only when the tier-2 silent-drop arm fires; thresholds `RTM_CHAPTER_TS_WARN_SECS` (2900) / `RTM_CHAPTER_TS_DROP_SECS` (5965)) |
 | `MOV_REFUSED` | shared unroutable pre-flight (`lib-paff.sh`; emitted by `mov.sh`/`auto.sh`/`remux.sh` — WO 5.2, parity closed in the 1.11 fix round) | `profile=unroutable-vcodec vcodec=` / `profile=dolby-e-audio track=a:<N>`. The 1.8.0–1.10.0 backhaul values (`qt-undecodable-*`, rot) are **retired — no longer emitted, reserved, never reused** |
-| `RMX_CENSUS` | every builder, post-mux, pre-bless (`lib-mux.sh`) | `stage=remux\|dual-track\|resync\|rebuild-paff\|pairfill-paff\|trim-to-idr\|metadata\|rung4 planned=<N> written=<M> codecs=ok\|mismatch\|na match=ok\|MISMATCH` (D5, 1.13 — the plan-vs-file reconciliation; MISMATCH is exit 1 with the artifact kept as `.part`) |
+| `RMX_CENSUS` | every builder, post-mux, pre-bless (`lib-mux.sh`) | `stage=remux\|dual-track\|resync\|rebuild-paff\|pairfill-paff\|trim-to-idr\|metadata\|rung4\|zero-base\|surgical-cut planned=<N> written=<M> codecs=ok\|mismatch\|na match=ok\|MISMATCH` (D5, 1.13 — the plan-vs-file reconciliation; MISMATCH is exit 1 with the artifact kept as `.part`; the two clinic stage values appended 1.15) |
+| `SRCV_SUMMARY` | `verify-source.sh` (1.15) | `verdict=ok\|review\|fail hash=match\|mismatch v_src= v_out= v_drop= a_drop=<csv\|none> dur_delta= gaps_src= gaps_out= trim= notes=` — the same-container identity battery (filtered-reference streamhash + measured census arithmetic + nothing-unexplained) |
+| `ZB_SUMMARY` | `zero-base.sh` (1.15) | `out= start_src= start_out= floor= predicted_nudges= observed_nudges= verdict=` — prediction contract: predicted != observed never ships |
+| `SCUT_SUMMARY` | `surgical-cut.sh` (1.15) | `out= vdrop_lt= vdrop_between= adrop_lt_pts= offset= predicted_nudges= observed_nudges= verdict=` — the declared selection, verbatim |
+| `LEADCHECK_SUMMARY` | `lead-check.sh` (1.15) | `verdict=clean\|lead black_frames= black_secs= splice_idx= splice_pts_t= gop=closed\|open\|unknown leadb=none\|A-B audio_hot=yes\|no\|na audio_discard_s=` |
+| `DIMSCAN_SUMMARY` | `dim-scan.sh` (1.15) | `changes= dims= first_change_pts= frames=` |
+| `CLOCK_SUMMARY` | `clock.sh` (1.15) | `player= start_time= raw= key_before= key_after= frames= luma_min= luma_max=` |
+| `CLEAN_SUMMARY` | `clean.sh` (1.15) | `verdict=clean\|findings\|damaged findings= routes=<csv\|none> deep=yes\|no` |
 | `MP4_SWAP` | `mp4-swap.sh` | `out= verdict=ok\|review\|fail stage=build\|verify fidelity=ok\|fail\|skip\|na` (D2, 1.13 — the container-swap rung's own verdict) |
 | `QTG_SUMMARY` | `qt-groups.sh` | `date= macos= mp4box= audio= enabled= group= patched= out=` |
 | `VERIFY_SUMMARY` / `VERIFY_SIGNATURE` | `verify.sh` (waiver flow) | waiver verdict + the exact gate/signature a sidecar must match |
@@ -432,6 +461,8 @@ renamed — Ground Rule 4):
 | Rung-4 delivery/encode recipes (x264/x265/ProRes) — NOT the lossless path | `references/delivery-encode.md` |
 | QuickTime language menu: `alternate_group` mechanics, the measured tool-avenue log (MP4Box `-group-add` recipe, gpac hazards), the 5-proof binary patch | `references/alternate-group.md` + `scripts/qt-groups.sh` |
 | **DEFAULT deliverable**: QuickTime-ready dual-track (PCM access + original preserved), alignment-safe two-pass cutting, dual-track QC | `references/dual-track-quicktime.md` + `scripts/dual-track.sh` |
+| **The SOURCE CLINIC**: checks + corrections in the source's own container (re-wrap ≠ remux, the two-tier consent model, the prediction contract, the deterministic-cut and leading-B rules, the player-clock rule, the zero-base floor, recorded candidates) | `references/source-clinic.md` + `scripts/clean.sh` |
+| Every `RTM_*`/`TSH_*`/`DISC_*` env knob and test hook, with defaults, in one table | `references/knobs.md` |
 | Named limitations (33-bit PTS wrap, multi-program TS winner, mid-stream SPS change, caption carriage, `use_editlist`) + verified non-issues (ADTS AAC auto-bsf, MPEG-2 4:2:0 plays) — dated, command-backed | `references/known-limits.md` |
 | Worked examples from a real broadcast job (copy-cut + QC driver scripts; paths/timestamps hardcoded) | `examples/README.md` |
 | Regression tests for the PAFF safeguards — run after editing any script | `tests/README.md` + `tests/regression.sh` |

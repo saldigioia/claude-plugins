@@ -2,7 +2,7 @@
 name: mov
 description: One-shot, lossless-first remux of a file to a QuickTime-ready .mov. Use whenever the user wants to convert/remux a capture to .mov or QuickTime and have it "just work" — correct hvc1/faststart technique, and a dual-track build (PCM access + original preserved) automatically when, and only when, the source audio (AC-3/DTS/MP2) won't play in QuickTime (E-AC-3/Dolby Digital Plus plays natively, so it is copied single-track). Verifies the output; never re-encodes video; never touches the source. Can also embed proper QuickTime metadata, but only when the user explicitly asks to tag the file.
 argument-hint: [input-file] [output.mov]
-allowed-tools: Bash Read
+allowed-tools: Bash, Read
 ---
 
 # /mov — one-shot QuickTime-ready remux

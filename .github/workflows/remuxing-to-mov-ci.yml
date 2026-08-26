@@ -1,0 +1,42 @@
+# Regression CI for the remuxing-to-mov plugin (monorepo root — GitHub Actions
+# only reads .github/workflows/ at the REPOSITORY root; the plugin-level copy of
+# this file never ran and is now a pointer here. Resurrected 1.15.0 Phase 0.)
+#
+# The skill makes many ffmpeg-version-specific claims (DV >= 5.0, the 8.1.1 SRT
+# copy bug, filter_units availability for the VCL check). The matrix pins static
+# ffmpeg/ffprobe builds per version so those claims and every safeguard are
+# exercised where they actually differ. 9.0.1 is the current claims bench
+# (tag existence on mwader/static-ffmpeg verified 2026-08-26).
+name: remuxing-to-mov regression
+on:
+  push:
+    paths:
+      - "plugins/remuxing-to-mov/**"
+      - ".github/workflows/remuxing-to-mov-ci.yml"
+  pull_request:
+    paths:
+      - "plugins/remuxing-to-mov/**"
+      - ".github/workflows/remuxing-to-mov-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ffmpeg: ["4.4", "6.1", "7.1", "8.1.2", "9.0.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install static ffmpeg ${{ matrix.ffmpeg }}
+        run: |
+          set -eux
+          docker create --name ff "mwader/static-ffmpeg:${{ matrix.ffmpeg }}"
+          sudo docker cp ff:/ffmpeg  /usr/local/bin/ffmpeg
+          sudo docker cp ff:/ffprobe /usr/local/bin/ffprobe
+          docker rm ff
+          ffmpeg -version | head -1
+      - name: Environment doctor (informational)
+        run: bash plugins/remuxing-to-mov/skills/remuxing-to-mov/scripts/doctor.sh || true
+      - name: Regression harness
+        run: bash plugins/remuxing-to-mov/skills/remuxing-to-mov/tests/regression.sh

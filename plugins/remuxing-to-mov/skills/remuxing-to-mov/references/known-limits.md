@@ -92,14 +92,16 @@ MPEG-2 ES concatenated into one TS stream, 2026-08-14):
   QuickTime renders past the splice on such a file is **unverified** — a
   track whose sample description contradicts half its samples is exactly
   where players diverge.
-- **Status: detect-and-warn candidate, not implemented** — the parallel of
-  `resync.sh`'s mid-stream audio-layout-change refusal (also a mid-stream
-  parameter change that rebuilds invisibly). A future probe/ts-health scan
-  would compare coded dimensions across the file (e.g. per-packet SPS/sequence
-  header sweep) and warn with a split-at-the-splice route. Until then: if a
-  broadcast capture is known to span a junction, check
-  `ffprobe -show_frames -show_entries frame=width,height` on a suspect region
-  and cut at the splice before remuxing.
+- **Status: the DETECTION half is implemented (1.15.0)** —
+  `scripts/dim-scan.sh` sweeps frame dimensions whole-file (a decode pass,
+  deliberately outside demux-only ts-health; background-able), counts the
+  changes, names each splice PTS, and routes source-domain: cut at the splice
+  (`surgical-cut.sh` on mpegts) or keep the source and do not remux across
+  the junction. Exit 0 CLEAN / 10 CHANGE(S) / additive `DIMSCAN_SUMMARY`;
+  fixture-pinned in `71-dim-scan.sh` on this entry's own splice recipe. No
+  route *auto-runs* it (whole-file decode is not a default cost); `clean.sh`
+  names it when a junction is suspected. The mux/verify blindness measured
+  above is otherwise unchanged.
 
 ### EIA-608/708 captions: preserved, not carried as a track
 
