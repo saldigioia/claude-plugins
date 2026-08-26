@@ -1,8 +1,9 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "remuxing-to-mov",
-  "displayName": "Remux to MOV",
-  "version": "1.15.0",
-  "description": "Losslessly remux broadcast and web captures (.ts, .mpg/.vob, .mkv, broken .mov) into verified QuickTime-ready .mov — stream copy first, an escalation ladder of measured timeline repairs, an operator-attested re-encode as the only lossy path, and the source file never touched — plus a source clinic that checks and corrects the capture in its own container (zero-base, deterministic surgical cuts, lead-in detection) without remuxing at all. Every build is verified (packet/essence identity, timeline, scrub, A/V parity, audio playability, macOS playability/fidelity) and every codec/container claim is re-measured on a named bench in a claims registry that records its own reversals; version history lives in CHANGELOG.md.",
+  "displayName": "Remux to MOV & Source Clinic",
+  "version": "1.15.1",
+  "description": "Lossless-first remux of broadcast captures (.ts, .mpg/.vob, .mkv, broken .mov) into verified, QuickTime-ready .mov — plus a source clinic that checks and corrects a capture in its own container without remuxing at all. Never re-encodes video, never touches the source; every output is verified, and every codec/container claim is re-measured on a named bench (history in CHANGELOG.md).",
   "author": {
     "name": "Rare Data Club",
     "email": "sal@raredata.club",

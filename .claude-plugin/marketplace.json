@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "rare-data-club",
   "owner": {
     "name": "Rare Data Club",
@@ -76,7 +77,7 @@
     {
       "name": "remuxing-to-mov",
       "source": "./plugins/remuxing-to-mov",
-      "description": "Losslessly remux broadcast and web captures (.ts, .mpg/.vob, .mkv, broken .mov) into verified QuickTime-ready .mov — stream copy first, an escalation ladder of measured timeline repairs (pair-mate PTS fill, whole-file DTS derivation, elementary rebuild, lossless container swap), dual-track PCM-access + bit-exact-original audio when QuickTime needs it, and an operator-attested re-encode as the only lossy path. Includes a source clinic that checks and corrects the capture in its own container without remuxing at all (timeline zero-base, deterministic surgical cuts, black-lead and mid-stream-resolution-change detection, a filtered-reference identity verifier); every output is verified, every codec/container fact is re-measured on a named bench, and the source file is never touched.",
+      "description": "Lossless-first remux of broadcast captures (.ts, .mpg/.vob, .mkv, broken .mov) into verified, QuickTime-ready .mov — plus a source clinic that checks and corrects a capture in its own container without remuxing at all. Never re-encodes video, never touches the source; every output is verified, and every codec/container claim is re-measured on a named bench.",
       "category": "video-archival",
       "keywords": [
         "video",
@@ -96,7 +97,16 @@
         "archival-video",
         "source-repair",
         "mpeg-ts-cleanup"
-      ]
+      ],
+      "displayName": "Remux to MOV & Source Clinic",
+      "author": {
+        "name": "Rare Data Club",
+        "email": "sal@raredata.club",
+        "url": "https://raredata.club"
+      },
+      "homepage": "https://github.com/saldigioia/claude-plugins/tree/main/plugins/remuxing-to-mov",
+      "repository": "https://github.com/saldigioia/claude-plugins",
+      "license": "MIT"
     },
     {
       "name": "hunt",

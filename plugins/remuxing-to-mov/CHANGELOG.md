@@ -4,6 +4,33 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.1 — topline-semantics round (2026-08-26)
+
+Cross-ref against the live plugins reference (code.claude.com/docs/en/
+plugins-reference + plugin-marketplaces, fetched 2026-08-26):
+
+- **`$schema` added to both manifests** — the docs now name official schemas
+  (`json.schemastore.org/claude-code-plugin-manifest.json` and
+  `…/claude-code-marketplace.json`; both verified live, HTTP 200
+  application/json). This REVERSES the 1.15.0 Phase-0 decision below, which
+  was correct on its evidence at the time (no URL was then verifiable on
+  this bench) — the reversal is recorded, not hidden.
+- `description` tightened to the docs' "brief, concise for marketplace
+  display" guidance (~360 chars, history pointed at CHANGELOG.md);
+  marketplace entry description aligned to match.
+- `displayName` → **"Remux to MOV & Source Clinic"** (free-form per docs,
+  not used for lookup) — the picker now names both storeys.
+- Marketplace entry enriched with the recognized optional fields
+  (`displayName`, `author`, `homepage`, `repository`, `license`).
+- **`name` kept as `remuxing-to-mov`, deliberately**: it keys
+  `enabledPlugins`, the install identity, and the `/remuxing-to-mov:*`
+  command namespace. The docs' `renames` map (v2.1.193+) makes a rename
+  *possible*, but identity stability is house doctrine (machine lines never
+  rename) and the name still names the plugin's center of gravity; the wider
+  scope lives in displayName/description/keywords, the surfaces built for it.
+- `claude plugin validate` passes clean (plugin `--strict` and the whole
+  marketplace — entry-level plugin.json checks included).
+
 ## 1.15.0 — the source-clinic round (2026-08-26)
 
 The storey below the ladder: integrity checks and corrections **to the source
@@ -19,6 +46,8 @@ never touching the original. Origin: the 2019-VMA `feed.ts` cleanup case file.
   `${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/`). Decision recorded: no
   `$schema` added — no verified schema URL exists on this bench and no sibling
   plugin carries one; inventing an unverifiable URL fails house doctrine.
+  **[REVERSED in 1.15.1, same day: the live docs name the official
+  schemastore URLs; verified and added — see the 1.15.1 entry.]**
 - **verify-source.sh** — the source-domain verification battery as a unit:
   filtered-reference streamhash (per-stream identity of a *cut* proven as
   rigorously as a straight copy), census arithmetic vs the plan, head/tail
