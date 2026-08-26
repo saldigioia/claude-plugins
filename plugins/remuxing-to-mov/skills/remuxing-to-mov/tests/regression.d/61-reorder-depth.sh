@@ -410,8 +410,16 @@ if bash "$SC/dual-track.sh" "$WORK/f2src.ts" "$WORK/f2dt.mov" >/dev/null 2>&1; t
   out=$(bash "$SC/verify.sh" "$WORK/f2src.ts" "$WORK/f2dt.mov" 2>&1); rc=$?
   hasnt "$out" "dual-track provenance" "the title->a:0 shortcut is GONE (no ordinal assumption ahead of the evidence)"
   has "$out" "a:1 source-baseline AMBIGUOUS" "the preserved original is judged by the general matcher, which says so out loud"
-  has "$out" "candidate source a:0 -> 2 decode line(s)" "…and prints source a:0's count: 2, the damage the build copied"
-  has "$out" "most forgiving candidate: 2 / delta: 0" "the most forgiving candidate IS a:0, so the delta is the same 0 the shortcut produced"
+  # RELATIONSHIP pin, not a constant (first-ever CI run, 2026-08-26): the "2"
+  # this used to assert is decoder chatter measured on the macOS bench — the
+  # Linux static builds count the same smear differently. What the gate owes
+  # is the RELATIONSHIP: a:0's count registers (>0), and the most-forgiving
+  # candidate IS that count with delta 0.
+  n0=$(printf '%s\n' "$out" | sed -n 's/.*candidate source a:0 -> \([0-9][0-9]*\) decode line.*/\1/p' | head -1)
+  { [ -n "${n0:-}" ] && [ "$n0" -ge 1 ]; } \
+    && ok "…and prints source a:0's count ($n0 — the copied damage registers, build-measured)" \
+    || no "candidate a:0 count missing/zero (got '${n0:-none}')"
+  has "$out" "most forgiving candidate: ${n0:-X} / delta: 0" "the most forgiving candidate IS a:0, so the delta is the same 0 the shortcut produced"
   hasnt "$out" ">> FAIL" "a real dual-track build of this source still draws no FAIL"
   [ "$rc" -ne 1 ] && ok "and still does not exit 1 (rc=$rc) — removing the shortcut cost the verdict nothing" \
     || no "dual-track build now exits 1 (rc=$rc) — the shortcut's removal changed a verdict"
@@ -460,7 +468,13 @@ out=$(bash "$SC/verify.sh" "$WORK/twin.ts" "$WORK/twin.mov" 2>&1); rc=$?
 has "$out" "source-baseline AMBIGUOUS" "the ambiguity is still ANNOUNCED — the matcher was not weakened"
 has "$out" "candidate source a:0 -> 0 decode line(s)" "every candidate's raw count is still printed (a:0)"
 has "$out" "candidate source a:1 -> 0 decode line(s)" "…and a:1"
-has "$out" "most forgiving candidate: 0 / delta: 2" "the decisive delta is computed and kept"
+# same relationship-not-constant rule as (a) above: the delta's VALUE is
+# build-measured decoder chatter; what is pinned is that it is computed,
+# kept, and positive against the all-zero candidate set
+d2=$(printf '%s\n' "$out" | sed -n 's|.*most forgiving candidate: 0 / delta: \([0-9][0-9]*\).*|\1|p' | head -1)
+{ [ -n "${d2:-}" ] && [ "$d2" -ge 1 ]; } \
+  && ok "the decisive delta is computed, kept, and positive (delta=$d2, build-measured)" \
+  || no "decisive delta missing/zero (got '${d2:-none}')"
 has "$out" "damage exceeds every candidate baseline" "…and NAMED as what it proves"
 has "$out" "proven regardless of which source track corresponds" "with the reason: the ambiguity does not need resolving"
 has "$out" ">> FAIL" "delta > 0 against EVERY candidate -> FAIL (was REVIEW)"

@@ -51,6 +51,19 @@ never touching the original. Origin: the 2019-VMA `feed.ts` cleanup case file.
 - Recorded candidates (named, not built): `wrap-split.sh` (≥2-wrap horizon),
   `derive-dts.sh --container mkv` (same-container MKV lane), bars-and-tone
   lead detection.
+- **First-ever CI run, and what it taught (2026-08-26):** the resurrected
+  workflow's maiden run failed on every leg — none of it from this round's
+  code. Test 61 (1.14) had pinned exact decoder-chatter counts measured on
+  the macOS bench ("2 decode lines") that Linux static builds count
+  differently — re-pinned as build-measured *relationships* (count registers
+  and equals the most-forgiving candidate at delta 0; decisive delta positive),
+  never as constants. The ms-timebase alternation pin is now gated on the
+  fixture's own minted shape (ffmpeg 6.1/7.1 mint it with uniform durations —
+  nothing to preserve there, announced skip). And the **4.4 matrix leg was
+  dropped: the supported floor is 6.1** — 4.4 failed 20 assertions across a
+  dozen sub-suites because that 2021 build predates surfaces the plugin
+  legitimately depends on; below the floor the claims are benched for, green
+  would have meant papering over, not proving.
 
 ## 1.14.0 — the reorder-DTS round (2026-08-16..24)
 

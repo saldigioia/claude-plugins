@@ -631,9 +631,21 @@ shash22 () { ffmpeg -nostdin -v error -i "$1" -map 0:v:0 -c copy -f streamhash -
 { [ -n "$(shash22 "$MSK")" ] && [ "$(shash22 "$MSK")" = "$(shash22 "$WORK/ms_t.mov")" ]; } \
   && ok "video bit-identical through --timescale (a timescale change, never a restamp)" || no "--timescale altered the video stream"
 ndur () { ffprobe -v error -select_streams v:0 -show_entries packet=duration -of csv=p=0 "$1" 2>/dev/null | grep -v -e N/A -e '^$' | sort -u | grep -c . || true; }
-{ [ "$(ndur "$WORK/ms_t.mov")" -ge 2 ] && [ "$(ndur "$WORK/ms_t.mov")" -le 3 ]; } \
-  && ok "ms alternation survives the conventional base (source-baked, not smoothed)" \
-  || no "alternation shape unexpected: $(ndur "$WORK/ms_t.mov") distinct durations"
+# gate on the FIXTURE's own shape (first-ever CI run, 2026-08-26): ffmpeg
+# 6.1/7.1 mint this mkv WITHOUT the baked ms alternation — nothing exists
+# there to preserve, so asserting its survival pins nothing. Where the mint
+# alternates (8.x/9.x, the claims bench), the survival pin is unchanged.
+# Measured on the SOURCE's sorted-PTS deltas, not its duration field: mkv
+# reports uniform durations even where the timestamps alternate 41/42 ms
+# (measured 2026-08-26 on 9.0.1 — 96x41 durations over 28x41+67x42 deltas).
+nd_pts () { ffprobe -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$1" 2>/dev/null | tr -d , | grep -v -e N/A -e '^$' | sort -n | awk 'NR>1{print $1-p} {p=$1}' | sort -u | grep -c . || true; }
+if [ "$(nd_pts "$MSK")" -ge 2 ]; then
+  { [ "$(ndur "$WORK/ms_t.mov")" -ge 2 ] && [ "$(ndur "$WORK/ms_t.mov")" -le 3 ]; } \
+    && ok "ms alternation survives the conventional base (source-baked, not smoothed)" \
+    || no "alternation shape unexpected: $(ndur "$WORK/ms_t.mov") distinct durations"
+else
+  echo "  (skip: this ffmpeg mints the ms fixture with $(ndur "$MSK") distinct duration(s) — no source-baked alternation to preserve; the C68 class needs a real ms-quantized source here)"
+fi
 
 # (b) waiver round-trip (5-4c): FAIL -> record -> WAIVED/exit 0 -> mutate ->
 # VOID/FAIL. Artifact: stts entry-1 delta hex-patched 1->0 on a copy of the

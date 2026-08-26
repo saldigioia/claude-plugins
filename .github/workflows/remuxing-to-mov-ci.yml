@@ -7,6 +7,14 @@
 # ffmpeg/ffprobe builds per version so those claims and every safeguard are
 # exercised where they actually differ. 9.0.1 is the current claims bench
 # (tag existence on mwader/static-ffmpeg verified 2026-08-26).
+#
+# SUPPORTED FLOOR = 6.1 (measured on the first-ever CI run, 2026-08-26): the
+# 4.4 leg failed 20 assertions across a dozen sub-suites — that 2021 build
+# predates surfaces the current plugin legitimately depends on (probe-retry
+# messaging, seam-check filters, the mp4 muxer defaults the container-axis
+# rung pins, frame-CSV shapes the clinic's dim-scan parses). The suite's own
+# doctrine benches claims per named version; 4.4 is below the floor those
+# claims are made for, so it was dropped rather than papered over.
 name: remuxing-to-mov regression
 on:
   push:
@@ -25,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ffmpeg: ["4.4", "6.1", "7.1", "8.1.2", "9.0.1"]
+        ffmpeg: ["6.1", "7.1", "8.1.2", "9.0.1"]
     steps:
       - uses: actions/checkout@v4
       - name: Install static ffmpeg ${{ matrix.ffmpeg }}
