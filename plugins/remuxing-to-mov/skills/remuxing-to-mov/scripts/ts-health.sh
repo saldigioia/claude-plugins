@@ -80,19 +80,45 @@ fi
 # --- cheap header facts ---------------------------------------------------------
 fdur_fmt=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 case "$fdur_fmt" in ''|N/A) fdur_fmt=0;; esac
+start_t=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+case "$start_t" in ''|N/A) start_t=0;; esac
 vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 pixfmt=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 vidx=$(ffp -v error -select_streams v:0 -show_entries stream=index -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 tb=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 rfr=$(ffp -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-tickrate=${tb##*/}; case "$tickrate" in ''|*[!0-9]*) tickrate=90000;; esac
+# B3 (WO-1.15.7): the old `tickrate=${tb##*/}` kept the DENOMINATOR only —
+# fine for 1/90000 and mkv 1/1000, numerator-BLIND for the AVI class
+# (1001/30000: frame duration computed as ~1001 ticks against a 1-tick
+# cadence — a measured 15-frame drop read `forward gaps=0`). Parse both and
+# work in real ticks-per-second (den/num, possibly fractional).
+tbnum=${tb%%/*}; tbden=${tb##*/}
+case "$tbnum" in ''|*[!0-9]*) tbnum=1;; esac; [ "$tbnum" -gt 0 ] || tbnum=1
+case "$tbden" in ''|*[!0-9]*) tbden=90000;; esac
+tickrate=$(awk "BEGIN{r=$tbden/$tbnum; if(r==int(r)) printf \"%d\", r; else printf \"%.6f\", r}")
+# B1 (WO-1.15.7): no video stream = the video-timeline half of this scan has
+# NO JURISDICTION. The old `-v vidx="${vidx:-0}"` fallback scanned stream 0 —
+# whatever it was — as "video" (measured: an MP2-only TS read `video
+# packets=1532 … CLEAN`). vidx=-1 matches nothing; the scope finding below
+# says so instead of an unscoped CLEAN.
+TSH_VIDEO=yes
+case "${vidx:-}" in ''|*[!0-9]*) TSH_VIDEO=none; vidx=-1;; esac
 fps=$(pf_eval_fps "${rfr:-0}")
 fdur_ticks="${TSH_FDUR_TICKS:-}"
 [ -n "$fdur_ticks" ] || fdur_ticks=$(awk "BEGIN{f=${fps:-0}+0; t=${tickrate}+0; if(f>0) printf \"%.0f\", t/f; else print 0}")
-[ -n "${TSH_PKT_FILE:-}" ] && vidx=0
+[ -n "${TSH_PKT_FILE:-}" ] && { vidx=0; TSH_VIDEO=yes; }
+# B2 (WO-1.15.7): the transport counters below grep MPEG-TS confession
+# vocabulary (continuity counters, TEI, PES sizes). Program streams and every
+# other container HAVE none — payload corruption demuxes silently there
+# (measured: 4000 random bytes mid-.vob read "no transport loss"). The scan
+# still runs (some errors do surface), but the verdict must state its scope.
+TSH_SCOPE=demux-only
+case "$container" in *mpegts*) TSH_SCOPE=mpegts;; esac
 
 say "== ts-health: $IN =="
-say "   container=$container  video=$vcodec/${pixfmt:-?}  tickrate=$tickrate  frame=${fdur_ticks} ticks"
+say "   container=$container  video=$vcodec/${pixfmt:-?}  tickrate=$tickrate ticks/s (tb=$tb)  frame=${fdur_ticks} ticks"
+[ "$TSH_SCOPE" = mpegts ] || \
+  say "   scope: $container has no transport-counter vocabulary — the transport pass here is demux-only evidence (payload corruption demuxes silently; clean.sh --deep decodes)"
 
 # --- pass 1: transport (full demux to null, log counted) ------------------------
 say "-- transport (whole-file -c copy demux) --"
@@ -170,6 +196,24 @@ fi
 findings=0; damaged=0
 finding () { findings=$((findings+1)); say "   [$1] $2"; say "        -> $3"; }
 say "-- findings --"
+# B1 (WO-1.15.7): jurisdiction first — a source the video gates never judged
+# must not read CLEAN. The route is honest: this plugin's ladder is built
+# around a video track, and the clinic's zero-base cannot be blessed without
+# one (verify-source refuses it).
+if [ "$TSH_VIDEO" = none ]; then
+  finding scope "no video stream — the video-timeline half of this scan has no jurisdiction here (transport + audio counters only)" \
+    "the repair ladder's video rungs and the clinic's zero-base route do not apply; for a deliverable from an audio-only capture, extract/remux the audio directly (ffmpeg -map 0:a -c copy) — verify-source refuses video-less re-wraps by design"
+fi
+# B4 (WO-1.15.7): on this ffmpeg the demuxer hands back an ALREADY-UNWRAPPED
+# timeline, so a mid-capture 33-bit crossing (or PCR epoch reset) surfaces as
+# a NEGATIVE format.start_time — not as the raw -2^33 delta the V_WRAP
+# counter guards (dead instrumentation for this reader; kept for demuxers
+# that still hand the raw representation). Measured 2026-08-27: a minted
+# mid-file 2^33 crossing yields start_time=-7.317689, V_WRAP=0, CLEAN.
+if awk "BEGIN{exit !(($start_t) < -0.05)}" 2>/dev/null; then
+  finding timeline "negative start_time (${start_t}s) — the demuxer has already unwrapped a mid-capture 33-bit PTS/PCR crossing (or epoch reset); the wrap counter cannot see this representation (V_WRAP=$V_WRAP)" \
+    "remux normally — the muxer rebases; the proof lives in the OUTPUT (verify.sh gate (d) strictly monotonic + duration sanity). For a stay-in-TS deliverable, scripts/zero-base.sh floors the timeline (its own prediction contract judges)"
+fi
 if [ "${scr:-0}" -gt 0 ]; then
   damaged=1
   finding transport "scrambled stream(s) detected" "encrypted capture — nothing in this toolchain can recover it"
@@ -244,7 +288,7 @@ if [ "${V_PREKEY:-0}" -gt 0 ]; then
   finding timeline "capture starts mid-GOP: $V_PREKEY packet(s) before the first keyframe" \
     "lossless trim at the first IDR: scripts/trim-to-idr.sh (keyframe-bound copy cut, references/cutting-concat.md; gop-probe.sh checks the boundary) — no re-encode; players otherwise conceal the pre-roll"
 fi
-if [ "${V_KEYS:-0}" -lt 2 ] && [ -z "${TSH_PKT_FILE:-}" ] && awk "BEGIN{exit !(${fdur_fmt:-0} > 30)}" 2>/dev/null; then
+if [ "$TSH_VIDEO" = yes ] && [ "${V_KEYS:-0}" -lt 2 ] && [ -z "${TSH_PKT_FILE:-}" ] && awk "BEGIN{exit !(${fdur_fmt:-0} > 30)}" 2>/dev/null; then
   finding timeline "single-GOP capture (${V_KEYS:-0} keyframe(s) over ${fdur_fmt}s) — effectively unseekable" \
     "no lossless fix exists; ship only with that stated (verify's scrub gate flags it)"
 fi
@@ -271,9 +315,21 @@ if [ "$MODE" = --kv ]; then
   printf 'TSH_VPKTS=%s\nTSH_NAPTS=%s\nTSH_NADTS=%s\nTSH_BACK=%s\nTSH_DUP=%s\nTSH_WRAP=%s\nTSH_GAPS=%s\nTSH_GAP_SECS=%s\nTSH_PREKEY=%s\nTSH_KEYS=%s\nTSH_MAXKGAP_S=%s\n' \
     "$V_N" "$V_NAPTS" "$V_NADTS" "$V_BACK" "$V_DUP" "$V_WRAP" "$V_GAPS" "$gap_s" "$V_PREKEY" "$V_KEYS" "$maxk_s"
   printf 'TSH_AUD_WORST_DELTA=%s\nTSH_FINDINGS=%s\nTSH_VERDICT=%s\n' "$worst_ad" "$findings" "$VERDICT"
+  printf 'TSH_VIDEO=%s\nTSH_SCOPE=%s\nTSH_START=%s\n' "$TSH_VIDEO" "$TSH_SCOPE" "$start_t"   # additive (WO-1.15.7 B1/B2/B4)
 else
   case "$VERDICT" in
-    CLEAN)    echo ">> CLEAN: no transport loss, timeline sound, timestamps complete — plain-copy territory (verify the output as always).";;
+    CLEAN)
+      if [ "$TSH_SCOPE" = mpegts ]; then
+        echo ">> CLEAN: no transport loss, timeline sound, timestamps complete — plain-copy territory (verify the output as always)."
+      else
+        # B2 (WO-1.15.7): a scanner states its jurisdiction. $container has
+        # no transport-counter vocabulary, so "no transport loss" is a claim
+        # this pass cannot make — CLEAN here is demux-only evidence.
+        echo ">> CLEAN (scope: demux-only — $container has no transport-counter vocabulary, so"
+        echo "   payload corruption demuxes silently here; a DECODE proves content:"
+        echo "   clean.sh --deep now, or verify.sh gate (b) post-build): timeline sound,"
+        echo "   timestamps complete."
+      fi;;
     FINDINGS) echo ">> FINDINGS: $findings issue(s) above, each with its route — lossless wherever a fix exists (re-encode only where explicitly named).";;
     DAMAGED)  echo ">> DAMAGED: transport-level loss/encryption (above). Timestamp repairs still apply to what survives, but the missing data is gone — re-capture is the only true fix.";;
   esac

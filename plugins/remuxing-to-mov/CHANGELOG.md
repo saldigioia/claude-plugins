@@ -4,6 +4,47 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.7 — "a scanner states its jurisdiction" round (2026-08-27)
+
+`WO-1.15.7-JURISDICTION.md` — the checkup round packaged as "jurisdiction"
+(CHECKUP-2026-08-27 **B1–B4, F1, F12, A3**; rule 5). Tests **88–89**,
+red-verified against 0d225ad (88: 26 red; 89: 4 red — both bench
+preconditions minted, no skips).
+
+- **B1:** ts-health no longer scans stream 0 as "video" on a video-less
+  source (measured: MP2-only TS read `video packets=1532 … CLEAN`); a
+  `[scope]` finding names the missing jurisdiction (FINDINGS rc=10),
+  `TSH_VIDEO=yes|none` additive, the single-GOP finding video-gated.
+  zero-base refuses audio-only at PRE-FLIGHT exit 2 (pre-round: full
+  re-wrap built, then verify-source's refusal — Item-C shape); clean.sh
+  gates its Tier-1 route and adds the scope finding.
+- **B2:** program streams have no transport-counter vocabulary (measured:
+  4000 random bytes mid-.vob read "no transport loss"). `TSH_SCOPE=
+  mpegts|demux-only` additive; a scope line for every non-mpegts container;
+  the CLEAN verdict scoped ("demux-only … a DECODE proves content"). rc
+  semantics unchanged — the harm was the definitive wording.
+- **B3:** both scanners (ts-health, lead-check) parse the FULL num/den
+  timebase; `${tb##*/}` was numerator-blind (measured A/B: an identical
+  15-frame drop read `gaps=1 ~0.500s` through mpegts and `gaps=0` through
+  AVI tb 1001/30000). Test 89 pins the A/B agreeing through both.
+- **B4:** the unwrapped-wrap symptom — NEGATIVE start_time (measured:
+  minted 2^33 crossing → start −7.317689, `V_WRAP=0`, CLEAN) — is a named
+  finding in ts-health (`TSH_START` additive; the wrap counter documented
+  as guarding the representation this demuxer no longer hands it) and in
+  clean.sh (which checked the positive direction only). The −2^32
+  half-wrap secondary stays SUSPECTED (recorded in the WO).
+- **F1:** zero-base's PAFF refusal split — the half_ts arm keeps its
+  1.15.2 message verbatim; the full-TS arm refuses as stated POLICY with
+  the honest profile (half_ts=no), says pairfill would refuse that very
+  file (exit 3), and names routes that accept it (mov.sh; diagnose.sh).
+  Pinned via the measured pf_detect injection (2× nominal, all stamped →
+  paff=yes half_ts=no).
+- **F12:** `PR_NPROG` in probe --kv and `"nprog"` in --json (append-only);
+  clean.sh gates the zero-base ready-to-run on it and names the topology
+  (pre-round it printed a command that refuses exit 2 — measured).
+- **A3:** the locale sweep is now a standing pin (test 88 §8): every entry
+  point sources lib-probe.sh or exports LC_ALL=C.
+
 ## 1.15.6 — "one writer, atomic bless" round (2026-08-27)
 
 `WO-1.15.6-ONE-WRITER.md` — the checkup round packaged as "one writer"

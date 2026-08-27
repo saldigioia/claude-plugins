@@ -73,12 +73,29 @@ if [ "${NPROG:-1}" -gt 1 ] 2>/dev/null; then
   echo "  ffmpeg -nostdin -i \"$IN\" -map 0:p:<PROGRAM_NUM> -c copy PROG.ts" >&2
   exit 2
 fi
+# B1 (WO-1.15.7): no video stream -> refuse at PRE-FLIGHT. verify-source —
+# this rung's mandatory identity battery — refuses video-less re-wraps, so
+# pre-round the full re-wrap was built only to die at that refusal (the
+# 1.15.2 Item-C shape on a new axis; measured on an MP2-only TS).
+zb_vidx=$(ffp1 -v error -select_streams v:0 -show_entries stream=index -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
+case "${zb_vidx:-}" in ''|*[!0-9]*)
+  echo "no video stream in the source: refusing at pre-flight — verify-source's" >&2
+  echo "identity battery requires video, so an audio-only re-wrap could never be" >&2
+  echo "blessed (never build to a foregone refusal). Nothing was written. An" >&2
+  echo "audio-only deliverable extracts directly: ffmpeg -i IN -map 0:a -c copy OUT" >&2
+  exit 2;;
+esac
 # pair-timestamped-PAFF check (1.15.2 Item C) — windowed and cheap, so it runs
 # BEFORE the whole-file scan: on the field source the old order burned a 54 s
 # scan plus a 23.68 GB build to reach a foregone hard-stop. pf_detect's
 # PF_PKT_FILE hook keeps this pinnable without mintable PAFF media.
+# F1 (WO-1.15.7): the two PAFF shapes are now DIAGNOSED separately — the old
+# single arm labeled a fully-timestamped PAFF source "pair-timestamped",
+# claimed untimestamped mates it does not have, and routed it to
+# pairfill-paff.sh, which exits 3 on exactly that file. The refusal POLICY
+# stands for both shapes; the diagnosis and the route now match the profile.
 eval "$(pf_detect "$IN")"
-if [ "${PF_HALF_TS:-no}" = yes ] || [ "${PF_PAFF:-no}" = yes ]; then
+if [ "${PF_HALF_TS:-no}" = yes ]; then
   echo "pair-timestamped PAFF source (paff=$PF_PAFF half_ts=$PF_HALF_TS): refusing at pre-flight." >&2
   echo "A TS->TS copy of this shape makes the mpegts muxer invent timing for the" >&2
   echo "untimestamped mates ('Timestamps are unset' — the hard-stop class, measured" >&2
@@ -86,6 +103,17 @@ if [ "${PF_HALF_TS:-no}" = yes ] || [ "${PF_PAFF:-no}" = yes ]; then
   echo "cosmetic: format.start_time lands at the reorder-delay floor either way and" >&2
   echo "players rebase it — the player clock already reads 0. The source IS the master." >&2
   echo "For the QuickTime deliverable route: scripts/pairfill-paff.sh IN OUT.mov" >&2
+  exit 2
+elif [ "${PF_PAFF:-no}" = yes ]; then
+  echo "field-coded (PAFF) source with a COMPLETE timestamp column (paff=$PF_PAFF half_ts=no):" >&2
+  echo "refusing at pre-flight — POLICY, not measurement (WO-1.15.7 F1): the 'TS->TS" >&2
+  echo "copy preserves PAFF' claim is scoped to its 1.15.2 case file and unproven for" >&2
+  echo "this shape, and the prize is cosmetic (players rebase start_time — the clock" >&2
+  echo "already reads 0). This is NOT the pair-timestamped class: every packet is" >&2
+  echo "stamped, and pairfill-paff.sh would refuse this very file (exit 3, half_ts=no)." >&2
+  echo "For a QuickTime deliverable: scripts/mov.sh (the copy ladder keeps the true" >&2
+  echo "reorder pyramid; scrub-gated); if ITS verify names timestamp work, scripts/" >&2
+  echo "diagnose.sh routes by measured profile. The source IS the master." >&2
   exit 2
 fi
 # whole-file rot check — zero-base is not a timeline repair. Saved for reuse:

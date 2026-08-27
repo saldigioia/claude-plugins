@@ -97,15 +97,30 @@ if [ "$DAMAGED" -eq 1 ]; then
   finding transport "ts-health verdict: DAMAGED (scrambled or heavy loss — counters above)" \
     "PERMANENT: re-capture is the only true fix (ts-health.sh for the detail)"
 fi
+# jurisdiction gates (WO-1.15.7): the Tier-1 zero-base route must never be
+# printed "ready to run" for a file zero-base refuses at pre-flight — B1
+# (no video: verify-source cannot bless the re-wrap) and F12 (multi-program:
+# the mpegts muxer cannot reconstruct the layout; measured refusal exit 2).
+NPROG=$(pget PR_NPROG); case "$NPROG" in ''|*[!0-9]*) NPROG=0;; esac
+if [ "$(tget TSH_VIDEO)" = none ]; then
+  finding scope "no video stream — the clinic's video-domain routes do not apply (ts-health scoped its scan the same way)" \
+    "audio-only capture: extract/remux the audio directly (ffmpeg -map 0:a -c copy); zero-base/verify-source require video by design"
+fi
 if awk "BEGIN{exit !(($ST) > 0.05)}"; then
-  if [ "$IS_TS" = yes ] && [ "$(tget TSH_BACK)" = 0 ] && [ "$(tget TSH_DUP)" = 0 ]; then
+  if [ "$IS_TS" = yes ] && [ "$(tget TSH_BACK)" = 0 ] && [ "$(tget TSH_DUP)" = 0 ] \
+     && [ "$(tget TSH_VIDEO)" != none ] && [ "${NPROG:-0}" -le 1 ]; then
     finding timeline "timeline starts at ${ST}s, not zero (players rebase it; tools and clocks read it)" \
       "TIER 1 (structural): scripts/zero-base.sh \"$IN\" OUT.ts — lossless re-wrap to the floor, PID layout kept, prediction-gated"
     route zero-base
   else
     finding timeline "timeline starts at ${ST}s, not zero" \
-      "zero-base.sh applies only to rot-free mpegts (back=$(tget TSH_BACK) dup=$(tget TSH_DUP) container=$CONT) — see the rot/container findings"
+      "zero-base.sh applies only to rot-free single-program mpegts with video (back=$(tget TSH_BACK) dup=$(tget TSH_DUP) container=$CONT programs=${NPROG} video=$(tget TSH_VIDEO)) — it refuses this shape at pre-flight; see the scope/rot/container findings"
   fi
+elif awk "BEGIN{exit !(($ST) < -0.05)}"; then
+  # B4 (WO-1.15.7): the positive direction alone missed the unwrapped-wrap
+  # symptom this ffmpeg's demuxer actually hands back.
+  finding timeline "negative start_time (${ST}s) — an already-unwrapped mid-capture 33-bit crossing or PCR epoch reset (ts-health names the representation)" \
+    "remux normally — the muxer rebases and verify.sh gate (d) proves the OUTPUT; for a stay-in-TS deliverable, scripts/zero-base.sh floors the timeline (prediction-gated)"
 fi
 if [ "$(tget TSH_PREKEY)" != 0 ]; then
   finding timeline "capture starts mid-GOP: $(tget TSH_PREKEY) pre-keyframe packet(s) — undecodable pre-roll" \

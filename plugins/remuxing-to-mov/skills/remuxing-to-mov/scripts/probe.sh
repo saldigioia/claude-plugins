@@ -144,8 +144,14 @@ pr_derive_sig () {
 probe_struct () {
   local mode="$1" q="ffp -v error -select_streams"
   local container vcodec vtag isavc acodec aaction rung rung_json cmd cp ct cs cr pixfmt vnat
-  local tag_advice tagadv_json
+  local tag_advice tagadv_json nprog
   container=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  # F12 (WO-1.15.7): multi-program topology must reach the MACHINE consumers —
+  # the human-mode advisory below (":263-era") never made it into --kv/--json,
+  # so clean.sh printed a "ready to run" zero-base command that refuses exit 2
+  # on a 2-program TS (measured). 0 = container carries no program concept.
+  nprog=$(ffp -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+  case "$nprog" in ''|*[!0-9]*) nprog=0;; esac
   vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vtag=$($q v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   pixfmt=$($q v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
@@ -238,9 +244,9 @@ probe_struct () {
   # 3-derive value is quoted so the JSON stays parseable (append-only API).
   rung_json="$rung"; case "$rung" in *[!0-9]*) rung_json="\"$rung\"";; esac
   if [ "$mode" = "--json" ]; then
-    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","vnative":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s","coded_rate_span":"%s","rate_method":"%s","ratio":"%s","ratio_hyp":"%s","ppf":"%s","depth_pics":"%s","depth_ts":"%s","decl_depth":"%s","depth_expected":"%s","depth_class":"%s","dts_short":"%s","dts_source":"%s"%s}\n' \
+    printf '{"container":"%s","vcodec":"%s","vtag":"%s","pix_fmt":"%s","vnative":"%s","is_avc":"%s","acodec":"%s","audio_action":"%s","paff":"%s","field_rate":"%s","timescale":"%s","coded_rate":"%s","nominal_fps":"%s","nopts_frac":"%s","half_ts":"%s","reorder":"%s","color_primaries":"%s","color_transfer":"%s","color_space":"%s","color_range":"%s","rec_rung":%s,"rec_cmd":"%s","coded_rate_span":"%s","rate_method":"%s","ratio":"%s","ratio_hyp":"%s","ppf":"%s","depth_pics":"%s","depth_ts":"%s","decl_depth":"%s","depth_expected":"%s","depth_class":"%s","dts_short":"%s","dts_source":"%s","nprog":%s%s}\n' \
       "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung_json" "$cmd" \
-      "$PF_CODED_RATE_SPAN" "$PF_RATE_METHOD" "$PF_RATIO" "$PF_RATIO_HYP" "$PF_PPF" "$PF_DEPTH_PICS" "$PF_DEPTH_TS" "$PF_DECL_DEPTH" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_CLASS" "${PF_DTS_SHORT:-unknown}" "$PF_DTS_SOURCE" "$tagadv_json"
+      "$PF_CODED_RATE_SPAN" "$PF_RATE_METHOD" "$PF_RATIO" "$PF_RATIO_HYP" "$PF_PPF" "$PF_DEPTH_PICS" "$PF_DEPTH_TS" "$PF_DECL_DEPTH" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_CLASS" "${PF_DTS_SHORT:-unknown}" "$PF_DTS_SOURCE" "$nprog" "$tagadv_json"
   else
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
     printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_VNATIVE=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
@@ -255,6 +261,7 @@ probe_struct () {
     printf 'PF_DEPTH_PICS=%s\nPF_DEPTH_TS=%s\nPF_DECL_DEPTH=%s\nPF_SPS_NOISE=%s\nPF_DEPTH_EXPECTED=%s\nPF_DEPTH_CLASS=%s\nPF_DTS_SHORT=%s\nPF_DTS_SOURCE=%s\n' \
       "$PF_DEPTH_PICS" "$PF_DEPTH_TS" "$PF_DECL_DEPTH" "$PF_SPS_NOISE" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_CLASS" "${PF_DTS_SHORT:-unknown}" "$PF_DTS_SOURCE"
     aud_manifest_kv                                                       # 5-2a
+    printf 'PR_NPROG=%s\n' "$nprog"                                       # F12 (WO-1.15.7, additive)
     printf 'PR_MS_TB=%s\nPR_TS_HINT=%s\n' "$MS_TB" "${TS_HINT:-none}"    # 5-4e
     printf 'PR_GAMA=%s\nPR_STSD_ENTRY=%s\nPR_STSD_DV=%s\n' \
       "$GAMA" "${STSD_ENTRY:-unknown}" "${STSD_DV:-no}"                  # 5-5b/e
