@@ -67,6 +67,32 @@
   gates live); main-section skip echoes are uncaptured by design — noted
   in the banner text.
 
-## Execution record
 
-(appended at execution)
+## Execution record (2026-08-27, same session as filing)
+
+Executed against f45b89d (the 1.15.7 tree). Test 90 red-verified first
+(6 red — the E1/E2/E3/E7 metas; the E6/E4/E8 sections were coverage
+additions, green through the 1.15.5 seams once their fixtures were right),
+then green 31/31, mode 755. E7 landed inside test 14: roster derived from
+scripts/*.sh minus lib-*, the nine new entry points (the 1.15 clinic family
++ poc-gate) joined the forced-failure battery and passed IN CONTRACT on
+every arm (109/109) — no code fixes needed, which is itself the round's
+best measurement.
+
+Bench facts recorded in test 90 (each measured this session):
+- a command substitution around `run_subsuites` loses the recorders — plain
+  redirection, never `$( )` (subshell);
+- bare `-color_primaries/-color_trc` encoder flags landed only the MATRIX
+  on this bench — `setparams` stamps all three VUI fields;
+- a MOV output masks a rewritten SPS behind a `colr` atom written from the
+  INPUT's codec parameters — the E4 drift fixture rides mpegts, where the
+  probe reads the SPS.
+
+The full suite's first run through the honest runner: **288/288**, and the
+banner surfaced **4 real skip announcements** on this very bench (the E3
+visibility working as designed — those are the dormant lanes an operator
+now sees). `claude plugin validate --strict` green on both manifests.
+
+Residuals as filed (E5 synthesis limit; E8 remainder: doctor degraded
+verdicts, derive-dts.py direct units, pf_dts_source beyond injection;
+fixture-reality gaps; main-section skips outside the tally).

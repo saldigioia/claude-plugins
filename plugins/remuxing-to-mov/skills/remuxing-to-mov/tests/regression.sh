@@ -1018,20 +1018,20 @@ else
     else no "make-fixtures.sh failed on:$fixmiss"; printf '%s\n' "$mkout" | tail -5 | sed 's/^/   /'; fi
   fi
 fi
-for t in "$HERE"/regression.d/*.sh; do
-  [ -f "$t" ] || continue        # literal glob: empty dir
-  [ -x "$t" ] || { echo "  (skip: $(basename "$t") not executable — chmod +x to enroll it)"; continue; }
-  tn="regression.d/$(basename "$t")"
-  if out=$(bash "$t" 2>&1); then
-    ok "$tn — $(printf '%s\n' "$out" | tail -1)"
-  else
-    no "$tn"
-    printf '%s\n' "$out" | sed 's/^/   /'
-  fi
-done
+# WO-1.15.8 (CHECKUP Class E): the loop lives in lib-harness.sh so it is
+# itself unit-testable (test 90). Every *.sh is enrolled regardless of exec
+# bit (E1 — the old `[ -x ] || continue` silently un-enrolled on mode drift,
+# and a deleted regression.d/ read 0/0 green); each case's tail line is
+# cross-checked against its exit status (E2); skip announcements are counted
+# into HARNESS_SKIPS (E3 — green, but visible in the banner below).
+. "$HERE/lib-harness.sh"
+run_subsuites "$HERE/regression.d"
 
 echo
 echo "===================================================================="
 echo "  PASSED: $pass    FAILED: $fail"
+echo "  (sub-suite SKIP announcements: ${HARNESS_SKIPS:-0} — a leaner bench surfaces its"
+echo "   dormant lanes here instead of keeping the same PASSED shape silently; E3."
+echo "   Main-section skips print inline above and are not in this tally.)"
 echo "===================================================================="
 [ "$fail" -eq 0 ]

@@ -97,9 +97,17 @@ mech "TERM routes through the trap chain -> 1 (never 143)"    'kill -TERM $$; sl
 
 echo
 echo "== 2. every entry point: forced failures return only documented codes =="
-# 6.3 fold-in: qt-groups (WO 5.3) and trim-to-idr (WO 2.2) postdate the loop's
-# WO 1.4 birth — every entry point means every entry point, new ones included
-ENTRY="auto batch derive-dts diagnose doctor dual-track gop-probe metadata mov pairfill-paff playable-check probe qt-groups rebuild-paff remux resync rung4 seam-check trim-to-idr ts-health verify waiver"
+# E7 (WO-1.15.8): "every entry point means every entry point, new ones
+# included" was a hand-kept string that fell 8 scripts behind its own promise
+# (the 1.15 clinic family never joined). The roster is now DERIVED from the
+# tree — scripts/*.sh minus the lib-* sourcing files — so a future entry
+# point joins this battery the day it lands.
+ENTRY=""
+for _f in "$SC"/*.sh; do
+  _b=$(basename "$_f" .sh)
+  case "$_b" in lib-*) continue;; esac
+  ENTRY="$ENTRY $_b"
+done
 # playable-check's qlmanage render is deadline-bounded (WO 1.4: it hangs forever
 # on undecodable garbage); keep the garbage case fast here, and pin the knob.
 export RTM_QL_TIMEOUT=10
@@ -109,7 +117,8 @@ X="$WORK/does-not-exist.ts"; O="$WORK/o.mov"
 # argument shapes: probe/scan tools take INPUT; builders take INPUT OUTPUT; the
 # attested/field tools need their mandatory extras to get past arg parsing
 args_for () { case "$1" in
-  diagnose|gop-probe|playable-check|probe|ts-health) printf '%s\n' "$2";;
+  diagnose|gop-probe|playable-check|probe|ts-health|clean|dim-scan|lead-check|poc-gate) printf '%s\n' "$2";;
+  clock)         printf '%s\n0:01\n' "$2";;
   metadata)      printf '%s\n%s\n--title\nT\n' "$2" "$O";;
   rebuild-paff)  printf '%s\n%s\n60000/1001\n' "$2" "$O";;
   rung4)         printf '%s\n%s\n--profile\nh264\n' "$2" "$O";;

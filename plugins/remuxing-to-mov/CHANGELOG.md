@@ -4,6 +4,57 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.8 — "the harness counts what it cannot see" round (2026-08-27)
+
+`WO-1.15.8-HARNESS.md` — the checkup round packaged as "harness"
+(CHECKUP-2026-08-27 **Class E**; rule 6), plus the closures this session
+made tractable. Test **90** (red-verified against f45b89d: 6 red — the
+E1/E2/E3/E7 metas; the E6/E8 sections were coverage additions, green through
+1.15.5's seams); E7 lands inside test 14 itself.
+
+- **E1/E2/E3 — the runner is factored and honest** (`tests/lib-harness.sh`,
+  unit-tested by 90 §1): every `regression.d/*.sh` is enrolled REGARDLESS of
+  exec bit (the old `[ -x ] || continue` silently un-enrolled on mode drift
+  — measured: a chmod 644 or even a deleted regression.d/ read "PASSED: 0
+  FAILED: 0" exit 0; now a missing/empty dir is a suite FAILURE and a
+  missing bit an announced note); each case's `name: X passed, Y failed`
+  tail is cross-checked against its exit status (a green exit with a
+  nonzero failed-count, or no recognizable tail, is a convention-breach
+  FAILURE — all existing sub-suites already complied, swept); SKIP
+  announcements are counted into `HARNESS_SKIPS` and printed in the final
+  banner — green but VISIBLE, so a leaner bench can no longer keep the
+  same PASSED shape while whole lanes go dormant.
+- **E7 — test 14's roster derives from the tree** (scripts/*.sh minus
+  lib-*): the hand-kept string was 8 entry points behind its own "every
+  entry point" promise. The nine new entries (the 1.15 clinic family +
+  poc-gate) joined the forced-failure battery and all passed in contract
+  on every arm (109/109) — no code fixes needed, which is itself the
+  measurement.
+- **E6 closure:** the in-situ POC count-arm UNPROVEN branch is exercised
+  end-to-end through pairfill (canned census with matching picture count —
+  so the histogram gate passes — but a short poc table: rows=70 vs
+  packets=75 trips the count guard; machine row `unproven=1 why=count`,
+  retention + re-judge, exit 1, .part kept). Testable only since 1.15.5's
+  census side files — the seam E6 said was missing.
+- **E4 closure:** `--signaling` now sees real color tags both ways.
+  Preserved: a `setparams`-stamped bt709 source through `-c copy`, the
+  VALUE printed back (non-vacuous). Drift: the SAME bitstream with its VUI
+  rewritten to bt2020/PQ via `h264_metadata` — lossless, so every other
+  gate passes and only this gate can catch it (three DRIFT lines, REVIEW +
+  note). Bench facts recorded in the test: bare `-color_primaries` encoder
+  flags landed only the matrix (use setparams), and a MOV output masks the
+  rewritten SPS behind a colr atom written from input parameters (the
+  drift fixture rides mpegts).
+- **E8 / 5.2 debt closed:** `rewrap_nudges` / `rewrap_hard_confessions`
+  unit tables — counts on canned logs plus the discrimination pins (a
+  +1-tick nudge is never a hard confession and vice versa; empty log 0/0).
+- **Recorded, not this round:** E5 (junction setts on real untimestamped
+  data — the synthesis limit is house doctrine, test 65's header);
+  E8 remainder (doctor degraded verdicts, derive-dts.py direct unit tests,
+  pf_dts_source beyond injection); fixture-reality gaps (multi-program
+  success paths, real open-GOP, DTS/DCA, MBAFF); main-section skip echoes
+  outside the sub-suite tally (named in the banner text).
+
 ## 1.15.7 — "a scanner states its jurisdiction" round (2026-08-27)
 
 `WO-1.15.7-JURISDICTION.md` — the checkup round packaged as "jurisdiction"
