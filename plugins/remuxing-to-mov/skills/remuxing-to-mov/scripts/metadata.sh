@@ -50,7 +50,9 @@ esac; done
 
 vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 VTAG=(); [ "$vcodec" = hevc ] && VTAG=(-tag:v hvc1)
-PART="$(rtm_part "$OUT")"   # extension-keeping (D6)
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 # -map 0 -map -0:d? keeps every real stream (video, all audio, subtitles) but drops
 # DATA tracks — the chapter/timecode text track QuickTime shows as a generic "menu".
 # CHAP controls chapter metadata; +bitexact suppresses the generic encoder tag;

@@ -87,6 +87,11 @@ fi
 
 WORK="$(mktemp -d)"   # NOT auto-deleted, so a failed run leaves intermediates to inspect
 echo "work dir (inspect on failure): $WORK"
+# WO-1.15.6 A2 + F11: lock + disk BEFORE the extraction — this builder stages
+# ~1x the source's media on the TMPDIR volume before its mux even starts, so
+# the staging dir rides the same pre-flight as OUT's volume.
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (A2; WORK stays, deliberately)
+rtm_writer_preflight "$OUT" "$IN" "$WORK" || exit 2
 
 # 1) video -> raw Annex-B H.264. TS/PS already Annex-B; AVCC (MKV/MOV) needs the bsf.
 isavc=$(ffp -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)

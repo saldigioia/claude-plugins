@@ -69,6 +69,11 @@ fi
 
 . "$SELF_DIR/lib-probe.sh"
 . "$SELF_DIR/lib-paff.sh"   # playability_verdict (the shared empirical half)
+. "$SELF_DIR/lib-mux.sh"    # rtm_lock: one writer per OUT (WO-1.15.6 A2)
+# held across the remux child (which re-enters via RTM_LOCK_HELD and runs the
+# disk pre-flight) and this driver's own verify/playability reads of OUT.
+trap 'rtm_unlock' EXIT
+rtm_lock "$OUT" || exit 2
 
 VC=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 PIX=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)

@@ -147,6 +147,8 @@ else
 fi
 
 # --- build ------------------------------------------------------------------------
+trap 'rm -rf "$TMP"; rtm_unlock' EXIT   # re-armed: TMP cleanup + writer-lock release (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
 PART="$(rtm_part "$OUT")"
 MUXLOG="$TMP/mux.log"
 if ! ffmpeg -nostdin -y -hide_banner -nostats -v warning "${FF_INPUT_OPTS[@]}" -i "$IN" \

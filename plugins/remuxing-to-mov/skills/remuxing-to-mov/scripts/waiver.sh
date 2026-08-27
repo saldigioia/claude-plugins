@@ -58,6 +58,9 @@ if [ "$ATT" != "$RTM_WAIVER_ATTEST" ]; then
 fi
 WVR="$OUT.waiver.json"
 [ -f "$WVR" ] && { echo "waiver.sh: $WVR already exists — delete it deliberately first; never overwritten." >&2; exit 2; }
+. "$SELF_DIR/lib-mux.sh"    # rtm_lock (WO-1.15.6 A2): never bind a waiver to a MOVING OUT —
+trap 'rtm_unlock' EXIT      # the sidecar's size/streamhash signature must be of settled bytes
+rtm_lock "$OUT" || exit 2
 
 # The failure signature comes from a live verify.sh run — never hand-typed.
 vrc=0

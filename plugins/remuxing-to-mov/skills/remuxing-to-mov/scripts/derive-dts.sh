@@ -169,6 +169,8 @@ case "$PF_DEPTH_CLASS" in
 esac
 
 # --- the repair (python writes an intermediate; extension kept — D6) ---------
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
 PART="$(rtm_part "$OUT")"
 NCHAP=$(ffp -v error -show_chapters -of csv "$IN" 2>/dev/null | grep -c '^chapter' || true)
 case "$NCHAP" in ''|*[!0-9]*) NCHAP=0;; esac

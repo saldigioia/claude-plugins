@@ -141,10 +141,14 @@ REL=$(awk "BEGIN{r=($IDR_PTS)-($ST); if(r<0)r=0; printf \"%.6f\", r}")
 SRC_DUR=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 case "$SRC_DUR" in ''|N/A) SRC_DUR="";; esac
 echo "   copy-cut: -ss $REL (relative: IDR pts $IDR_PTS - start_time $ST) — all streams, -c copy"
-# atomic part-file, but with the REAL extension kept ("x.part.ts", not "x.ts.part"):
+# atomic part-file, but with the REAL extension kept ("x.part….ts", not "x.ts.part"):
 # this tool is container-agnostic, so the muxer is inferred from the extension —
-# a bare ".part" makes ffmpeg refuse ("Unable to choose an output format", measured)
-PART="${OUT%.*}.part.${OUT##*.}"
+# a bare ".part" makes ffmpeg refuse ("Unable to choose an output format", measured).
+# WO-1.15.6: the 1.9-era inline name converts to rtm_part — same extension
+# discipline, now unique per process like every other builder (A2).
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
+PART="$(rtm_part "$OUT")"
 CUTLOG="$(mktemp)"
 cut_mux () {  # cut_mux INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
   ffmpeg -nostdin -y -hide_banner -nostats -ss "$REL" "$@" -i "$IN" \

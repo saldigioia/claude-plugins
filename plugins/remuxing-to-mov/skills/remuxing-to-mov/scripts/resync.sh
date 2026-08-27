@@ -157,7 +157,9 @@ for spec in $ASPECS; do
   fi
 done
 
-PART="$(rtm_part "$OUT")"   # extension-keeping (D6)
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 # shellcheck disable=SC2086
 ffmpeg -nostdin -v error -fflags +genpts "${FF_INPUT_OPTS[@]}" -i "$IN" \
   -map 0:v:0 -c:v copy $VTAG \

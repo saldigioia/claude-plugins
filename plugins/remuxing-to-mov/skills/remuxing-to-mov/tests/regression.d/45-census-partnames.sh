@@ -45,13 +45,24 @@ done
 if [ "$(uname -s)" = Darwin ] && command -v qlmanage >/dev/null 2>&1; then BENCH=mac; else BENCH=other; fi
 
 echo "== 1. D6: rtm_part/rtm_sidecar keep the real extension, always =="
+# RE-PINNED WO-1.15.6 (A2): rtm_part is now UNIQUE PER PROCESS
+# (out.part-<pid>-<epoch>.mov) — the deterministic name was half the measured
+# concurrent-writer corruption, so the exact-name pins here became SHAPE pins:
+# same directory, stem + ".part…" tag, the REAL extension still last. D6 (the
+# suffix discipline) is unchanged and still asserted; determinism was the
+# defect, not the contract. Deviation recorded in WO-1.15.6-ONE-WRITER.md.
 # shellcheck source=/dev/null
 . "$SC/lib-mux.sh"
-[ "$(rtm_part /a/b/out.mov)" = /a/b/out.part.mov ] && ok "out.mov -> out.part.mov (not out.mov.part)" || no "rtm_part out.mov = $(rtm_part /a/b/out.mov)"
-[ "$(rtm_part /a/b/out.mp4)" = /a/b/out.part.mp4 ] && ok "out.mp4 keeps .mp4" || no "rtm_part out.mp4 = $(rtm_part /a/b/out.mp4)"
-[ "$(rtm_part /a/b/cut.ts)" = /a/b/cut.part.ts ] && ok "cut.ts keeps .ts (the 1.9 lesson, now shared)" || no "rtm_part cut.ts = $(rtm_part /a/b/cut.ts)"
-[ "$(rtm_part /a/b/out)" = /a/b/out.part.mov ] && ok "an EXTENSIONLESS target still gets a real extension" || no "rtm_part out = $(rtm_part /a/b/out)"
-[ "$(rtm_part /a/b.c/out)" = /a/b.c/out.part.mov ] && ok "a dotted DIRECTORY does not fool the split" || no "rtm_part /a/b.c/out = $(rtm_part /a/b.c/out)"
+pshape () {  # pshape OUT GLOB DESC — rtm_part(OUT) must match GLOB (case pattern)
+  local got; got="$(rtm_part "$1")"
+  case "$got" in $2) ok "$3 ($got)";; *) no "$3 [rtm_part $1 = $got]";; esac
+}
+pshape /a/b/out.mov '/a/b/out.part*.mov' "out.mov -> out.part….mov (not out.mov.part…)"
+pshape /a/b/out.mp4 '/a/b/out.part*.mp4' "out.mp4 keeps .mp4"
+pshape /a/b/cut.ts  '/a/b/cut.part*.ts'  "cut.ts keeps .ts (the 1.9 lesson, now shared)"
+pshape /a/b/out     '/a/b/out.part*.mov' "an EXTENSIONLESS target still gets a real extension"
+pshape /a/b.c/out   '/a/b.c/out.part*.mov' "a dotted DIRECTORY does not fool the split"
+case "$(rtm_part /a/b/out.mov)" in /a/b/out.mov.part*) no "extension-hiding shape returned";; *) ok "never extension-hiding (the D6 half of the name survives A2's uniqueness)";; esac
 [ "$(rtm_sidecar /a/b/out.mov premeta)" = /a/b/out.premeta.mov ] && ok "rtm_sidecar tags the same way (mov.sh's .premeta)" || no "rtm_sidecar premeta = $(rtm_sidecar /a/b/out.mov premeta)"
 [ "$(rtm_sidecar /a/b/out.mov autobest)" = /a/b/out.autobest.mov ] && ok "auto.sh's parked artifact keeps its extension too" || no "rtm_sidecar autobest = $(rtm_sidecar /a/b/out.mov autobest)"
 
@@ -79,10 +90,13 @@ printf 'Application provided invalid, non monotonically increasing dts to muxer\
 o=$(RTM_MUX_LOG_APPEND="$WORK/conf.log" bash "$SC/remux.sh" "$FIX/m2v420.ts" "$WORK/hs.mov" 2>&1); rc=$?
 [ "$rc" -eq 1 ] && ok "confession hard stop still exits 1" || no "confession rc=$rc, want 1"
 [ ! -f "$WORK/hs.mov" ] && ok "nothing blessed under the real name" || no "hs.mov exists — a confessed build got blessed"
-[ -s "$WORK/hs.part.mov" ] && ok "the kept artifact is 'hs.part.mov' — openable by the extension-keyed tools" \
-  || { no "expected \$WORK/hs.part.mov"; ls "$WORK" | sed 's/^/   /'; }
+# re-pinned WO-1.15.6: unique part names — glob the shape, then assert the
+# message names the EXACT kept file (the two must agree, whatever the nonce)
+hskept=$(ls "$WORK"/hs.part*.mov 2>/dev/null | head -1)
+[ -n "$hskept" ] && [ -s "$hskept" ] && ok "the kept artifact is '$(basename "$hskept")' — extension last, openable by the extension-keyed tools" \
+  || { no "expected \$WORK/hs.part….mov"; ls "$WORK" | sed 's/^/   /'; }
 [ ! -f "$WORK/hs.mov.part" ] && ok "the old 'hs.mov.part' shape is gone" || no "hs.mov.part still written"
-has "$o" "$WORK/hs.part.mov" "the message names the kept file by its real path"
+[ -n "$hskept" ] && has "$o" "$hskept" "the message names the kept file by its real path"
 
 echo
 echo "== 4. D5: mux_census — both arms, asserted directly =="

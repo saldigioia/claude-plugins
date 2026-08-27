@@ -96,7 +96,9 @@ PROV=(-metadata "com.apple.quicktime.rung4.source=$(basename "$IN")"
 
 # .part hides the extension from ffmpeg — pick the muxer from OUT explicitly
 case "$OUT" in *.mov|*.MOV) FMT=mov;; *.mp4|*.m4v|*.MP4) FMT=mp4;; *) FMT=$([ "$DEXT" = mov ] && echo mov || echo mp4);; esac
-PART="$(rtm_part "$OUT")"   # extension-keeping (D6)
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 if ! ffmpeg -nostdin -y -v error "${FF_INPUT_OPTS[@]}" -i "$IN" \
     "${VARGS[@]}" ${AARGS[@]+"${AARGS[@]}"} \
     "${PROV[@]}" -movflags use_metadata_tags+faststart -f "$FMT" "$PART"; then

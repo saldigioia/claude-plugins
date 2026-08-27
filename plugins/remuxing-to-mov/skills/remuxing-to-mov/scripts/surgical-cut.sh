@@ -153,6 +153,8 @@ PRED=$(rewrap_predict "$IN" "$FILTV" "$FILTA")
 echo "   predicted monotonicity nudges: ${PRED:-0}"
 
 # --- build ------------------------------------------------------------------------
+trap 'rm -rf "$TMP"; rtm_unlock' EXIT   # re-armed: TMP cleanup + writer-lock release (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
 PART="$(rtm_part "$OUT")"
 MUXLOG="$TMP/mux.log"
 BARGS=(-bsf:v "$FILTV")

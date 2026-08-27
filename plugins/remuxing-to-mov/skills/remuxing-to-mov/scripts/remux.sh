@@ -410,7 +410,9 @@ VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
 cp=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 
-PART="$(rtm_part "$OUT")"; MUXLOG="$(mktemp)"   # extension-keeping (D6)
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
+PART="$(rtm_part "$OUT")"; MUXLOG="$(mktemp)"   # extension-keeping (D6) + unique per process (A2)
 mux_once () {  # mux_once INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
   # $DRC sits BEFORE -i (WO 3.7): -drc_scale is a decoder option and must ride
   # the input side; after -i ffmpeg would reject it as an unknown output option

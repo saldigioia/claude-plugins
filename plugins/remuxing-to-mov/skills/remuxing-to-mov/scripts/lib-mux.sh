@@ -42,6 +42,9 @@ RTM_MUX_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # rtm_sidecar OUT TAG -> a temp/intermediate name for OUT that KEEPS the real
 # extension: rtm_sidecar /a/x.mov part -> /a/x.part.mov. An extensionless target
 # gets .mov, because an extensionless artifact is the very thing this prevents.
+# DETERMINISTIC on purpose: premeta/autobest must be re-derivable within a run
+# (auto.sh rm-cleans a stale park by name), and cross-run safety is rtm_lock's
+# job, not the name's.
 rtm_sidecar () {
   local out="${1:?rtm_sidecar needs OUT}" tag="${2:?rtm_sidecar needs a TAG}" base
   base="$(basename "$out")"
@@ -51,8 +54,136 @@ rtm_sidecar () {
   esac
 }
 
-# rtm_part OUT -> the atomic part-file name for OUT ("out.mov" -> "out.part.mov")
-rtm_part () { rtm_sidecar "${1:?rtm_part needs OUT}" part; }
+# rtm_part OUT -> the atomic part-file name for OUT — extension-keeping (D6)
+# and, since WO-1.15.6 (CHECKUP-2026-08-27 A2), UNIQUE PER PROCESS:
+# "out.mov" -> "out.part-<pid>-<epoch>.mov". The deterministic name was half
+# the measured A2 corruption: two runs sharing one part path meant run B's
+# `ffmpeg -y` truncated run A's part mid-census (A blessed foreign bytes,
+# rc=0, delivered file undecodable), and a stale .part kept as FAIL evidence
+# was silently truncated by the next run's -y — the very file the retention
+# message told the operator to inspect. pid separates concurrent writers;
+# the epoch separates a recycled pid from a weeks-old kept part. One name
+# per run (a second call in the same process/second returns the same name —
+# every builder mints exactly once). D6 is about the SUFFIX, not
+# determinism: the real extension still comes last.
+rtm_part () { rtm_sidecar "${1:?rtm_part needs OUT}" "part-$$-$(date +%s)"; }
+
+# --- WO-1.15.6 (CHECKUP-2026-08-27 A2 + F11): one writer, atomic bless ------
+#
+# rtm_lock OUT — the per-OUT writer lock. mkdir is the primitive (atomic on
+# POSIX; macOS ships no flock(1)); the lockdir "<OUT>.lock" holds pid + host.
+# A second live writer REFUSES (return 1; callers exit 2 — pre-flight family,
+# nothing written). A lock whose recorded pid is dead ON THIS HOST is stolen
+# with a one-line announcement (kill-9/reboot self-heal). An EMPTY pid file is
+# treated as LIVE — the holder's mkdir-to-pid-write window must never be
+# stolen; never-corrupt beats auto-heal, and the refusal names the rm -rf
+# remedy for a truly-orphaned lock. Re-entrancy: acquiring exports
+# RTM_LOCK_HELD=<lockdir>, so a CHILD builder computing the same lockdir
+# (mov.sh/auto.sh/mp4-swap.sh drive builders at their own OUT) proceeds
+# without owning — the driver's single lock spans its children, its
+# deterministic sidecars (idrtrim/premeta/autobest), and its post-build reads.
+# Release: the acquirer installs `trap 'rtm_unlock' EXIT` at the acquisition
+# site (all arg guards run before it — the lib-exit EXIT-trap caveat);
+# lib-exit routes INT/TERM/HUP through exit 1, so killed runs release too.
+RTM_LOCKDIR=""   # set only in the process that OWNS the lock
+
+rtm_lock () {
+  local out="${1:?rtm_lock needs OUT}" d lockdir opid ohost myhost stole=0
+  d="$(cd "$(dirname "$out")" 2>/dev/null && pwd)" || d="$(dirname "$out")"
+  lockdir="$d/$(basename "$out").lock"
+  [ "${RTM_LOCK_HELD:-}" = "$lockdir" ] && return 0   # parent driver holds it
+  myhost="$(hostname 2>/dev/null || echo unknown)"
+  while :; do
+    if mkdir "$lockdir" 2>/dev/null; then
+      printf '%s\n' "$$" > "$lockdir/pid"
+      printf '%s\n' "$myhost" > "$lockdir/host"
+      RTM_LOCKDIR="$lockdir"
+      export RTM_LOCK_HELD="$lockdir"
+      return 0
+    fi
+    opid=$(cat "$lockdir/pid" 2>/dev/null || true)
+    ohost=$(cat "$lockdir/host" 2>/dev/null || true)
+    if [ "$stole" -eq 0 ] && [ -n "$opid" ] && [ "${ohost:-$myhost}" = "$myhost" ] \
+       && ! kill -0 "$opid" 2>/dev/null; then
+      echo "   (stale writer lock: holder pid $opid is gone — taking over $lockdir)"
+      rm -rf "$lockdir"; stole=1; continue
+    fi
+    echo ">> ONE WRITER per OUT (CHECKUP-2026-08-27 A2): $lockdir" >&2
+    echo "   is held by pid ${opid:-unknown, still creating}${ohost:+ on $ohost}. A second concurrent writer" >&2
+    echo "   corrupts the artifact the first one blesses (measured: the census and the" >&2
+    echo "   mv are not atomic against another -y). Nothing was written. Wait for that" >&2
+    echo "   run, pick another OUT — or, ONLY if that run is truly gone:" >&2
+    echo "   rm -rf \"$lockdir\"" >&2
+    echo "RTM_LOCK verdict=refused holder=${opid:-unknown} dir=$lockdir"
+    return 1
+  done
+}
+
+rtm_unlock () {
+  [ -n "${RTM_LOCKDIR:-}" ] && rm -rf "$RTM_LOCKDIR"
+  RTM_LOCKDIR=""
+  return 0
+}
+
+# rtm_free_bytes DIR -> free bytes on DIR's volume, empty when unmeasurable.
+# Test hook: RTM_DISK_FREE_KB injects the reading (kilobytes; non-numeric
+# values simulate a broken meter). df -Pk: POSIX portable-format kilobytes.
+rtm_free_bytes () {
+  local kb
+  if [ -n "${RTM_DISK_FREE_KB:-}" ]; then kb="$RTM_DISK_FREE_KB"
+  else kb=$(df -Pk "${1:?rtm_free_bytes needs DIR}" 2>/dev/null | awk 'NR==2{print $4}'); fi
+  case "$kb" in ''|*[!0-9]*) return 0;; esac
+  printf '%s' $((kb * 1024))
+}
+
+# rtm_disk_preflight OUT SRC [STAGE_DIR] — F11: free bytes on OUT's volume
+# (and the staging volume, when the builder has one — rebuild-paff's WORK)
+# must be >= the source's size, else refuse (return 1; callers exit 2,
+# nothing written). Deliberately ONE rule (the TSH_LOSS_FAIL precedent):
+# a lossless remux writes roughly the source's size. The genuinely-smaller
+# classes (cuts/trims) skip with RTM_DISK_CHECK=0 — an OPERATOR knob, which
+# is legitimate here where 1.15.2 Defect-B forbade one: this is a resource
+# heuristic, not an evidence gate, and every output gate still judges the
+# build. A failed df announces "could not measure" and NEVER refuses —
+# EMPTY != ABSENT applies to refusals too: a broken meter is not a full disk.
+rtm_disk_preflight () {
+  local out="${1:?rtm_disk_preflight needs OUT}" src="${2:?rtm_disk_preflight needs SRC}" stage="${3:-}"
+  local need free d
+  if [ "${RTM_DISK_CHECK:-1}" != 1 ]; then
+    echo "   (disk pre-flight skipped: RTM_DISK_CHECK=0 — the build's own gates still judge)"
+    return 0
+  fi
+  need=$(wc -c < "$src" 2>/dev/null | tr -d ' ') || need=""
+  case "$need" in ''|*[!0-9]*) return 0;; esac   # unreadable source size: not this gate's business
+  for d in "$(dirname "$out")" ${stage:+"$stage"}; do
+    free=$(rtm_free_bytes "$d")
+    if [ -z "$free" ]; then
+      echo "   (disk pre-flight could not measure free space on $d — proceeding unverified)"
+      continue
+    fi
+    if [ "$free" -lt "$need" ]; then
+      echo ">> REFUSED (pre-flight): not enough free space on $d — free $free bytes <" >&2
+      echo "   source $need bytes. A lossless remux writes roughly the source's size, and" >&2
+      echo "   an ENOSPC an hour in leaves a truncated .part whose short size reads like a" >&2
+      echo "   different defect (CHECKUP-2026-08-27 F11). Nothing was written. Free space" >&2
+      echo "   and retry — or, when the intended output is genuinely smaller (a cut/trim)," >&2
+      echo "   skip this check with RTM_DISK_CHECK=0 (operator knob; references/knobs.md)." >&2
+      echo "RTM_DISK verdict=refused free=$free need=$need vol=$d"
+      return 1
+    fi
+  done
+  return 0
+}
+
+# rtm_writer_preflight OUT SRC [STAGE_DIR] — what every builder owes BEFORE
+# its first write: the writer lock, then the disk check. Callers install
+# `trap 'rtm_unlock' EXIT` first (extending an existing cleanup trap where
+# one exists), then `rtm_writer_preflight "$OUT" "$IN" || exit 2`.
+rtm_writer_preflight () {
+  rtm_lock "${1:?rtm_writer_preflight needs OUT}" || return 1
+  rtm_disk_preflight "$1" "${2:?rtm_writer_preflight needs SRC}" "${3:-}" || return 1
+  return 0
+}
 
 # mux_census FILE PLANNED_N PLANNED_CODECS_CSV [STAGE] [SOURCE]
 #   PLANNED_N            how many streams the builder mapped (its own plan)

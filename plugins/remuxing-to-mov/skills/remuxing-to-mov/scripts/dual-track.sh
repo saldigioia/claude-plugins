@@ -116,7 +116,9 @@ esac
 
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
-PART="$(rtm_part "$OUT")"   # extension-keeping (D6)
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 
 # track titles, self-describing
 T1="PCM ${BITS}-bit (access)"

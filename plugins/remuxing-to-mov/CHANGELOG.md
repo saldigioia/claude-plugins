@@ -4,6 +4,66 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.6 — "one writer, atomic bless" round (2026-08-27)
+
+`WO-1.15.6-ONE-WRITER.md` — the checkup round packaged as "one writer"
+(CHECKUP-2026-08-27 **A2 + F11**, both CONFIRMED with measured repros),
+penciled there as "1.15.5" and shipping as 1.15.6 (WO-1.15.3's execution
+took 1.15.5). Tests **86–87**, red-verified against 6e90e20 first
+(86: 14 red — including the sequential evidence-truncation pin; 87: 11 red).
+
+- **A2, half 1 — unique part names:** `rtm_part` now mints
+  `out.part-<pid>-<epoch>.mov` (extension-keeping as ever — D6 is about the
+  SUFFIX, not determinism). The deterministic name was half the measured
+  corruption: two runs sharing one part path meant run B's `ffmpeg -y`
+  truncated run A's part mid-census (A blessed foreign bytes, rc=0,
+  delivered file undecodable), and the SEQUENTIAL half — a stale `.part`
+  kept as FAIL evidence was silently truncated by the next run's `-y`, the
+  very file the retention message invited the operator to inspect. Test 86
+  pins the kept evidence surviving a retry byte-identical. `rtm_sidecar`
+  stays deterministic on purpose (premeta/autobest must be re-derivable
+  within a run; cross-run safety is the lock's job). `trim-to-idr.sh`'s
+  1.9-era inline part name converts to `rtm_part`. Test 45's exact-name
+  pins re-recorded as shape pins (deviation recorded in the WO).
+- **A2, half 2 — the per-OUT writer lock:** `rtm_lock`/`rtm_unlock`
+  (lib-mux.sh) — `mkdir "<OUT>.lock"` (atomic POSIX primitive; macOS ships
+  no flock) holding pid + host. A second live writer REFUSES pre-flight,
+  exit 2, nothing written, machine row `RTM_LOCK verdict=refused holder=
+  dir=`. A dead same-host holder is stolen with one announced line
+  (kill-9/reboot self-heal); an EMPTY pid file is treated as LIVE — the
+  holder's mkdir-to-pid-write window is never stolen (never-corrupt beats
+  auto-heal; the refusal names `rm -rf` for the truly-orphaned case).
+  Drivers hold ONE lock across children/sidecars/post-build reads via the
+  exported `RTM_LOCK_HELD` re-entry (mov.sh after OUT settles, auto.sh
+  before the stale-park rm, mp4-swap.sh newly sourcing lib-mux,
+  waiver.sh — a waiver must never bind to a MOVING OUT). Release is an
+  EXIT trap at the acquisition site (after every arg guard — the lib-exit
+  EXIT-trap caveat pattern); lib-exit already routes INT/TERM/HUP through
+  exit 1, so killed runs release; kill-9 leaves the stale-steal case.
+- **F11 — disk pre-flight:** `rtm_disk_preflight OUT SRC [STAGE_DIR]` —
+  free bytes on OUT's volume (and the staging volume: `rebuild-paff` stages
+  ~1× the source's media on TMPDIR before its mux starts) must be ≥ the
+  source size, else REFUSE exit 2 with the arithmetic + machine row
+  `RTM_DISK verdict=refused free= need= vol=`. ONE rule deliberately (the
+  TSH_LOSS_FAIL precedent); its stated assumption — a lossless remux
+  writes roughly the source's size — has legitimate exceptions (cuts,
+  trims), so `RTM_DISK_CHECK=0` is an OPERATOR knob: a resource heuristic
+  is not an evidence gate, which is why a knob is legitimate here where
+  1.15.2 Defect-B forbade one. A failed `df` announces "could not
+  measure — proceeding unverified" and never refuses (EMPTY ≠ ABSENT
+  applies to refusals too: a broken meter is not a full disk). Test hook
+  `RTM_DISK_FREE_KB`; threshold pinned as a relationship in test 87 (free
+  just below the fixture's size refuses, just above proceeds).
+- **Wiring:** `rtm_writer_preflight OUT SRC [STAGE_DIR]` (lock + disk) at
+  all 11 builders' writer-begins point (the `rtm_part` site — read-only
+  modes like `--print-plan` never reach it); `zero-base`/`surgical-cut`
+  re-arm their TMP traps to include the unlock. Lock-only at the four
+  driver/sidecar scripts. Machine rows tabled in SKILL.md; knobs
+  (`RTM_DISK_CHECK`, hooks) in `knobs.md`.
+- **Recorded residual:** `batch.sh`'s ledger CSV (a report, not an
+  artifact) is not locked — two concurrent batch runs sharing a ledger
+  path interleave it; inherited by the next filing knowingly.
+
 ## 1.15.5 — "verify the POC gate's reach" round (WO-1.15.3 executed, 2026-08-27)
 
 `WO-1.15.3-VERIFY-POC-REACH.md`, filed 2026-08-27 and executed the same day,

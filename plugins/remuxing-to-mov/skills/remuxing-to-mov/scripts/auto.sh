@@ -304,6 +304,13 @@ if [ "$DRY" -eq 1 ]; then
   exit 0
 fi
 
+# ONE WRITER per OUT (WO-1.15.6 / CHECKUP-2026-08-27 A2): the ladder holds one
+# lock across every rung attempt, the .autobest park, and each verify read of
+# OUT; children re-enter via RTM_LOCK_HELD and run the disk pre-flight
+# themselves. Acquired after --dry-run (which writes nothing) has exited.
+trap 'rtm_unlock' EXIT
+rtm_lock "$OUT" || exit 2
+
 rm -f "$BEST_SAVE"   # a stale park from a killed earlier run must never be "restored"
 
 if [ "$PF_PAFF" = yes ]; then

@@ -153,6 +153,13 @@ if [ -z "$OUT" ]; then
   [ "$OUT" = "$d/$b" ] && OUT="$d/$stem.qt.mov"   # input already .mov -> don't target the source
 fi
 
+# ONE WRITER per OUT (WO-1.15.6 / CHECKUP-2026-08-27 A2): the driver holds one
+# lock across its children (they re-enter via RTM_LOCK_HELD), its
+# idrtrim/premeta sidecars, and its post-build reads of OUT; the children run
+# the disk half of the pre-flight themselves.
+trap 'rtm_unlock' EXIT
+rtm_lock "$OUT" || exit 2
+
 # OPT-IN metadata: applied as a -c copy pass on the finished file ONLY when the user
 # passed metadata flags. NEVER automatic. Proper QuickTime format + drops the generic
 # chapter "menu" (metadata.sh); A/V stays bit-identical.

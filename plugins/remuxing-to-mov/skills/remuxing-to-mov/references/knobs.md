@@ -28,6 +28,7 @@ documented in SKILL.md's machine-lines table, not here.
 | `RTM_CHAPTER_TS_DROP_SECS` | `5965` | `mov.sh`, `resync.sh` | Chapter-track silent-drop risk announce (conservative superset of the measured geometry gate). |
 | `RTM_FORCE_BACKHAUL` | `0` | `mov.sh --force-backhaul`, `backhaul_gate` children | Operator has decided: short-circuits the whole shared backhaul gate (advisory included at child entry points — P1c). Human decision, never set by a session on its own. |
 | `RTM_PRECOND_ATTEST` | unset | `lib-attest.sh` consumers (`derive-dts.sh`, `pairfill-paff.sh`) | Verbatim operator attestation string overriding ONE named precondition; writes a `.precond-waiver.txt` sidecar. Every output gate still runs. |
+| `RTM_DISK_CHECK` | `1` | every builder's writer pre-flight (`rtm_disk_preflight`, `lib-mux.sh` — WO-1.15.6 F11) | `0` skips the free-disk pre-flight (free bytes on OUT's/staging volume ≥ source size), ANNOUNCED. For the genuinely-smaller-output classes (cuts/trims) on a nearly-full disk. A resource heuristic, not an evidence gate — every output gate still judges the build. |
 | `TSH_LOSS_FAIL` | `100` | `ts-health.sh`, `diagnose.sh` | Transport-error count where "proceed with eyes open" becomes "re-capture" — deliberately one knob so the two scanners cannot disagree. |
 | `DISC_MULT` | `1.5` | `ts-health.sh`, `disc_scan` (`lib-paff.sh`) | Forward-gap threshold in frame durations. |
 
@@ -58,6 +59,8 @@ Added in 1.15.0 (source clinic):
 | `RTM_BACKHAUL_GATED` | `backhaul_gate` (`lib-paff.sh`) | Caller already ran the gate — children skip the re-check. Set by drivers, not humans. |
 | `PF_SCAN_WINDOW` | `lib-paff.sh` | The one named window constant for both windowed advisory scans (P1.1; default 5000). |
 | `PF_SPS_NOISE_MAX`, `PF_PPF_WINDOW` | `lib-paff.sh` | SPS-parse noise ceiling / PPF probe window bounds. |
+| `RTM_DISK_FREE_KB` | `rtm_free_bytes` (`lib-mux.sh`, WO-1.15.6) | Injected free-space reading in kilobytes (bypasses `df`); a non-numeric value simulates a broken meter (which must announce and proceed, never refuse). |
+| `RTM_LOCK_HELD` | `rtm_lock` (`lib-mux.sh`, WO-1.15.6) | Set by the LOCK ITSELF when a driver acquires (exported lockdir path) so child builders on the same OUT re-enter instead of deadlocking. Driver-set, like `RTM_BACKHAUL_GATED` — never set by humans. |
 
 ## Cost models (measured, so nobody re-pays to rediscover them)
 

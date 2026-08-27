@@ -416,7 +416,9 @@ if [ "$PP_MODEL" = junction ]; then
 else
   SETTS="setts=pts=if(lt(PTS\,-8000000000000000000)\,PREV_OUTPTS+${A}\,PTS):dts=if(lt(PREV_OUTDTS\,-8000000000000000000)\,PTS-${PREROLL}\,PREV_OUTDTS+${A}+${AB}*mod(N\,2))"
 fi
-PART="$(rtm_part "$OUT")"; MUXLOG="$(mktemp)"   # extension-keeping (D6)
+trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
+rtm_writer_preflight "$OUT" "$IN" || exit 2
+PART="$(rtm_part "$OUT")"; MUXLOG="$(mktemp)"   # extension-keeping (D6) + unique per process (A2)
 echo "-- muxing (video bits copied untouched; timeline pair-filled) --"
 pf_mux () {  # pf_mux INPUT_OPT... — one attempt; only the probe window varies (WO 1.2)
   ffmpeg -nostdin -y -hide_banner -nostats ${DRC[@]+"${DRC[@]}"} "$@" -i "$IN" \
