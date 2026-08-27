@@ -4,6 +4,102 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.4 — "EMPTY ≠ ABSENT" round (2026-08-27)
+
+First round packaged by `CHECKUP-2026-08-27.md` (six-axis audit; findings
+verified with measured repros) — the sites where a probe's EMPTY output was
+read as a measured fact. The rule this round lands, twin of 1.15.2's
+UNPROVEN ≠ FAILED: **no probe output feeds a verdict, a plan, or an
+accusation without its exit status** (the `clean.sh` capture idiom,
+`set +e; x=$(…); rc=$?; set -e`, at every touched site). Full scope +
+leftovers: `WO-1.15.4-EMPTY-NE-ABSENT.md`. No released 1.15.3 exists —
+`WO-1.15.3-VERIFY-POC-REACH.md` stays filed-unexecuted (its reserved test
+numbers 77–79 are kept; this round's cases are 80–85).
+
+- **A1 (the worst confirmed finding — silent false-bless):** one failed
+  ffprobe (the audio-manifest query) shipped a silently audio-stripped MOV as
+  ">> DONE … verified lossless", exit 0. The whole feeder family now fails
+  CLOSED: `remux.sh`'s plan probe refuses exit 2; `probe.sh --kv` emits
+  `PR_AUD_MANIFEST=failed` + exits 1 instead of fabricating
+  `PR_AUD_COUNT=0` from its awk END block (which silently disabled the
+  Dolby-E refusal loop at every eval site); the `mov.sh`/`auto.sh` eval
+  sites capture the probe rc and refuse; `mov.sh`'s `--print-plan` consumer
+  relays a failed plan instead of reading it as MODE=none ("no audio →
+  pure copy"); `rebuild-paff.sh`'s audio census refuses instead of
+  "rebuilding video only"; `verify.sh` gates (f)/(g) report a failed census
+  as **UNPROVEN → REVIEW**, never "gate N/A" + OK. Test 80 (PATH-shim fault
+  injection, the checkup-appendix recipe, plus fail-closed-not-fail-always
+  negative controls).
+- **C2:** `verify-source.sh` with an empty/invalid SOURCE baseline
+  (`--src-tsh` empty file, failed scan) accused "backward DTS INTRODUCED
+  (0 → N)" on a byte-identical copy. Now: "no source baseline — attribution
+  UNPROVEN", one REVIEW, the four s_*-dependent comparisons skipped and the
+  output counters printed unattributed. Test 81.
+- **C3:** `verify.sh` gate (b) read empty-vs-empty hashes (tool failure —
+  both `fhead` and the VCL branch end `|| true`) as "decoded frames differ /
+  VCL MISMATCH — NOT a lossless copy". Accusations now require two NON-EMPTY
+  differing hashes; empty is "could not decode — INCONCLUSIVE" REVIEW,
+  mirroring gate (a) and the degraded-env arm. Test 81 (ffmpeg-shim
+  injection + re-encode discrimination controls).
+- **C4:** `ts-health.sh` on an unreadable input died at its first probe with
+  zero output and exit 1 — the contract's DAMAGED. Now an announced
+  pre-flight: "cannot read (ffprobe rc=N), NOT a damage verdict", exit 2;
+  `clean.sh` propagates the child's 2 as 2 instead of relabeling it. Test 81.
+- **C6 (+ the D4 fixture it was deferred for):** `verify.sh`'s `spo()` read
+  ffprobe's `start_pts`/`time_base` by LINE NUMBER while ffprobe emits
+  canonical order (measured: line 1 = time_base) — declared start_pts read 0
+  unconditionally, the D4 "delta == declared start_pts, content aligned"
+  branch (built for the 2026-08-15 field case) was dead code, and the report
+  printed a false measurement inviting the exact "fix" the D4 comment warns
+  against. Now parsed BY KEY; the branch is re-armed WITH its fixture: a
+  minted dual-track MOV whose 4800-sample decode delta equals its declared
+  start_pts reads "ALIGNED at offset 0 … not drift" → OK, and a
+  non-matching offset still reads "NOT explained" → REVIEW. Test 82.
+- **C7:** `mov.sh`'s bare builder calls died at a child's exit 10 —
+  remux.sh's SANCTIONED REVIEW — skipping verify, playability, metadata,
+  `MOV_SUMMARY`, the verdict line and trim custody (measured: rc=10,
+  verify ran 0). Builders are now rc-captured: 10 continues into the gate
+  battery with a REVIEW floor (an OK verify cannot outrank the child's own
+  10); other codes announce, keep temp custody, and propagate unchanged.
+  Test 83.
+- **D1:** the confession hard-stop's frequency summary
+  (`…| sort -rn | head -4`) SIGPIPEd its producer on large muxlogs and the
+  ERR trap ate the "kept at $PART (log: $MUXLOG)" pointer — a mktemp path,
+  unfindable without it (`remux.sh` + `pairfill-paff.sh`; `derive-dts.sh`
+  was fixed in the one-liner round). The reader is now `awk 'NR<=4'` (reads
+  to EOF). Test 84 reproduces with a 30k-line log — measured red pre-fix on
+  this bench.
+- **D2:** `verify.sh --full`'s whole-file decodes ran in statement position —
+  a mid-decode failure was a SILENT exit 1 (no verdict line) that leaked the
+  mktemp dir of framemd5 lists (~40 MB/occurrence). Both `--full` arms now
+  capture per-decode rcs, print "FAILED mid-stream … INCONCLUSIVE (UNPROVEN,
+  not FAILED)", land REVIEW, and clean up on every path. Siblings fixed the
+  same way: `lead-check.sh`'s astats probe (announces, keeps
+  `audio_hot=na`) and `qt-groups.sh`'s essence proofs (UNPROVEN — not
+  blessed, evidence pointer intact; the empty-vs-empty accusation arm is
+  unreachable for tool failures). Test 84.
+- **C8:** `derive-dts.py` opened inputs at libav's stock 5 MB probesize
+  against lib-probe.sh's "no call site can fall back to stock defaults"
+  (measured on the repo's own late-sps.ts: PyAV saw 0x0). `rtm_open_options()`
+  now plumbs `RTM_PROBESIZE`/`RTM_ANALYZEDURATION` (same 200M defaults,
+  K/M/G parsed to plain integers) into both read-side `av.open` calls.
+  Test 85 (unit lane, importlib — no PyAV needed) + a lockstep guard on the
+  call sites.
+- **A4 lockstep guard:** the one-liner round's broadened `mux_confessions`
+  carried a "keep in lockstep" comment with no test — test 84 now asserts
+  the two confession regexes byte-identical and pins the 4.4-era spellings.
+
+One carried pin re-recorded, not weakened: test 12 §3's never-mask control
+fed remux.sh a garbage input to provoke its mux-stage failure — with A1 an
+unreadable input now refuses at the pre-flight (exit 2, nothing written,
+still no retry line), so the pin records the new contract while the
+property it guards (a non-probe-shaped failure is never retried, reported
+once, writes nothing) is asserted unchanged.
+
+Suite 280/280 on this bench (274 carried + tests 80–85, each verified RED
+against a checkout of the pre-round commit); `claude plugin validate
+--strict` green on plugin and marketplace.
+
 ## 1.15.2 — field-defects round (2026-08-27)
 
 Four defects measured in the field on one live capture (2022-08-28 MTV VMA

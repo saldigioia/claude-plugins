@@ -43,7 +43,9 @@ echo "   (report-only: nothing is written; every named route stays in the source
 # --- 1. identity + profile (probe) ------------------------------------------------
 echo "-- 1. probe (identity + timestamp profile) --"
 set +e; PKV=$(bash "$SELF_DIR/probe.sh" "$IN" --kv 2>/dev/null); prc=$?; set -e
-[ -n "$PKV" ] || { echo "probe.sh could not read the source (rc=$prc)" >&2; exit 1; }
+# a child rc 2 is its pre-flight "cannot read" — propagate it as OUR 2, never
+# relabeled 1 (= this contract's DAMAGED-adjacent FAIL; WO-1.15.4 C4)
+[ -n "$PKV" ] || { echo "probe.sh could not read the source (rc=$prc)" >&2; [ "$prc" -eq 2 ] && exit 2; exit 1; }
 pget () { printf '%s\n' "$PKV" | sed -n "s/^$1=//p" | head -1; }
 CONT=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 ST=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
@@ -54,7 +56,9 @@ echo "   container=$CONT video=$(pget PR_VCODEC)/$(pget PR_PIX_FMT) audio_tracks
 # --- 2. whole-file health (ts-health) ---------------------------------------------
 echo "-- 2. ts-health (whole-file transport + timeline, demux only) --"
 set +e; bash "$SELF_DIR/ts-health.sh" "$IN" --kv > "$TMP/tsh" 2>/dev/null; thrc=$?; set -e
-[ -s "$TMP/tsh" ] || { echo "ts-health could not scan the source (rc=$thrc)" >&2; exit 1; }
+# ts-health's 2 is its announced "cannot read" pre-flight (WO-1.15.4 C4) —
+# propagate as 2; only a real scan failure stays this driver's 1
+[ -s "$TMP/tsh" ] || { echo "ts-health could not scan the source (rc=$thrc)" >&2; [ "$thrc" -eq 2 ] && exit 2; exit 1; }
 tget () { sed -n "s/^$1=//p" "$TMP/tsh" | head -1; }
 echo "   transport: CC=$(tget TSH_CC) corrupt=$(tget TSH_CORRUPT) PES=$(tget TSH_PES) scrambled=$(tget TSH_SCRAMBLED)"
 echo "   timeline:  napts=$(tget TSH_NAPTS) nadts=$(tget TSH_NADTS) back=$(tget TSH_BACK) dup=$(tget TSH_DUP) gaps=$(tget TSH_GAPS) wrap=$(tget TSH_WRAP) prekey=$(tget TSH_PREKEY)"

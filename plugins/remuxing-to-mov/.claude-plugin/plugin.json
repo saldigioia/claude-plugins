@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "remuxing-to-mov",
   "displayName": "Remux to MOV & Source Clinic",
-  "version": "1.15.2",
+  "version": "1.15.4",
   "description": "Lossless-first remux of broadcast captures (.ts, .mpg/.vob, .mkv, broken .mov) into verified, QuickTime-ready .mov — plus a source clinic that checks and corrects a capture in its own container without remuxing at all. Never re-encodes video, never touches the source; every output is verified, and every codec/container claim is re-measured on a named bench (history in CHANGELOG.md).",
   "author": {
     "name": "Rare Data Club",

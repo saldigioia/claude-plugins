@@ -286,18 +286,33 @@ echo "   proof (a) byte-diff: $cmp_n byte(s) differ, all inside the $PATCHED pat
 # (b)+(c) essence hashes — the WO 5.3 mandated form, both sides read in full
 HAS_VIDEO=0
 i=0; while [ "$i" -lt "$NTRAK" ]; do [ "${TK_HANDLER[$i]}" = "76696465" ] && HAS_VIDEO=1; i=$((i + 1)); done
+# D2 sibling (CHECKUP-2026-08-27 / WO-1.15.4): the essence decodes are
+# CAPTURED — in statement position a mid-decode ffmpeg failure was a silent
+# ERR exit 1 that ate the "Evidence kept at $PART" pointer, and an
+# empty-vs-empty hash pair would have read as a proof verdict (the C3 shape).
+# A tool failure is UNPROVEN: announced, not blessed, pointer intact.
 if [ "$HAS_VIDEO" -eq 1 ]; then
-  V_IN=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$IN"   -map 0:v -c copy -f md5 - 2>/dev/null)
-  V_OUT=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$PART" -map 0:v -c copy -f md5 - 2>/dev/null)
-  { [ -n "$V_IN" ] && [ "$V_IN" = "$V_OUT" ]; } \
+  v_rc=0
+  V_IN=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$IN"   -map 0:v -c copy -f md5 - 2>/dev/null) || v_rc=$?
+  V_OUT=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$PART" -map 0:v -c copy -f md5 - 2>/dev/null) || v_rc=$?
+  if [ "$v_rc" -ne 0 ] || [ -z "$V_IN" ] || [ -z "$V_OUT" ]; then
+    echo ">> proof (b) COULD NOT RUN: ffmpeg failed mid-decode (rc=$v_rc; in=${V_IN:-empty} out=${V_OUT:-empty})." >&2
+    echo "   UNPROVEN is not proven — NOT blessing. Evidence kept at $PART." >&2; exit 1
+  fi
+  [ "$V_IN" = "$V_OUT" ] \
     || { echo ">> FAIL: video MD5 proof ($V_IN vs $V_OUT). Evidence kept at $PART." >&2; exit 1; }
   echo "   proof (b) video essence: $V_IN (identical)"
 else
   echo "   proof (b) skipped: no video track (audio-only container; byte-diff bound already covers it)"
 fi
-A_IN=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$IN"   -map 0:a -c copy -f streamhash -hash md5 - 2>/dev/null)
-A_OUT=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$PART" -map 0:a -c copy -f streamhash -hash md5 - 2>/dev/null)
-{ [ -n "$A_IN" ] && [ "$A_IN" = "$A_OUT" ]; } \
+a_rc=0
+A_IN=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$IN"   -map 0:a -c copy -f streamhash -hash md5 - 2>/dev/null) || a_rc=$?
+A_OUT=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$PART" -map 0:a -c copy -f streamhash -hash md5 - 2>/dev/null) || a_rc=$?
+if [ "$a_rc" -ne 0 ] || [ -z "$A_IN" ] || [ -z "$A_OUT" ]; then
+  echo ">> proof (c) COULD NOT RUN: ffmpeg failed mid-decode (rc=$a_rc; in=${A_IN:-empty} out=${A_OUT:-empty})." >&2
+  echo "   UNPROVEN is not proven — NOT blessing. Evidence kept at $PART." >&2; exit 1
+fi
+[ "$A_IN" = "$A_OUT" ] \
   || { echo ">> FAIL: per-stream audio MD5 proof. Evidence kept at $PART." >&2; exit 1; }
 echo "   proof (c) audio essence: $AUD_N per-stream MD5s identical"
 

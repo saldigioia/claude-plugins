@@ -146,15 +146,28 @@ if [ -n "$FIRST_APTS" ] && [ "$FIRST_APTS" != N/A ]; then
   ADISC=$(awk "BEGIN{v=($splice_pts)-($FIRST_APTS); if(v<0)v=0; printf \"%.3f\", v}")
   SSREL=$(awk "BEGIN{v=($splice_pts)-($ST)-1; if(v<0)v=0; printf \"%.3f\", v}")
   # -v info, not error: astats logs its summary at AV_LOG_INFO — at -v error the
-  # measurement never prints and the probe would silently read "no audio"
-  ARMS=$(ffmpeg -nostdin -v info -hide_banner -nostats "${FF_INPUT_OPTS[@]}" -ss "$SSREL" -i "$IN" -map 0:a:0 -t 2 \
-      -af astats=measure_overall=RMS_level:measure_perchannel=none -f null - 2>&1 | \
-    sed -n 's/.*RMS level dB: *//p' | head -1)
-  case "$ARMS" in
-    ''|-inf) AHOT=no;;
-    *) awk "BEGIN{exit !(($ARMS) > -45)}" && AHOT=yes || AHOT=no;;
-  esac
-  echo "   audio across the splice: RMS ${ARMS:--inf} dB -> hot=$AHOT; a cut to picture-start discards ${ADISC}s of audio"
+  # measurement never prints and the probe would silently read "no audio".
+  # D2 sibling (CHECKUP-2026-08-27 / WO-1.15.4): the decode is CAPTURED with
+  # its rc — in statement position a mid-decode failure was a silent ERR exit
+  # 1 (this script's "cannot measure" code, with no message). A failed probe
+  # announces itself and keeps audio_hot=na (unmeasured, not "quiet"); the
+  # first-line pick rides awk, whose read-to-EOF cannot SIGPIPE the producer.
+  set +e
+  ARMS_RAW=$(ffmpeg -nostdin -v info -hide_banner -nostats "${FF_INPUT_OPTS[@]}" -ss "$SSREL" -i "$IN" -map 0:a:0 -t 2 \
+      -af astats=measure_overall=RMS_level:measure_perchannel=none -f null - 2>&1); arms_rc=$?
+  set -e
+  if [ "$arms_rc" -ne 0 ]; then
+    echo "   audio probe FAILED mid-decode (ffmpeg rc=$arms_rc) — audio_hot UNMEASURED (na),"
+    echo "   not 'quiet'; the cut command below omits the audio-drop argument on purpose."
+    AHOT=na
+  else
+    ARMS=$(printf '%s\n' "$ARMS_RAW" | sed -n 's/.*RMS level dB: *//p' | awk 'NF && !g { print; g=1 }')
+    case "$ARMS" in
+      ''|-inf) AHOT=no;;
+      *) awk "BEGIN{exit !(($ARMS) > -45)}" && AHOT=yes || AHOT=no;;
+    esac
+    echo "   audio across the splice: RMS ${ARMS:--inf} dB -> hot=$AHOT; a cut to picture-start discards ${ADISC}s of audio"
+  fi
 else
   echo "   no audio stream (or no audio timestamps) — video-only cut"
   ADISC=0

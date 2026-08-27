@@ -97,8 +97,23 @@ ffmpeg -nostdin -y "${FF_INPUT_OPTS[@]}" -i "$IN" -map 0:v:0 -c:v copy $BSF -f h
 # 2) audio -> PCM/WAV per track (starts at sample 0, stays aligned; a single-track
 #    rebuild would silently drop SAP/secondary audio)
 # sort -u: TS program duplication can list the same stream twice (see ingest-compatibility.md)
-# grep -c + || true: a NO-audio source must yield 0, not a pipefail abort
-NA=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null | sort -u | grep -c . || true)
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the census probe is
+# captured WITH its exit status — the old `| grep -c . || true` read a FAILED
+# probe as NA=0 and rebuilt video-only under "note: no audio streams found".
+# A probe failure refuses pre-flight (exit 2, nothing written); only a
+# successful empty probe means a genuinely audio-free source. Counting rides
+# awk (NF), not grep -c, whose rc-1-on-zero-matches is what bred the || true.
+set +e
+NA_RAW=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$IN" 2>/dev/null); na_rc=$?
+set -e
+if [ "$na_rc" -ne 0 ]; then
+  echo ">> REFUSED (pre-flight): the audio census probe FAILED (ffprobe rc=$na_rc) —" >&2
+  echo "   cannot distinguish 'no audio' from 'probe broke'; a video-only rebuild on a" >&2
+  echo "   guessed census is the silent track-drop class. No OUTPUT written (extracted" >&2
+  echo "   intermediates remain in $WORK)." >&2
+  exit 2
+fi
+NA=$(printf '%s\n' "$NA_RAW" | sort -u | awk 'NF{n++} END{print n+0}')
 AIN=(); AMAP=(); AMETA=()
 i=0
 while [ "$i" -lt "$NA" ]; do

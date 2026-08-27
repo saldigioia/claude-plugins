@@ -367,7 +367,11 @@ conf=${MC_VIDEO:-0}
 if [ "${conf:-0}" -gt 0 ]; then
   echo ">> HARD STOP: the muxer logged $conf timeline confession(s) (pts has no value /"
   echo "   Timestamps are unset / non-monotonic DTS) — it invented timing despite the fill."
-  grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sort | uniq -c | sort -rn | head -4 | sed 's/^/   /'
+  # awk 'NR<=4', never head -4 (CHECKUP-2026-08-27 D1 / WO-1.15.4): head's
+  # early close SIGPIPEd the sort on large muxlogs and the ERR trap ate the
+  # "Kept:" pointer below — the mktemp log became unfindable. awk reads to
+  # EOF; || true is belt-and-braces on a pure-display pipeline.
+  grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sort | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /' || true
   echo "   NOT blessing the output. Kept: $PART (log: $MUXLOG)"; exit 1
 fi
 PF_CONF_REVIEW=0

@@ -172,7 +172,18 @@ apply_metadata () {  # $1 = finished .mov to tag in place via a temp
 
 # probe once; consume the structured KEY=VAL (single source of truth). The grep
 # whitelists PR_/PF_ lines so a stray line can never become code via eval.
-eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the probe's exit status
+# is captured, not laundered through the grep — a failed probe used to eval a
+# manifest whose PR_AUD_COUNT was fabricated as 0 (probe.sh's END block),
+# silently disabling the Dolby-E refusal loop and the audio classifier. rc!=0
+# or a missing PR_AUD_COUNT row is a pre-flight refusal: exit 2, nothing built.
+set +e; PKV=$(bash "$SELF_DIR/probe.sh" "$IN" --kv); pkv_rc=$?; set -e
+if [ "$pkv_rc" -ne 0 ] || ! printf '%s\n' "$PKV" | grep -q '^PR_AUD_COUNT='; then
+  echo ">> REFUSED (pre-flight): probe.sh --kv failed (rc=$pkv_rc) or returned no audio" >&2
+  echo "   manifest — cannot classify this source (EMPTY is not ABSENT). Nothing written." >&2
+  exit 2
+fi
+eval "$(printf '%s\n' "$PKV" | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
 echo "== mov: $IN -> $OUT =="
 echo "   video=$PR_VCODEC  audio=$PR_ACODEC  paff=$PF_PAFF"
 
@@ -422,8 +433,17 @@ if [ "${PREKEY:-0}" -gt 0 ]; then
       IN="$TRIMTMP"; IDRTRIM=$PREKEY
       # the pre-roll skewed every windowed probe fact (untimestamped fractions,
       # PAFF ratios measured across undecodable garbage) -> re-probe the input
-      # the build will actually consume
-      eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
+      # the build will actually consume. Same EMPTY ≠ ABSENT capture as the
+      # front-door probe (CHECKUP-2026-08-27 A1): a failed re-probe must not
+      # eval a fabricated manifest over the good one already in scope.
+      set +e; PKV=$(bash "$SELF_DIR/probe.sh" "$IN" --kv); pkv_rc=$?; set -e
+      if [ "$pkv_rc" -ne 0 ] || ! printf '%s\n' "$PKV" | grep -q '^PR_AUD_COUNT='; then
+        echo ">> REFUSED (pre-flight): re-probe of the trimmed intermediate failed (rc=$pkv_rc)" >&2
+        echo "   — cannot classify what the build would consume. Nothing further written." >&2
+        [ -n "$TRIMTMP" ] && echo "   (trimmed intermediate kept at $TRIMTMP for inspection)" >&2
+        exit 2
+      fi
+      eval "$(printf '%s\n' "$PKV" | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
       echo "   building from the trimmed intermediate: $TRIMTMP"
       echo "   (deleted after a verified DONE; kept for the closer look otherwise)"
     else
@@ -497,7 +517,19 @@ fi
 # --print-plan (RMX_PLAN + RMX_T machine rows) instead of duplicating it. The
 # old classifier read a:0 only — the FLAC-5.1 + MP2-stereo source classified
 # 'pcm' off the FLAC and silently dropped track 2 (the transcript-1 defect).
-PLANOUT=$(bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio-keep "$AKEEP" --print-plan 2>&1 || true)
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the old `|| true` read a
+# FAILED plan (refusal, usage, probe failure) as an empty keep-set — KEPT=""
+# -> MODE=none -> "-- no audio (or none kept) -> pure copy --", a video-only
+# build blessed downstream. A plan that did not exit 0 (or produced no
+# RMX_PLAN row) is relayed verbatim and its contract code propagates: 11
+# stays REFUSED, 2 stays pre-flight, anything else is FAIL.
+set +e; PLANOUT=$(bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio-keep "$AKEEP" --print-plan 2>&1); plan_rc=$?; set -e
+if [ "$plan_rc" -ne 0 ] || ! printf '%s\n' "$PLANOUT" | grep -q '^RMX_PLAN '; then
+  printf '%s\n' "$PLANOUT" | sed 's/^/   plan: /'
+  echo ">> the audio KEEP/DROP plan did not complete (rc=$plan_rc) — refusing to guess a"
+  echo "   keep-set from its absence (an empty plan is not 'no audio'). Nothing built."
+  case "$plan_rc" in 11) exit 11;; 2) exit 2;; *) exit 1;; esac   # stray codes map to FAIL (contract)
+fi
 KEPT=$(printf '%s\n' "$PLANOUT" | sed -n 's/^RMX_PLAN .*kept=\([^ ]*\).*/\1/p' | head -1)
 DROPPED=$(printf '%s\n' "$PLANOUT" | sed -n 's/^RMX_PLAN .*dropped=\([^ ]*\).*/\1/p' | head -1)
 [ "$KEPT" = none ] && KEPT=""
@@ -524,17 +556,27 @@ elif [ "$NKEPT" -eq 1 ] && [ "$KEPT" = 0 ]; then
   [ "$ALWAYS" -eq 1 ] && [ "$MODE" = copy ] && MODE=dual  # --always-dual upgrades native -> dual
 else MODE=multi; fi
 
-AUDV=""
+# C7 (CHECKUP-2026-08-27 / WO-1.15.4): every builder call is CAPTURED, not
+# bare — under set -e a child's exit 10 (remux.sh's SANCTIONED REVIEW, whose
+# own text says "verify gates (f)/(g) judge audio. Building on; exit will say
+# 10") killed this driver at the call site: no verify, no playability check,
+# no metadata, no MOV_SUMMARY, no verdict line, trim_cleanup skipped
+# (measured: remux direct rc=10 correct; through mov.sh rc=10, verify ran 0).
+# rc 10 continues into the gate battery with a REVIEW floor on the final
+# verdict; any other nonzero announces, keeps temp custody, and propagates
+# its contract code (11/2 as themselves, strays to 1) exactly as before.
+AUDV=""; build_rc=0
 case "$MODE" in
   dual)
     # dual-track.sh bypasses remux.sh, so announce the plan (incl. any drops) here
     printf '%s\n' "$PLANOUT" | grep -E '^(-- audio|   KEEP|\*\* WARN)' || true
     echo "-- audio a:0 not QuickTime-native -> dual-track (PCM access + original preserved) --"
-    bash "$SELF_DIR/dual-track.sh" "$IN" "$OUT"; AUDV="--audio" ;;
+    set +e; bash "$SELF_DIR/dual-track.sh" "$IN" "$OUT"; build_rc=$?; set -e
+    AUDV="--audio" ;;
   pcm)
     echo "-- audio a:0 can't be preserved in MOV -> single PCM access track --"
     echo "   (to keep the original bitstream, deliver as MP4/MKV instead; see references/ingest-compatibility.md)"
-    bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio pcm --audio-keep "$AKEEP" ;;
+    set +e; bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio pcm --audio-keep "$AKEEP"; build_rc=$?; set -e ;;
   multi)
     echo "-- $NKEPT audio tracks survive the '$AKEEP' policy --"
     nonnative=0
@@ -556,14 +598,23 @@ case "$MODE" in
     # as PCM access. Pre-3.2 this call copied AC-3 through while the banner
     # promised PCM access (entry 1); a blanket --audio pcm would instead
     # decode already-native AAC for nothing.
-    bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio-keep "$AKEEP" ;;
+    set +e; bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio-keep "$AKEEP"; build_rc=$?; set -e ;;
   none)
     echo "-- no audio (or none kept) -> pure copy --"
-    bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio copy --audio-keep "$AKEEP" ;;
+    set +e; bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio copy --audio-keep "$AKEEP"; build_rc=$?; set -e ;;
   copy)
     echo "-- audio a:0 is QuickTime-native -> pure copy --"
-    bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio copy --audio-keep "$AKEEP" ;;
+    set +e; bash "$SELF_DIR/remux.sh" "$IN" "$OUT" --audio copy --audio-keep "$AKEEP"; build_rc=$?; set -e ;;
 esac
+if [ "$build_rc" -ne 0 ] && [ "$build_rc" -ne 10 ]; then
+  echo ">> build failed (rc=$build_rc) — the builder's own output above says why. Source untouched."
+  trim_cleanup "$build_rc"
+  case "$build_rc" in 2|11) exit "$build_rc";; *) exit 1;; esac
+fi
+if [ "$build_rc" -eq 10 ]; then
+  echo "   (builder exited 10 — its sanctioned REVIEW: the artifact is complete and the notes"
+  echo "    above say where to look. Verify runs now; the final verdict floors at REVIEW.)"
+fi
 
 apply_metadata "$OUT" || { rc=$?; trim_cleanup "$rc"; exit "$rc"; }
 
@@ -580,6 +631,12 @@ set -e
 printf '%s\n' "$o" | sed 's/^/   /'
 
 case "$o" in *">> OK"*) rc=0;; *">> REVIEW"*) rc=10;; *) rc=1;; esac
+# C7: an OK verify cannot outrank the builder's own sanctioned REVIEW (its
+# exit 10 said "look" about something the gate battery does not re-judge)
+if [ "$rc" -eq 0 ] && [ "${build_rc:-0}" -eq 10 ]; then
+  echo "   (verify OK, but the builder's own REVIEW (exit 10) stands — final verdict REVIEW)"
+  rc=10
+fi
 
 # --- post-build playability (WO 4.1): the demoted 4:2:2 gate's empirical half.
 # Only when a pre-build fact made it due — the contribution profile (yuv422p*),

@@ -61,8 +61,10 @@ REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
    gaps, 33-bit PTS wraparound, mid-GOP capture start (fix implemented:
    `scripts/trim-to-idr.sh`), single-GOP
    unseekability, audio duration drift — and names the **lossless** route for
-   each finding (exit 0 CLEAN / 10 FINDINGS / 1 DAMAGED; `--kv` for machine
-   output).
+   each finding (exit 0 CLEAN / 10 FINDINGS / 1 DAMAGED / 2 usage or
+   pre-flight — an input ffprobe cannot read says so and exits 2, never a
+   silent 1: "could not read" is not "proven damaged", WO-1.15.4 C4; `--kv`
+   for machine output).
 1. **Probe** the source first — never guess:
    `scripts/probe.sh INPUT`
    It prints codecs+tags, field structure, Annex-B vs AVCC, color, and

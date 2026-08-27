@@ -250,8 +250,20 @@ fi
 echo "-- (d) defect counters: inherited or explained (ts-health both sides) --"
 set +e; O_TSH=$(bash "$SELF_DIR/ts-health.sh" "$OUT" --kv 2>/dev/null); set -e
 if [ -z "$O_TSH" ]; then downgrade FAIL "ts-health could not scan the OUTPUT"; fi
+s_thrc=0
 if [ -n "$SRC_TSH" ]; then S_TSH=$(cat "$SRC_TSH")
-else set +e; S_TSH=$(bash "$SELF_DIR/ts-health.sh" "$SRC" --kv 2>/dev/null); set -e; fi
+else set +e; S_TSH=$(bash "$SELF_DIR/ts-health.sh" "$SRC" --kv 2>/dev/null); s_thrc=$?; set -e; fi
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 C2 / WO-1.15.4): the SOURCE baseline was
+# never validated — an empty/failed scan (or an empty --src-tsh file) made
+# every ${s_*:-0} read 0 and this gate accused "backward DTS INTRODUCED
+# (0 -> N)" on a byte-identical copy (measured). No baseline means the
+# inherited-vs-introduced attribution is UNPROVEN: one announced REVIEW, and
+# the four comparisons that need the s_* counters are skipped, never guessed.
+S_BASE=ok
+printf '%s\n' "$S_TSH" | grep -q '^TSH_VERDICT=' || S_BASE=missing
+if [ "$S_BASE" = missing ]; then
+  downgrade REVIEW "no source ts-health baseline (scan rc=$s_thrc${SRC_TSH:+; --src-tsh file invalid}) — inherited-vs-introduced attribution UNPROVEN for gaps/rot/wrap; the output's own counters print unattributed below"
+fi
 tsv () { printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -1; }
 o_scr=$(tsv TSH_SCRAMBLED "$O_TSH"); s_gaps=$(tsv TSH_GAPS "$S_TSH"); o_gaps=$(tsv TSH_GAPS "$O_TSH")
 s_back=$(tsv TSH_BACK "$S_TSH");    o_back=$(tsv TSH_BACK "$O_TSH")
@@ -262,16 +274,21 @@ echo "   out: gaps=${o_gaps:-?} back=${o_back:-?} dup=${o_dup:-?} wrap=${o_wrap:
 [ "${o_scr:-0}" -eq 0 ] || downgrade FAIL "OUTPUT reads scrambled"
 [ "$O_P_NAPTS" -le "$S_P_NAPTS" ] || downgrade FAIL "missing PTS INTRODUCED ($S_P_NAPTS -> $O_P_NAPTS) — the re-wrap lost timestamps"
 [ "$O_P_NADTS" -le "$S_P_NADTS" ] || downgrade FAIL "missing DTS INTRODUCED ($S_P_NADTS -> $O_P_NADTS)"
-[ "${o_back:-0}" -le "${s_back:-0}" ] || downgrade FAIL "backward DTS INTRODUCED (${s_back:-0} -> ${o_back:-0})"
-[ "${o_dup:-0}" -le "${s_dup:-0}" ] || downgrade FAIL "duplicate DTS INTRODUCED (${s_dup:-0} -> ${o_dup:-0})"
-allow_gaps=$(( ${s_gaps:-0} + EXP_GAPS_D ))
-if [ "${o_gaps:-0}" -gt "$allow_gaps" ]; then
-  downgrade REVIEW "forward gaps grew beyond the plan (src=${s_gaps:-0} + explained $EXP_GAPS_D < out=${o_gaps:-0})"
-elif [ "${o_gaps:-0}" -gt 0 ]; then
-  echo "   forward gaps on output: ${o_gaps:-0} — inherited/explained (src=${s_gaps:-0}, plan +$EXP_GAPS_D)"
+if [ "$S_BASE" = ok ]; then
+  [ "${o_back:-0}" -le "${s_back:-0}" ] || downgrade FAIL "backward DTS INTRODUCED (${s_back:-0} -> ${o_back:-0})"
+  [ "${o_dup:-0}" -le "${s_dup:-0}" ] || downgrade FAIL "duplicate DTS INTRODUCED (${s_dup:-0} -> ${o_dup:-0})"
+  allow_gaps=$(( ${s_gaps:-0} + EXP_GAPS_D ))
+  if [ "${o_gaps:-0}" -gt "$allow_gaps" ]; then
+    downgrade REVIEW "forward gaps grew beyond the plan (src=${s_gaps:-0} + explained $EXP_GAPS_D < out=${o_gaps:-0})"
+  elif [ "${o_gaps:-0}" -gt 0 ]; then
+    echo "   forward gaps on output: ${o_gaps:-0} — inherited/explained (src=${s_gaps:-0}, plan +$EXP_GAPS_D)"
+  fi
+  if [ "${o_wrap:-0}" -gt "${s_wrap:-0}" ]; then downgrade REVIEW "PTS wraparound count grew (${s_wrap:-0} -> ${o_wrap:-0})"
+  elif [ "${o_wrap:-0}" -lt "${s_wrap:-0}" ]; then echo "   wraparounds ${s_wrap:-0} -> ${o_wrap:-0}: the demuxer unwrapped on read (expected on a re-wrap)"; fi
+else
+  echo "   (back/dup/gaps/wrap comparisons SKIPPED — no source baseline to difference against;"
+  echo "    output shows back=${o_back:-?} dup=${o_dup:-?} gaps=${o_gaps:-?} wrap=${o_wrap:-?}, unattributed)"
 fi
-if [ "${o_wrap:-0}" -gt "${s_wrap:-0}" ]; then downgrade REVIEW "PTS wraparound count grew (${s_wrap:-0} -> ${o_wrap:-0})"
-elif [ "${o_wrap:-0}" -lt "${s_wrap:-0}" ]; then echo "   wraparounds ${s_wrap:-0} -> ${o_wrap:-0}: the demuxer unwrapped on read (expected on a re-wrap)"; fi
 [ "$O_P_PREKEY" -le "$S_P_PREKEY" ] || downgrade REVIEW "pre-keyframe packets grew ($S_P_PREKEY -> $O_P_PREKEY)"
 
 # --- (c) head / duration ----------------------------------------------------------

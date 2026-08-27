@@ -132,9 +132,31 @@ fi
 # program view carries the PMT tags (language!) -> dedupe by stream index,
 # MERGING the two views field-by-field instead of keeping the first verbatim
 # (WO 3.4: the keep-first dedupe read every TS track as lang=und).
-PLAN=$(ffp -v error -select_streams a \
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the manifest probe is
+# captured WITH its exit status before anything selects on it. The old
+# `PLAN=$(ffp … | awk …) || true` made a FAILED probe byte-identical to a
+# genuinely audio-free source — one ffprobe failure shipped a silently
+# audio-stripped MOV as "verified lossless", exit 0 (measured end-to-end,
+# twice, with a PATH shim failing only this query shape). A probe failure is
+# a pre-flight refusal (exit 2, nothing written); only a SUCCESSFUL empty
+# probe means "no audio".
+PLANERR="$(mktemp)"
+set +e
+PLANRAW=$(ffp -v error -select_streams a \
     -show_entries stream=index,codec_name,channels,channel_layout:stream_tags=language \
-    -of compact=p=0:nk=0 "$IN" 2>/dev/null | \
+    -of compact=p=0:nk=0 "$IN" 2>"$PLANERR"); plan_rc=$?
+set -e
+if [ "$plan_rc" -ne 0 ]; then
+  echo ">> REFUSED (pre-flight): the audio-manifest probe FAILED (ffprobe rc=$plan_rc) —" >&2
+  echo "   cannot distinguish 'no audio' from 'probe broke', and planning on an empty" >&2
+  echo "   manifest ships an audio-stripped file as verified (CHECKUP-2026-08-27 A1)." >&2
+  tail -4 "$PLANERR" | sed 's/^/   probe: /' >&2
+  rm -f "$PLANERR"
+  echo "   Nothing written. Source untouched." >&2
+  exit 2
+fi
+rm -f "$PLANERR"
+PLAN=$(printf '%s\n' "$PLANRAW" | \
   awk -F'|' -v pol="$KEEP" '
     # BEGIN{n=0} is load-bearing: an UNINITIALIZED n used as an array subscript
     # is the empty string (not 0) in POSIX awk, silently storing record 0 at
@@ -433,7 +455,14 @@ eval "$(mux_confessions_scoped "$MUXLOG" 0)"   # video is output stream 0:0 (map
 conf=${MC_VIDEO:-0}
 if [ "${conf:-0}" -gt 0 ]; then
   echo ">> HARD STOP: the muxer logged $conf timeline confession(s):"
-  grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sort | uniq -c | sort -rn | head -4 | sed 's/^/   /'
+  # awk 'NR<=4', never head -4 (CHECKUP-2026-08-27 D1 / WO-1.15.4): head's
+  # early close SIGPIPEd the sort above it on large muxlogs (>~64 KB of
+  # matching lines), and pipefail + the ERR trap then exited AFTER these four
+  # summary lines but BEFORE the "Kept:" pointer below — MUXLOG is a mktemp
+  # path, unfindable without it. awk reads to EOF (the ffp1 doctrine applied
+  # to a display pipeline); || true is belt-and-braces on a pure-display line
+  # whose verdict was already decided by the confession counter.
+  grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sort | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /' || true
   echo "   The muxer invented timing for packets the source never timestamped."
   echo "   NOT blessing the output (kept at $PART; log: $MUXLOG)."
   echo "   Run scripts/diagnose.sh \"$IN\" — it routes by MEASURED profile:"

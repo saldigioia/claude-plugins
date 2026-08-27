@@ -21,9 +21,24 @@ IN="${1:?usage: probe.sh INPUT [--kv|--json]}"; MODE="${2:-human}"
 # dropped track 2. Emitted as PR_AUD_COUNT + PR_AUD_<n>_{CODEC,CHANNELS,LAYOUT,
 # LANG}; layouts are single-quoted (parens) — keys satisfy ^(PR|PF)_[A-Z0-9_]+=.
 aud_manifest_kv () {
-  ffp -v error -select_streams a \
+  # EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the old form piped the
+  # probe straight into awk, whose END block printed PR_AUD_COUNT=0 even when
+  # the PRODUCER failed (measured: probe exits 1, 36 keys still emitted, the
+  # Dolby-E refusal loop silently disabled at every eval site). Capture the
+  # probe WITH its exit status; on failure emit the additive sentinel
+  # PR_AUD_MANIFEST=failed, do NOT emit PR_AUD_COUNT, and return 1 so --kv
+  # exits nonzero. Only a SUCCESSFUL empty probe may count zero tracks.
+  local am_raw am_rc
+  set +e
+  am_raw=$(ffp -v error -select_streams a \
       -show_entries stream=index,codec_name,channels,channel_layout:stream_tags=language \
-      -of compact=p=0:nk=0 "$IN" 2>/dev/null | \
+      -of compact=p=0:nk=0 "$IN" 2>/dev/null); am_rc=$?
+  set -e
+  if [ "$am_rc" -ne 0 ]; then
+    printf 'PR_AUD_MANIFEST=failed\n'
+    return 1
+  fi
+  printf '%s\n' "$am_raw" | \
   awk -F'|' 'NF{
       c="unknown"; ch=0; lay=""; lang="und"; idx=""
       for(i=1;i<=NF;i++){ eq=index($i,"="); k=substr($i,1,eq-1); v=substr($i,eq+1)

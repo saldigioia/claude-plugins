@@ -143,7 +143,16 @@ if [ "$bitproven" -eq 0 ]; then
   if [ "$SRC_IS_H264" -eq 1 ] && [ "$HAVE_VCL" -eq 1 ]; then
     echo "-- (b) VCL-payload identity (demux only; lossless arbiter for H.264) --"
     sv=$(vcl_hash "$SRC"); ov=$(vcl_hash "$OUT")
-    if [ -n "$sv" ] && [ "$sv" = "$ov" ]; then
+    # EMPTY ≠ ABSENT (CHECKUP-2026-08-27 C3 / WO-1.15.4): an empty hash is a
+    # TOOL failure (vcl_hash ends || true), not slice data — the accusation
+    # arm is reachable only on two NON-EMPTY differing hashes. Empty-side
+    # verdict mirrors the degraded-env arm: cannot cheaply prove, REVIEW.
+    if [ -z "$sv" ] || [ -z "$ov" ]; then
+      echo "   VCL hash could not be computed (src=$([ -n "$sv" ] && echo ok || echo EMPTY) out=$([ -n "$ov" ] && echo ok || echo EMPTY))"
+      echo "   — no evidence either way: INCONCLUSIVE, not a mismatch. Settle with --full."
+      [ "$verdict" = FAIL ] || verdict=REVIEW
+      note="${note:+$note }VCL hash pass produced no output on one side (tool/decode failure) — losslessness UNPROVEN, not disproven; settle with --full."
+    elif [ "$sv" = "$ov" ]; then
       echo "   VCL MATCH: coded picture data bit-identical — lossless proven"
       echo "   (survives TS->MOV and field-rate rebuilds; framemd5 would false-FAIL here)."
       bitproven=1
@@ -166,7 +175,16 @@ if [ "$bitproven" -eq 0 ]; then
     fhead () { ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -frames:v "$N" -f framemd5 - 2>/dev/null \
                  | grep -v '^#' | awk -F', *' '{print $NF}' || true; }
     sh=$(fhead "$SRC"); oh=$(fhead "$OUT")
-    if [ -n "$sh" ] && [ "$sh" = "$oh" ]; then
+    # EMPTY ≠ ABSENT (CHECKUP-2026-08-27 C3 / WO-1.15.4): fhead ends || true,
+    # so an empty hash list is a DECODE failure, not differing frames — the
+    # measured pre-fix arm read empty==empty as "frames differ; NOT a
+    # lossless copy". Accuse only on two NON-EMPTY differing hash lists.
+    if [ -z "$sh" ] || [ -z "$oh" ]; then
+      echo "   head sample: could not decode (src=$([ -n "$sh" ] && echo ok || echo EMPTY) out=$([ -n "$oh" ] && echo ok || echo EMPTY))"
+      echo "   — no evidence either way: INCONCLUSIVE, not a mismatch. Settle with --full."
+      [ "$verdict" = FAIL ] || verdict=REVIEW
+      note="${note:+$note }Head-sample decode produced no frames on one side (tool/decode failure) — losslessness UNPROVEN, not disproven; settle with --full."
+    elif [ "$sh" = "$oh" ]; then
       echo "   head sample: MATCH ($N decoded frames identical)"
     else
       echo "   head sample: FAIL — decoded frames differ; output is NOT a lossless copy."
@@ -404,9 +422,26 @@ echo "-- (f) A/V duration parity (sync) --"
 # Δ from −2.2s to +1.9s — aresample overfill on multi-gap sources. An audio-LONG
 # delta is called out by direction wherever it lands (inside or beyond budget).
 sdur () { ffp -v error -select_streams "$1" -show_entries stream=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1; }
-vdur=$(sdur v:0); naud=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the audio census is
+# captured WITH its exit status — the old `| grep -c . || true` read a FAILED
+# probe as "no audio tracks", silently disarming this gate. A failed census is
+# UNPROVEN: announced, REVIEW, never a quiet N/A and never a FAIL (the
+# artifact is not indicted by a broken ruler). Counting rides awk (NF), not
+# grep -c, whose rc-1-on-zero-matches is what bred the || true.
+vdur=$(sdur v:0)
+set +e
+f_cen=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null); f_cen_rc=$?
+set -e
+naud=0
+if [ "$f_cen_rc" -eq 0 ]; then
+  naud=$(printf '%s\n' "$f_cen" | LC_ALL=C sort -u | awk 'NF{n++} END{print n+0}')   # distinct indices: a program-bearing OUT lists each stream twice
+fi
 SYNC_TOL="${RTM_SYNC_TOL:-0.25}"
-if [ "${naud:-0}" -eq 0 ] || [ -z "$vdur" ] || [ "$vdur" = N/A ]; then
+if [ "$f_cen_rc" -ne 0 ]; then
+  echo "   audio census probe FAILED (ffprobe rc=$f_cen_rc) — sync parity UNPROVEN, not N/A."
+  [ "$verdict" = FAIL ] || verdict=REVIEW
+  note="${note:+$note }Gate (f) could not census the output audio (ffprobe rc=$f_cen_rc) — A/V duration parity is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+elif [ "${naud:-0}" -eq 0 ] || [ -z "$vdur" ] || [ "$vdur" = N/A ]; then
   echo "   no audio or no stream durations — sync parity N/A."
 else
   worst=0; worst_dir=short; ai=0
@@ -555,14 +590,29 @@ echo "-- (g) audio playability (QTFF sample-entry allowlist + bounded decode) --
 # inherited-damage doctrine — a remux cannot fix source damage, and claiming it
 # caused it is the accusation gates (c)/(e) were rebuilt to stop making — and it
 # is exactly how (c)/(e) already behave on the same evidence.
-g_naud=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
-# the pre-correction figure, kept ONLY so the correction can announce itself
-# (P1c): the census fix silently moved a program-bearing OUT from FAIL to OK by
-# retiring a phantom track, and a FAIL->OK move may never be silent.
-g_naud_raw=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | grep -c . || true)
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): one captured census
+# feeds both counts — the old `| grep -c . || true` pair read a FAILED probe
+# as "no audio tracks in the output — gate N/A" and disarmed the whole
+# playability gate. A failed census is UNPROVEN: announced, REVIEW, never a
+# quiet N/A. awk (NF) counts; grep -c's rc-1-on-zero is what bred || true.
+set +e
+g_cen=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null); g_cen_rc=$?
+set -e
+g_naud=0; g_naud_raw=0
+if [ "$g_cen_rc" -eq 0 ]; then
+  g_naud=$(printf '%s\n' "$g_cen" | LC_ALL=C sort -u | awk 'NF{n++} END{print n+0}')   # distinct indices: a program-bearing OUT lists each stream twice
+  # the pre-correction figure, kept ONLY so the correction can announce itself
+  # (P1c): the census fix silently moved a program-bearing OUT from FAIL to OK by
+  # retiring a phantom track, and a FAIL->OK move may never be silent.
+  g_naud_raw=$(printf '%s\n' "$g_cen" | awk 'NF{n++} END{print n+0}')
+fi
 g_ofmt=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
 g_qtff=0; case ",$g_ofmt," in *,mov,*|*,mp4,*) g_qtff=1;; esac
-if [ "${g_naud:-0}" -eq 0 ]; then
+if [ "$g_cen_rc" -ne 0 ]; then
+  echo "   audio census probe FAILED (ffprobe rc=$g_cen_rc) — audio playability UNPROVEN, not N/A."
+  [ "$verdict" = FAIL ] || verdict=REVIEW
+  note="${note:+$note }Gate (g) could not census the output audio (ffprobe rc=$g_cen_rc) — the playability gate is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+elif [ "${g_naud:-0}" -eq 0 ]; then
   echo "   no audio tracks in the output — gate N/A."
 else
   [ "$g_qtff" -eq 1 ] || echo "   output container '$g_ofmt' has no QTFF sample entries — tag allowlist N/A; the decode half still applies."
@@ -1041,7 +1091,22 @@ if [ "$FULL" -eq 1 ]; then
     HLD="$(mktemp -d)"
     hlist () { ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -f framemd5 - 2>/dev/null \
                  | grep -v '^#' | awk -F', *' '{print $NF}'; }
-    hlist "$SRC" > "$HLD/s"; hlist "$OUT" > "$HLD/o"
+    # EMPTY ≠ ABSENT (CHECKUP-2026-08-27 D2 / WO-1.15.4): the two whole-file
+    # decodes used to run in statement position — a mid-decode failure (I/O
+    # error at 90% of a 2 h broadcast; stderr already discarded) was a SILENT
+    # ERR-trap exit 1 indistinguishable from a real FAIL, and the mktemp dir
+    # (~40 MB of framemd5 lists) leaked. Capture each rc; a failed decode is
+    # INCONCLUSIVE (UNPROVEN, not FAILED) and the scratch dir dies either way.
+    hl_src_rc=0; hlist "$SRC" > "$HLD/s" || hl_src_rc=$?
+    hl_out_rc=0; hlist "$OUT" > "$HLD/o" || hl_out_rc=$?
+    if [ "$hl_src_rc" -ne 0 ] || [ "$hl_out_rc" -ne 0 ]; then
+      echo "   --full decode FAILED mid-stream (src rc=$hl_src_rc, out rc=$hl_out_rc) — the"
+      echo "   whole-file presentation-order check is INCONCLUSIVE: not proof of loss,"
+      echo "   not proof of losslessness. Fix the read/decode problem and re-run --full."
+      [ "$verdict" = FAIL ] || verdict=REVIEW
+      note="${note:+$note }--full whole-file decode failed mid-stream (src rc=$hl_src_rc, out rc=$hl_out_rc) — presentation-order check UNPROVEN, not FAILED; re-run --full after fixing the read/decode problem."
+      rm -rf "$HLD"
+    else
     s=$(sort "$HLD/s" | md5sum | awk '{print $1}'); d=$(sort "$HLD/o" | md5sum | awk '{print $1}')
     sq=$(md5sum < "$HLD/s" | awk '{print $1}'); dq=$(md5sum < "$HLD/o" | awk '{print $1}')
     echo "   source multiset=$s sequence=$sq"
@@ -1065,10 +1130,21 @@ if [ "$FULL" -eq 1 ]; then
       echo "   authoritative lossless proof; not downgrading on this alone."
     fi
     rm -rf "$HLD"
+    fi
   else
     echo "-- (--full) whole-file decoded-pixel identity (two full decodes) --"
     fmd5 () { ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -c:v rawvideo -f md5 - | sed 's/^MD5=//'; }
-    s=$(fmd5 "$SRC"); d=$(fmd5 "$OUT")
+    # same D2 shape as the H.264 arm: statement-position decodes died silently
+    # on a mid-stream failure; capture each rc and call the check inconclusive.
+    fm_src_rc=0; s=$(fmd5 "$SRC") || fm_src_rc=$?
+    fm_out_rc=0; d=$(fmd5 "$OUT") || fm_out_rc=$?
+    if [ "$fm_src_rc" -ne 0 ] || [ "$fm_out_rc" -ne 0 ] || [ -z "$s" ] || [ -z "$d" ]; then
+      echo "   --full decode FAILED mid-stream (src rc=$fm_src_rc, out rc=$fm_out_rc) — the"
+      echo "   decoded-pixel identity check is INCONCLUSIVE: not proof of loss, not proof"
+      echo "   of losslessness. Fix the read/decode problem and re-run --full."
+      [ "$verdict" = FAIL ] || verdict=REVIEW
+      note="${note:+$note }--full decoded-pixel identity failed mid-stream (src rc=$fm_src_rc, out rc=$fm_out_rc) — UNPROVEN, not FAILED; re-run --full after fixing the read/decode problem."
+    else
     echo "   source=$s"
     echo "   output=$d"
     if [ "$s" = "$d" ]; then
@@ -1077,6 +1153,7 @@ if [ "$FULL" -eq 1 ]; then
     else
       echo "   FAIL: decoded frames differ — output is NOT a lossless copy."
       verdict=FAIL; other_failed=1
+    fi
     fi
   fi
 fi
@@ -1196,11 +1273,20 @@ if [ "$AUD" -eq 1 ]; then
       case "$asr" in ''|*[!0-9]*) asr=0;; esac
       bpf=$((bps * ach))
       spo () {  # spo TRACK -> declared start offset in SAMPLES (0 if undeclared)
+        # BY KEY, never by line number (CHECKUP-2026-08-27 C6 / WO-1.15.4):
+        # ffprobe emits stream fields in ITS canonical order regardless of the
+        # request order (the remux.sh OTHERS/metadata.sh house lesson) —
+        # measured here: line 1 is time_base, line 2 is start_pts. The nk=1
+        # form read them SWAPPED, split("0","/") gave an empty denominator,
+        # and this function printed 0 unconditionally — which killed the D4
+        # "delta == declared start_pts" branch below as dead code and printed
+        # a false measurement into the report.
         ffp -v error -select_streams "a:$1" -show_entries stream=start_pts,time_base \
-            -of default=nw=1:nk=1 "$OUT" 2>/dev/null | \
-          awk -v r="$asr" 'NR==1{p=$0} NR==2{split($0,t,"/");
-            if(p=="N/A"||p==""||t[2]+0==0||r+0==0){print 0; exit}
-            printf "%.0f", p*t[1]/t[2]*r}'
+            -of default=nw=1 "$OUT" 2>/dev/null | \
+          awk -F= -v r="$asr" '$1=="start_pts"{p=$2} $1=="time_base"{tb=$2}
+            END{ split(tb,t,"/")
+              if(p==""||p=="N/A"||t[2]+0==0||r+0==0){print 0; exit}
+              printf "%.0f", p*t[1]/t[2]*r }'
       }
       n0=$(dec_len 0); n1=$(dec_len 1 "$drc")
       sp0=$(spo 0); sp1=$(spo 1)

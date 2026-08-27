@@ -67,7 +67,17 @@ esac; done
 # eval only well-formed PR_/PF_ KEY=VAL lines. probe emits controlled ffprobe
 # tokens (never the path) — the filter is defense-in-depth so a stray line can't
 # become code. If you ever add a PR_ value that embeds $IN/$OUT, parse, don't eval.
-eval "$(bash "$SELF_DIR/probe.sh" "$IN" --kv | grep -E '^(PR|PF)_[A-Z0-9_]+=')"   # PR_* + PF_*
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): capture the probe's exit
+# status — the grep used to launder it away, and a failed probe eval'd a
+# manifest with a FABRICATED PR_AUD_COUNT=0 (probe.sh's END block), silently
+# disabling this driver's Dolby-E refusal loop. Pre-flight refusal, exit 2.
+set +e; PKV=$(bash "$SELF_DIR/probe.sh" "$IN" --kv); pkv_rc=$?; set -e
+if [ "$pkv_rc" -ne 0 ] || ! printf '%s\n' "$PKV" | grep -q '^PR_AUD_COUNT='; then
+  echo ">> REFUSED (pre-flight): probe.sh --kv failed (rc=$pkv_rc) or returned no audio" >&2
+  echo "   manifest — cannot route this source (EMPTY is not ABSENT). Nothing written." >&2
+  exit 2
+fi
+eval "$(printf '%s\n' "$PKV" | grep -E '^(PR|PF)_[A-Z0-9_]+=')"   # PR_* + PF_*
 echo "== auto: $IN -> $OUT =="
 echo "   probe: vcodec=$PR_VCODEC audio=$PR_ACODEC($PR_AUDIO_ACTION) paff=$PF_PAFF half_ts=${PF_HALF_TS:-no} reorder=${PF_REORDER:-no} -> first rung $PR_REC_RUNG"
 

@@ -49,6 +49,7 @@
 # The pure derivation lives in derive_dts() with no PyAV dependency so the
 # regression suite can pin the math via importlib on a bench without PyAV.
 
+import os
 import sys
 import collections
 
@@ -102,6 +103,40 @@ def derive_dts(coded_pts):
 MOV_SUB_CODECS = {"mov_text", "text", "tx3g"}
 
 
+def _rtm_window(raw, floor):
+    """Parse an RTM_* probe-window value ('200M', '5000000', '1G') to a plain
+    integer. K/M/G are the decimal SI multipliers ffmpeg's own CLI applies to
+    the same knobs. Anything absent or unparseable falls back to the FLOOR —
+    never to libav's stock default (the floor's whole reason to exist)."""
+    if not raw:
+        return floor
+    s = str(raw).strip()
+    mult = 1
+    if s and s[-1] in "kKmMgG":
+        mult = {"k": 1000, "m": 1000000, "g": 1000000000}[s[-1].lower()]
+        s = s[:-1]
+    try:
+        return int(s) * mult
+    except ValueError:
+        return floor
+
+
+def rtm_open_options():
+    """libavformat options for every READ-side av.open(): the lib-probe.sh
+    200M probe-window floor, plumbed into the Python half of the rung
+    (CHECKUP-2026-08-27 C8 / WO-1.15.4 — measured on the repo's own
+    late-sps.ts: a stock 5 MB open sees 0x0 where the floor reads the real
+    dimensions, and the mux then dies on a stream this rung misprobed).
+    RTM_PROBESIZE is bytes, RTM_ANALYZEDURATION microseconds — the same env
+    knobs, same 200M defaults, as the shell side. Values are plain integer
+    strings so no libav suffix-parsing behavior is assumed."""
+    return {
+        "probesize": str(_rtm_window(os.environ.get("RTM_PROBESIZE"), 200000000)),
+        "analyzeduration": str(_rtm_window(os.environ.get("RTM_ANALYZEDURATION"),
+                                           200000000)),
+    }
+
+
 def main():
     args = [a for a in sys.argv[1:]]
     limit = None
@@ -128,7 +163,7 @@ def main():
         sys.exit(10)
 
     # --- pass 1: the WHOLE video PTS column, coded order --------------------
-    inp = av.open(src)
+    inp = av.open(src, options=rtm_open_options())   # probe-window floor (C8)
     vin = inp.streams.video[0]
     coded = []
     n_empty = 0
@@ -173,7 +208,7 @@ def main():
           % (n, depth, step, shift_ticks, shift_ms))
 
     # --- pass 2: copy every packet, rewrite timestamps ----------------------
-    inp = av.open(src)
+    inp = av.open(src, options=rtm_open_options())   # probe-window floor (C8)
     vin = inp.streams.video[0]
     mapped = [vin]
     skipped = []

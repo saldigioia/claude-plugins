@@ -83,12 +83,18 @@ out=$(RTM_PROBESIZE=5M bash "$SC/dual-track.sh" "$FIX/late-sps.ts" "$WORK/dt.mov
 n=$(nretry "$out"); [ "$n" -eq 1 ] && ok "dual-track.sh retry line exactly once" || no "dual-track.sh retry line count=$n, want 1"
 
 echo
-echo "== 3. never-mask control: a different mux failure is NOT retried =="
+echo "== 3. never-mask control: a different failure is NOT retried =="
+# RE-PINNED 1.15.4 (WO-1.15.4 A1): an input ffprobe cannot read no longer
+# reaches the muxer at all — the audio-manifest pre-flight refuses it (exit 2,
+# "REFUSED (pre-flight)", nothing written) instead of the old mux-stage
+# "mux FAILED" rc 1. The control's PROPERTY is unchanged and still pinned:
+# a failure that is not probe-window-shaped fires NO retry and is reported
+# honestly, once, with nothing written.
 printf 'this is not a media file — negative control for the probe-shaped gate\n' > "$WORK/bad.ts"
 out=$(RTM_BACKHAUL_GATED=1 bash "$SC/remux.sh" "$WORK/bad.ts" "$WORK/bad.mov" 2>&1); rc=$?
-[ "$rc" -eq 1 ] && ok "garbage input FAILs with the contract code (rc=1)" || no "garbage input rc=$rc (want 1)"
+[ "$rc" -eq 2 ] && ok "unreadable input refuses pre-flight (rc=2; was mux-stage rc=1 pre-1.15.4)" || no "garbage input rc=$rc (want 2)"
 n=$(nretry "$out"); [ "$n" -eq 0 ] && ok "no retry line on a non-probe-shaped failure" || no "retry fired on a different error (count=$n)"
-has "$out" "mux FAILED" "the failure is reported once, honestly"
+has "$out" "REFUSED (pre-flight)" "the failure is reported once, honestly (the A1 refusal)"
 [ ! -f "$WORK/bad.mov" ] && ok "nothing written on failure" || no "failure left an output file"
 
 echo

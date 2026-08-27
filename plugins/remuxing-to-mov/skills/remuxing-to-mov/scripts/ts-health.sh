@@ -43,7 +43,9 @@
 # Usage: scripts/ts-health.sh INPUT [--kv]
 #   default: human report + verdict; --kv: TSH_* KEY=VAL lines only.
 # Exit: 0 = CLEAN; 10 = FINDINGS (each named above with its route);
-#       1 = DAMAGED (scrambled, or transport loss >= TSH_LOSS_FAIL); 2 = usage.
+#       1 = DAMAGED (scrambled, or transport loss >= TSH_LOSS_FAIL);
+#       2 = usage OR pre-flight (input unreadable by ffprobe — announced, never
+#           a silent 1: "could not read" is not "proven damaged", WO-1.15.4 C4).
 # Tunables: TSH_LOSS_FAIL (transport-error FAIL threshold, default 100),
 #           DISC_MULT (forward-gap threshold in frame durations, default 1.5).
 # Test hooks (house injection style): TSH_PKT_FILE=<csv idx,pts,dts,duration,flags
@@ -60,8 +62,22 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never th
 
 say () { [ "$MODE" != --kv ] && echo "$@"; return 0; }
 
+# --- pre-flight: is the input READABLE at all? ------------------------------------
+# EMPTY ≠ ABSENT (CHECKUP-2026-08-27 C4 / WO-1.15.4): the first failing probe
+# assignment under set -e used to exit 1 with ZERO output — and 1 is this
+# contract's DAMAGED, so "I could not read the source" shipped as "source
+# proven damaged", silently, at the very first probe of the scanner the clinic
+# trusts. An unreadable input is a PRE-FLIGHT verdict: say so, exit 2. ffp1 is
+# the SIGPIPE-safe first-line form (the reader consumes to EOF).
+set +e
+container=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>"$TMP/preflight.err"); pf_rc=$?
+set -e
+if [ "$pf_rc" -ne 0 ]; then
+  echo "ts-health: cannot read $IN (ffprobe rc=$pf_rc) — pre-flight failure, NOT a damage verdict:" >&2
+  sed 's/^/   /' "$TMP/preflight.err" | tail -4 >&2
+  exit 2
+fi
 # --- cheap header facts ---------------------------------------------------------
-container=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 fdur_fmt=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
 case "$fdur_fmt" in ''|N/A) fdur_fmt=0;; esac
 vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
