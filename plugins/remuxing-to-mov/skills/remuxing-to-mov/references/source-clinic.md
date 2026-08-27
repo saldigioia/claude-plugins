@@ -12,12 +12,21 @@ source's own container (`.ts` today; the recipes are measured on mpegts).
 **Re-wrap ≠ remux.** A *re-wrap* is a same-container-family rewrite whose
 essence is byte-identical and whose structure is preserved — mpegts PID and
 program layout ride through (`-streamid`, `-mpegts_pmt_start_pid`,
-`-mpegts_service_id`), and TS→TS plain copy preserves even the
-pair-timestamped PAFF shape (measured in the case file: untimestamped mates
-in → timestamp-less PES out). A *remux* changes container family and is the
+`-mpegts_service_id`). A *remux* changes container family and is the
 ladder's business. The clinic never crosses a container boundary, never
 re-encodes, and never touches the source — the output is always a new
 sibling; the original remains the master.
+
+The pair-timestamped PAFF shape is the measured exception (1.15.2 Item C):
+the 2026-08-26 case file recorded a TS→TS plain copy preserving it
+(untimestamped mates in → timestamp-less PES out), but on the 2022-08-28
+field source the same copy made the mpegts muxer confess `Timestamps are
+unset` — the invented-timing hard-stop class — after building all 23.68 GB,
+and the run was correctly refused. That claim is therefore scoped to the case
+file's bench and shape, not doctrine; since 1.15.2 `zero-base.sh` refuses
+pair-timestamped PAFF at pre-flight (nothing built, `pairfill-paff.sh` named
+as the route), because the only prize on such a source is a `start_time`
+cosmetic every player rebases away.
 
 **The two-tier consent model.**
 - **Tier 1 — structural**: corrections that discard nothing any player could
@@ -30,13 +39,20 @@ sibling; the original remains the master.
   trim-to-idr's open-GOP refusal ("that trade is the operator's") — the same
   line, drawn at content instead of at re-encoding.
 
-**The prediction contract.** A null-muxer copy pre-pass (`-f null`, `-copyts`)
-predicts exactly what the real mux will hit: the case file measured 9
-equal-DTS collision sites in the pre-pass and exactly 9 one-tick DTS nudges
-in the build (CLI-filled PAFF mate DTS colliding as equals; presentation
-timestamps untouched). Clinic builders announce the expected artifact set
-BEFORE building and FAIL if the mux log observes anything else — nothing
-unexplained ships, enforced, not aspired to.
+**The prediction contract.** A true-dry-run pre-pass — the build's own mpegts
+mux with identical options and the bytes discarded — predicts exactly what
+the real mux will hit (CLI-filled mate DTS colliding as equals and taking a
++1-tick nudge; presentation timestamps untouched). Clinic builders announce
+the expected artifact set BEFORE building and FAIL if the mux log observes
+anything else — nothing unexplained ships, enforced, not aspired to.
+HISTORY (1.15.2 Defect B): through 1.15.1 the pre-pass was `-f null` +
+`-copyts` without the build's muxdelay/layout options — a different mux than
+the one that ran. The case file's 9-predicted/9-observed agreement was a
+coincidence of that source; the 2022-08-28 field source measured 0 predicted
+against 11 observed, i.e. the old pre-pass had no predictive value there. The
+pre-pass now mirrors the build by construction (`rewrap_predict`,
+lib-rewrap.sh; pinned by test 74), so predicted == observed is a property of
+the command, and any breach that remains is a real surprise in the source.
 
 **The player-clock rule.** Users report PLAYER-clock time; ffprobe reports
 CONTAINER time; they differ by `format.start_time`. Every "starts at X" /

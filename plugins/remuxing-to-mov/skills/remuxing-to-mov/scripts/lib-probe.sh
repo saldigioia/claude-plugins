@@ -44,3 +44,14 @@ FF_INPUT_OPTS=(-probesize "${RTM_PROBESIZE:-200M}" -analyzeduration "${RTM_ANALY
 
 # ffprobe drop-in: one input per invocation -> inject first, pass through.
 ffp () { ffprobe "${FF_INPUT_OPTS[@]}" "$@"; }
+
+# ffp1 — first non-empty line of an ffprobe query, SIGPIPE-safe. awk reads to
+# EOF, so ffprobe always completes its write: `head -1` under `pipefail`
+# closes the pipe early and can take ffprobe down with SIGPIPE (exit 141),
+# which `set -e` then promotes into a SILENT caller abort. Measured (1.15.2
+# Defect A): `-show_entries program=` emits 1 program line + N blank
+# program_stream lines, and on the field bench the 200M probe window lost the
+# race 5/5 while the stock 5M window won it 5/5 — same 6-line output both
+# ways. Use ffp1 for any query that can emit more than one line; on
+# single-line queries it is byte-identical to `ffp ... | head -1`.
+ffp1 () { ffp "$@" | awk 'NF && !g { print; g=1 }'; }

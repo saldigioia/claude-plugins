@@ -41,10 +41,13 @@
 #      (90 kHz @ 59.94 -> 1501/1502; @ 50 -> 1800/1800).
 #
 # JUNCTION-MODEL OUTPUT GATE (in addition to every existing gate): the
-# POC lattice — per IDR-delimited sequence, every picture's OUTPUT PTS must sit
-# exactly on  base + pic_order_cnt_lsb * half_interval  (the record's local
-# gate 2; 451,071/451,071 on-slot on the proving job). Any off-lattice picture
-# is FAIL exit 1 with the artifact kept as .part.
+# POC lattice — per IDR-delimited sequence, every picture's OUTPUT PTS must
+# sit exactly on  base + POC * half_interval  with pic_order_cnt_lsb UNWRAPPED
+# to full POC first (the record's local gate 2; 451,071/451,071 on-slot on the
+# proving job — a figure the 1.14.0–1.15.1 gate could NOT reproduce: the
+# extraction dropped the unwrap and the shipped gate false-FAILed the same
+# file at 3,179/451,071 until 1.15.2 Defect D restored it, pinned by test 76).
+# Any off-lattice picture is FAIL exit 1 with the artifact kept as .part.
 #
 # setts LESSONS BAKED IN (each cost a broken build in the incident):
 #   * unset timestamps reach setts expressions as INT64_MIN, NOT NaN — test
@@ -315,7 +318,8 @@ MOVFLAGS="+faststart"; { [ -n "$cprim" ] && [ "$cprim" != unknown ]; } && MOVFLA
 # ramp anchors to the FIRST REAL PTS (domain-relative) and alternates A/B ticks.
 if [ "$PP_MODEL" = junction ]; then
   # The widened rule, exactly as proven on the 2026-08-18 job (whole-file
-  # timeline clean; POC lattice 451,071/451,071 on-slot; VCL bit-identical):
+  # timeline clean; POC lattice 451,071/451,071 on-slot — measured with the
+  # UNWRAPPING gate, restored 1.15.2 and pinned by test 76; VCL bit-identical):
   #   pts = if(lt(PTS, -8e18),
   #            if(lt(PREV_INPTS, -8e18), NEXT_PTS, PREV_OUTPTS + FIELD),
   #            if(eq(PTS, PREV_OUTPTS), PTS + FIELD, PTS))
@@ -446,34 +450,51 @@ rm -f "$MUXLOG"
 # lib-paff.sh). Any off-lattice picture: FAIL exit 1, artifact kept as .part.
 if [ "$PP_JM" -eq 1 ]; then
   echo "-- POC-lattice gate (junction model): every picture on its presentation slot --"
-  PP_POCA="$(mktemp)"; PP_POCB="$(mktemp)"; PP_POCT="$(mktemp)"
+  PP_POCA="$(mktemp)"; PP_POCB="$(mktemp)"; PP_POCT="$(mktemp)"; PP_SPS="$(mktemp)"
+  # the same pass also captures the SPS's log2_max_pic_order_cnt_lsb_minus4 —
+  # pf_poc_lattice needs MaxPicOrderCntLsb to unwrap the lsb (1.15.2 Defect D)
   ffmpeg -nostdin -hide_banner -nostats -i "$PART" -map 0:v:0 -c copy \
       -bsf:v trace_headers -f null - 2>&1 | \
-    awk '{ name=""
-           for(i=1;i<=NF;i++) if($i=="nal_unit_type"||$i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"){ name=$i; break }
+    awk -v spsf="$PP_SPS" '{ name=""
+           for(i=1;i<=NF;i++) if($i=="nal_unit_type"||$i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
            if(name=="") next
            v=$NF+0
+           if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; next }
            if(name=="nal_unit_type"){ nal=v; next }
            if(name=="first_mb_in_slice"){ if(v==0){ pend=1; idr=(nal==5)?1:0 }; next }
-           if(pend){ printf "%d,%d\n", idr, v; pend=0 } }' > "$PP_POCA"
+           if(pend){ printf "%d,%d\n", idr, v; pend=0 } }
+         END{ if(l2 != "") printf "%d\n", l2 > spsf }' > "$PP_POCA"
   ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$PART" 2>/dev/null | \
     awk -F, 'NF && $1!="N/A"{ print $1+0 }' > "$PP_POCB"
   pp_na=$(grep -c . "$PP_POCA" || true); pp_nb=$(grep -c . "$PP_POCB" || true)
   if [ "${pp_na:-0}" -eq 0 ] || [ "${pp_na:-0}" -ne "${pp_nb:-1}" ]; then
-    echo ">> POC-LATTICE GATE FAILED — POC not extractable or picture/packet counts differ"
+    # UNPROVEN, not FAILED (the 1.15.2 rule): this branch is a claim about the
+    # GATE's reach, not about the artifact — but an unproven build is still
+    # never blessed, so the exit and the retention are unchanged.
+    echo ">> POC-LATTICE GATE UNPROVEN — POC not extractable or picture/packet counts differ"
     echo "   (POC rows=$pp_na, timestamped packets=$pp_nb; pic_order_cnt_type != 0 streams"
-    echo "    carry no pic_order_cnt_lsb and the lattice cannot be proven — never blessed"
-    echo "    unproven). Kept: $PART"
-    rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT"; exit 1
+    echo "    carry no pic_order_cnt_lsb and the lattice cannot be evaluated — never"
+    echo "    blessed unproven; this is not evidence the artifact is bad)."
+    echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes; delete: rm \"$PART\")"
+    rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT" "$PP_SPS"; exit 1
+  fi
+  PP_L2=$(head -1 "$PP_SPS" 2>/dev/null || true)
+  PP_MAXLSB=0
+  case "${PP_L2:-}" in ''|*[!0-9]*) ;; *) [ "$PP_L2" -le 12 ] && PP_MAXLSB=$((1 << (PP_L2 + 4)));; esac
+  if [ "$PP_MAXLSB" -gt 0 ]; then
+    echo "   MaxPicOrderCntLsb=$PP_MAXLSB (SPS log2_max_pic_order_cnt_lsb_minus4=$PP_L2); lsb unwrapped per H.264 8.2.1.1"
+  else
+    echo "   MaxPicOrderCntLsb: SPS value unavailable — inferred per sequence (next power of two above the largest lsb)"
   fi
   paste -d, "$PP_POCA" "$PP_POCB" > "$PP_POCT"
-  eval "$(pf_poc_lattice "$PP_POCT")"
-  rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT"
+  eval "$(pf_poc_lattice "$PP_POCT" "$PP_MAXLSB")"
+  rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT" "$PP_SPS"
   echo "   on_slot=$PL_ON/$PL_TOTAL  off_lattice=$PL_OFF  (IDR sequences=$PL_SEQS)"
   echo "PP_POC_LATTICE on_slot=$PL_ON total=$PL_TOTAL off=$PL_OFF"   # machine-readable (additive, 2026-08-18)
   if [ "${PL_OFF:-1}" -ne 0 ]; then
     echo ">> POC-LATTICE GATE FAILED — $PL_OFF picture(s) off their presentation slot:"
-    echo "   the written timeline is not the derived lattice. NOT blessing. Kept: $PART"
+    echo "   the written timeline is not the derived lattice. NOT blessing."
+    echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes; delete: rm \"$PART\")"
     exit 1
   fi
 fi

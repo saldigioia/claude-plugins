@@ -16,13 +16,20 @@
 #    a multi-program layout from -map 0; known-limits.md names the
 #    isolate-one-program route).
 #
-# 2. THE PREDICTION CONTRACT (rewrap_predict / rewrap_nudges): a null-muxer
-#    copy pre-pass predicts exactly what a real mux will hit — the feed.ts
-#    case measured 9 equal-DTS collision sites in the pre-pass and exactly 9
-#    one-tick nudges in the build. The clinic announces the expected artifact
-#    set BEFORE building and reconciles the build's mux log against it after:
-#    observed != predicted is a verdict, not a shrug. Both passes ride
-#    -copyts so collision arithmetic is identical on both sides.
+# 2. THE PREDICTION CONTRACT (rewrap_predict / rewrap_nudges): a TRUE DRY RUN
+#    of the caller's build — same mpegts muxer, same timestamp arithmetic
+#    (-muxdelay 0 -muxpreload 0), same layout opts, bytes discarded — predicts
+#    exactly what the real mux will hit. The clinic announces the expected
+#    artifact set BEFORE building and reconciles the build's mux log against
+#    it after: observed != predicted is a verdict, not a shrug.
+#    HISTORY (1.15.2 Defect B): through 1.15.1 the pre-pass ran `-f null -`
+#    with -copyts and WITHOUT the muxdelay/muxpreload/layout opts — a
+#    different mux than the one that runs. On the 2022-08-28 field source it
+#    predicted 0 collision sites against 11 observed; the contract gate would
+#    have FAILED a build whose artifacts were fully explained. A gate that
+#    measures a different thing than it admits is worse than no gate — the
+#    pre-pass now mirrors the build by construction. Callers therefore run
+#    rewrap_layout FIRST (the prediction needs RW_STREAMID_OPTS/RW_MUX_OPTS).
 #
 # Hard-stop discipline is unchanged: the pair-timestamped-PAFF confessions
 # (`pts has no value` / `Timestamps are unset`) remain the mux-invented-timing
@@ -46,8 +53,12 @@ rewrap_layout () {
     n=$((n+1))
   done < <(ffp -v error -show_entries stream=index,id -of csv=p=0 "$f" 2>/dev/null | \
            awk -F, 'NF>=2{ if(seen[$1]++) next; print }')
-  pmt=$(ffp -v error -show_entries program=pmt_pid -of csv=p=0 "$f" 2>/dev/null | head -1 | tr -d ,)
-  svc=$(ffp -v error -show_entries program=program_num -of csv=p=0 "$f" 2>/dev/null | head -1 | tr -d ,)
+  # ffp1, NEVER `| head -1`: program= emits 1 program line + N blank
+  # program_stream lines, and head's early close SIGPIPEs ffprobe under the
+  # callers' `set -euo pipefail` — a silent exit-141 abort with zero
+  # diagnostic, measured on the 2022-08-28 field source (1.15.2 Defect A).
+  pmt=$(ffp1 -v error -show_entries program=pmt_pid -of csv=p=0 "$f" 2>/dev/null | tr -d ,)
+  svc=$(ffp1 -v error -show_entries program=program_num -of csv=p=0 "$f" 2>/dev/null | tr -d ,)
   case "$pmt" in ''|*[!0-9]*) pmt="";; esac
   case "$svc" in ''|*[!0-9]*) svc="";; esac
   [ -n "$pmt" ] && RW_MUX_OPTS+=(-mpegts_pmt_start_pid "$pmt")
@@ -55,17 +66,34 @@ rewrap_layout () {
   RW_LAYOUT_NOTE="stream PIDs preserved: $((${#RW_STREAMID_OPTS[@]} / 2)); PMT pid ${pmt:-default}; service id ${svc:-default}; transport_stream_id: muxer default (not ffprobe-exposed)"
 }
 
-# rewrap_predict FILE [BSF_V] [BSF_A] — null-muxer copy pre-pass; prints the
-# predicted equal-DTS nudge count on stdout (one number). Filters, when given,
-# replay the caller's intended selection so the prediction covers the packets
-# that will actually meet the muxer.
+# rewrap_predict FILE [BSF_V] [BSF_A] — TRUE dry-run pre-pass: the caller's
+# own mpegts build with the bytes thrown away; prints the predicted equal-DTS
+# nudge count on stdout (one number). Filters, when given, replay the caller's
+# intended selection so the prediction covers the packets that will actually
+# meet the muxer. Call rewrap_layout FIRST — the prediction mirrors
+# RW_STREAMID_OPTS/RW_MUX_OPTS. A caller whose build carries options beyond
+# the shared `-muxdelay 0 -muxpreload 0` + layout set mirrors them here via
+#   RW_PREDICT_IN_OPTS[]   input-side  (e.g. -copyts)
+#   RW_PREDICT_OUT_OPTS[]  output-side (e.g. -output_ts_offset N)
+# — the same arrays its real build must then splice, so the two commands
+# cannot drift apart. (`-f null -` + -copyts predicted a DIFFERENT mux than
+# the one that runs: 1.15.2 Defect B. Cost: the pre-pass now performs real
+# mpegts muxing to a discarded sink — still stream-copy, no encode; more CPU
+# than the null muxer, same passes. Deliberately no skip knob: a gate that can
+# be skipped silently is Defect B again.)
 rewrap_predict () {
   local f="$1" fv="${2:-}" fa="${3:-}" log args=()
   [ -n "$fv" ] && args+=(-bsf:v "$fv")
   [ -n "$fa" ] && args+=(-bsf:a "$fa")
   log="$(mktemp)"
-  ffmpeg -nostdin -v warning "${FF_INPUT_OPTS[@]}" -copyts -i "$f" -map 0 -c copy \
-    ${args[@]+"${args[@]}"} -f null - 2>"$log" || true
+  ffmpeg -nostdin -v warning "${FF_INPUT_OPTS[@]}" \
+    ${RW_PREDICT_IN_OPTS[@]+"${RW_PREDICT_IN_OPTS[@]}"} -i "$f" -map 0 -c copy \
+    ${args[@]+"${args[@]}"} \
+    -muxdelay 0 -muxpreload 0 \
+    ${RW_PREDICT_OUT_OPTS[@]+"${RW_PREDICT_OUT_OPTS[@]}"} \
+    ${RW_STREAMID_OPTS[@]+"${RW_STREAMID_OPTS[@]}"} \
+    ${RW_MUX_OPTS[@]+"${RW_MUX_OPTS[@]}"} \
+    -f mpegts -y /dev/null 2>"$log" || true
   rewrap_nudges "$log"
   rm -f "$log"
 }

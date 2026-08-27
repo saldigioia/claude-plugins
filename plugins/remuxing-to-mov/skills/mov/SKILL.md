@@ -31,7 +31,9 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
   `--no-idr-trim` keeps a mid-GOP capture head instead of the default announced
   auto-trim (see below); `--audio-keep` picks which audio tracks survive —
   default `all` (see below), `layouts` opt-in curation, `first` historical
-  a:0-only, or explicit indices.
+  a:0-only, or explicit indices. On the PAFF repair path the flag is
+  **rejected** (exit 2) rather than silently ignored — audio policy there
+  comes from the repair rung (1.15.2); re-run without it.
 - **Metadata (opt-in — ONLY if the user explicitly asks to tag the file)**: pass
   `--title`, `--description`, `--author`, `--date`, `--copyright`, `--comment`,
   `--keywords`, or `--key NAME=VALUE`. These embed proper QuickTime (`mdta`) metadata

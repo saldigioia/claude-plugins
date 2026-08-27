@@ -12,10 +12,11 @@
 # reads 0). Getting ffprobe to PRINT zero would require inventing DTS: refused
 # on doctrine. This script computes and announces the floor BEFORE building.
 #
-# THE PREDICTION CONTRACT (case-file step 4): a null-muxer copy pre-pass
-# counts the DTS monotonicity-collision sites first, the script announces the
-# expected artifact set (the measured class: CLI-filled PAFF mate DTS collide
-# as equals and take a +1-tick nudge, presentation timestamps untouched), and
+# THE PREDICTION CONTRACT (case-file step 4; re-grounded 1.15.2 Defect B): a
+# TRUE DRY RUN — the build's own mpegts mux with the bytes discarded — counts
+# the DTS monotonicity-collision sites first, the script announces the
+# expected artifact set (the measured class: CLI-filled mate DTS collide as
+# equals and take a +1-tick nudge, presentation timestamps untouched), and
 # after the build the mux log's observed nudge count must EQUAL the
 # prediction — a surprise on either side is a verdict, not a shrug.
 #
@@ -25,6 +26,12 @@
 #     the remux ladder's business);
 #   * multi-program TS (the muxer cannot reconstruct that layout from -map 0;
 #     isolate one program first — known-limits.md);
+#   * pair-timestamped PAFF (pf_detect half_ts/paff=yes): measured on the
+#     2022-08-28 field source (1.15.2 Item C), the TS->TS copy makes the
+#     mpegts muxer confess 'Timestamps are unset' — the invented-timing
+#     hard-stop class — AFTER building 23.68 GB, for a prize of 40 ms on a
+#     start_time every player rebases away. Refuse before building; the .mov
+#     route is pairfill-paff.sh and the .ts source is already the master;
 #   * timeline rot (whole-file backward/duplicate DTS > 0): zero-base is NOT
 #     a timeline repair — diagnose.sh routes those (derive-dts.sh et al.).
 #
@@ -44,6 +51,7 @@ OUT="${2:?need OUTPUT.ts (same container family as the input)}"
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
+. "$SELF_DIR/lib-paff.sh"   # pf_detect: the pair-timestamped-PAFF pre-flight
 . "$SELF_DIR/lib-mux.sh"    # rtm_part: extension-keeping atomic part files
 . "$SELF_DIR/lib-rewrap.sh" # layout preservation + the prediction contract
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never the source
@@ -63,6 +71,21 @@ if [ "${NPROG:-1}" -gt 1 ] 2>/dev/null; then
   echo "multi-program TS ($NPROG programs): the mpegts muxer cannot reconstruct that" >&2
   echo "layout from -map 0 — isolate the program first (known-limits.md):" >&2
   echo "  ffmpeg -nostdin -i \"$IN\" -map 0:p:<PROGRAM_NUM> -c copy PROG.ts" >&2
+  exit 2
+fi
+# pair-timestamped-PAFF check (1.15.2 Item C) — windowed and cheap, so it runs
+# BEFORE the whole-file scan: on the field source the old order burned a 54 s
+# scan plus a 23.68 GB build to reach a foregone hard-stop. pf_detect's
+# PF_PKT_FILE hook keeps this pinnable without mintable PAFF media.
+eval "$(pf_detect "$IN")"
+if [ "${PF_HALF_TS:-no}" = yes ] || [ "${PF_PAFF:-no}" = yes ]; then
+  echo "pair-timestamped PAFF source (paff=$PF_PAFF half_ts=$PF_HALF_TS): refusing at pre-flight." >&2
+  echo "A TS->TS copy of this shape makes the mpegts muxer invent timing for the" >&2
+  echo "untimestamped mates ('Timestamps are unset' — the hard-stop class, measured" >&2
+  echo "2026-08-27 on a 23.68 GB field source AFTER the full build), and the prize is" >&2
+  echo "cosmetic: format.start_time lands at the reorder-delay floor either way and" >&2
+  echo "players rebase it — the player clock already reads 0. The source IS the master." >&2
+  echo "For the QuickTime deliverable route: scripts/pairfill-paff.sh IN OUT.mov" >&2
   exit 2
 fi
 # whole-file rot check — zero-base is not a timeline repair. Saved for reuse:
@@ -107,8 +130,12 @@ else
   echo "   inventing DTS: refused on doctrine."
 fi
 
-# --- the prediction contract ------------------------------------------------------
-echo "-- prediction pre-pass (null muxer, whole file, -copyts) --"
+# --- layout, then the prediction contract -----------------------------------------
+# layout FIRST: the pre-pass is a true dry run of the build (1.15.2 Defect B)
+# and needs RW_STREAMID_OPTS/RW_MUX_OPTS on its command line.
+rewrap_layout "$IN"
+echo "   layout: $RW_LAYOUT_NOTE"
+echo "-- prediction pre-pass (true dry run: same mpegts mux, bytes discarded) --"
 PRED=$(rewrap_predict "$IN")
 if [ "${PRED:-0}" -gt 0 ]; then
   echo "   predicted: $PRED DTS monotonicity-collision site(s). Expected artifact set:"
@@ -119,9 +146,7 @@ else
   echo "   predicted: 0 collision sites — the mux log must stay nudge-free."
 fi
 
-# --- layout + build ---------------------------------------------------------------
-rewrap_layout "$IN"
-echo "   layout: $RW_LAYOUT_NOTE"
+# --- build ------------------------------------------------------------------------
 PART="$(rtm_part "$OUT")"
 MUXLOG="$TMP/mux.log"
 if ! ffmpeg -nostdin -y -hide_banner -nostats -v warning "${FF_INPUT_OPTS[@]}" -i "$IN" \

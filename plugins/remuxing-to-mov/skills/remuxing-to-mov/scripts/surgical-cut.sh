@@ -136,21 +136,28 @@ FILTA=""
 [ -n "$APTS" ] && FILTA="noise=drop=lt(pts\\,$APTS)"
 echo "   selection: -bsf:v '$FILTV'${FILTA:+ -bsf:a '$FILTA'} (replayed verbatim by verify-source)"
 
-# --- prediction contract ----------------------------------------------------------
-echo "-- prediction pre-pass (null muxer, filtered, -copyts) --"
+# --- layout, then the prediction contract -----------------------------------------
+# layout FIRST (1.15.2 Defect B): the pre-pass is a true dry run of the build
+# below — same mpegts muxer, same filters, and the SAME extra options, mirrored
+# through the RW_PREDICT_* arrays the build then splices itself so the two
+# command lines cannot drift apart.
+rewrap_layout "$IN"
+echo "   layout: $RW_LAYOUT_NOTE"
+RW_PREDICT_IN_OPTS=(-copyts)
+RW_PREDICT_OUT_OPTS=(-output_ts_offset "$OFF")
+echo "-- prediction pre-pass (true dry run: same mpegts mux, filtered, bytes discarded) --"
 PRED=$(rewrap_predict "$IN" "$FILTV" "$FILTA")
 echo "   predicted monotonicity nudges: ${PRED:-0}"
 
-# --- layout + build ---------------------------------------------------------------
-rewrap_layout "$IN"
-echo "   layout: $RW_LAYOUT_NOTE"
+# --- build ------------------------------------------------------------------------
 PART="$(rtm_part "$OUT")"
 MUXLOG="$TMP/mux.log"
 BARGS=(-bsf:v "$FILTV")
 [ -n "$FILTA" ] && BARGS+=(-bsf:a "$FILTA")
-if ! ffmpeg -nostdin -y -hide_banner -nostats -v warning "${FF_INPUT_OPTS[@]}" -copyts -i "$IN" \
+if ! ffmpeg -nostdin -y -hide_banner -nostats -v warning "${FF_INPUT_OPTS[@]}" \
+      "${RW_PREDICT_IN_OPTS[@]}" -i "$IN" \
       -map 0 -c copy "${BARGS[@]}" \
-      -output_ts_offset "$OFF" -muxdelay 0 -muxpreload 0 \
+      "${RW_PREDICT_OUT_OPTS[@]}" -muxdelay 0 -muxpreload 0 \
       ${RW_STREAMID_OPTS[@]+"${RW_STREAMID_OPTS[@]}"} \
       ${RW_MUX_OPTS[@]+"${RW_MUX_OPTS[@]}"} \
       -f mpegts "$PART" 2>"$MUXLOG"; then

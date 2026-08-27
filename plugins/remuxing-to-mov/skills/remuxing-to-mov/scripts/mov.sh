@@ -38,7 +38,9 @@
 #                  OPT-IN curation flag — distinct layout+language pairs
 #                  survive, same-layout same-language duplicates curated
 #                  lossless > lossy-high > lossy-low, every drop announced;
-#                  'first' reproduces the historical a:0-only behavior)
+#                  'first' reproduces the historical a:0-only behavior.
+#                  REJECTED on the PAFF path, exit 2 — audio policy there
+#                  comes from the repair rung; 1.15.1 silently ignored it)
 #   --full         archival sign-off: pass --full to verify.sh (whole-file decode)
 #   --force-backhaul  skip the pre-build backhaul timeline scan + warning.
 #                  Since 1.11 NEITHER backhaul arm refuses — the 4:2:2/pix_fmt
@@ -455,7 +457,17 @@ if [ "$PF_PAFF" = yes ]; then
     echo "   this verifies OK (same copy mux + PCM access track)."
   fi
   [ "$ALWAYS" -eq 1 ] && echo "   note: --always-dual does not apply on the PAFF path — audio policy comes from the repair rung (pairfill dual-tracks non-native codecs by itself)."
-  [ "$AKEEP" != all ] && echo "   note: --audio-keep does not apply on the PAFF path — audio policy comes from the rung (repair rungs build a:0 and pairfill warns on multi-track sources; the copy rung keeps every track)."
+  if [ "$AKEEP" != all ]; then
+    # REJECT, never silently ignore (1.15.2 field UX trap): 1.15.1 accepted
+    # the flag here, printed a mid-scroll note, and built a:0 regardless — the
+    # operator asked for one track and shipped another.
+    echo ">> REFUSED (--audio-keep $AKEEP): the flag is not honoured on the PAFF path —" >&2
+    echo "   audio policy comes from the rung (repair rungs build a:0 and pairfill warns" >&2
+    echo "   on multi-track sources; the copy rung keeps every track). Re-run without" >&2
+    echo "   --audio-keep, or curate tracks on the finished .mov afterwards (the remux" >&2
+    echo "   ladder's --audio-keep applies there). Nothing was written." >&2
+    exit 2
+  fi
   set +e; bash "$SELF_DIR/auto.sh" "$IN" "$OUT" $FULL; rc=$?; set -e
   if [ "$rc" -eq 0 ] && [ "${#MDARGS[@]}" -gt 0 ]; then
     apply_metadata "$OUT" || rc=$?

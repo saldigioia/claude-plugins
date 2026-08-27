@@ -4,6 +4,53 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.2 — field-defects round (2026-08-27)
+
+Four defects measured in the field on one live capture (2022-08-28 MTV VMA
+satellite backhaul, 23.68 GB PAFF mpegts — `WO-1.15.2-FIELD-DEFECTS.md` holds
+the full evidence; none was caught by the 1.15.1 suite). Every defect sat in
+the honesty machinery — the gates that judge the work — never in the muxing:
+
+- **Defect A (silent abort):** `rewrap_layout`'s `program=` probes died by
+  SIGPIPE under `pipefail` (`ffprobe | head -1` — program= emits one line per
+  program PLUS one blank per program_stream; head's early close is a race the
+  field bench lost 5/5 at the 200M window). Killed `zero-base.sh` /
+  `surgical-cut.sh` with exit 1 and zero diagnostic. Fix: `ffp1` in
+  lib-probe.sh (awk reads to EOF, first non-empty line), both sites
+  converted; test 73 pins the recovered values and greps the class.
+- **Defect B (prediction contract):** the pre-pass ran `-f null -` +
+  `-copyts` — a different mux than the build (field: predicted 0, observed
+  11; the gate would have FAILED a fully-explained build). `rewrap_predict`
+  is now a TRUE DRY RUN — the caller's own mpegts mux, layout opts included,
+  bytes discarded; callers run `rewrap_layout` first and mirror extra build
+  options through `RW_PREDICT_IN_OPTS`/`RW_PREDICT_OUT_OPTS`, which the build
+  itself splices so the commands cannot drift. Test 74 pins predicted ==
+  observed on a collision-bearing timeline (relationship, never a literal).
+- **Item C (doctrine qualified + pre-flight):** the "TS→TS plain copy
+  preserves the pair-timestamped PAFF shape" claim is scoped to its case
+  file — the field source measured the opposite ('Timestamps are unset', the
+  hard-stop class, after a full 23.68 GB build chasing 40 ms of cosmetic
+  start_time). `zero-base.sh` now refuses pair-timestamped PAFF at
+  pre-flight (exit 2, nothing built, `pairfill-paff.sh` named); test 75.
+- **Defect D (POC-lattice false FAIL — regression vs the recorded proving
+  job):** `pf_poc_lattice` never unwrapped `pic_order_cnt_lsb`, so any IDR
+  sequence outliving one wrap period read as off-lattice — broadcast
+  long-IDR open-GOP is the NORM (field: 24 sequences × ~73 wraps →
+  3,179/451,071 on a provably correct build; 55 minutes to a false FAIL at
+  the last gate). The gate now unwraps per ITU-T H.264 §8.2.1.1, preferring
+  the SPS's `MaxPicOrderCntLsb` (captured in the same trace_headers pass)
+  over per-sequence inference; the patched gate restores the proving job's
+  451,071/451,071 on the same artifact and still fails a genuinely off-slot
+  picture. Test 76 (the unit-test lane's first resident: pure CSV tables, no
+  media). Git bisect: the unwrap never existed in-repo — the 2026-08-18
+  proving figure came from the pre-extraction hand-run gate.
+- **UNPROVEN ≠ FAILED:** the not-extractable POC branch now reports the gate
+  UNPROVEN (still exit 1, still never blessed — but no longer an accusation
+  against the artifact). Retained `.part` messages state the byte size and
+  the delete command.
+- **UX:** `mov.sh --audio-keep` on the PAFF path is rejected (exit 2) instead
+  of silently ignored.
+
 ## 1.15.1 — topline-semantics round (2026-08-26)
 
 Cross-ref against the live plugins reference (code.claude.com/docs/en/

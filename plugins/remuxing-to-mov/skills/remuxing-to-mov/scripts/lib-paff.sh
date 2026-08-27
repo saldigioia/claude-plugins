@@ -1076,26 +1076,52 @@ pf_trace_census () {
     }'
 }
 
-# pf_poc_lattice TABLE_FILE — the POC-lattice output gate's checker (the record
-# call it local gate 2: the strongest correctness evidence for a field fill).
-# TABLE_FILE carries one line per coded picture, DECODE order: "idr,poc,pts"
-# (idr 1|0, poc = pic_order_cnt_lsb, pts in stream ticks). Per IDR-delimited
-# sequence the presentation lattice is  PTS = base + POC * half_interval ; the
-# half interval is FIT from the first pictures of the sequence (first pair with
-# distinct POC whose PTS delta / POC delta is a positive integer) and base from
-# the sequence's first picture, then EVERY picture must sit on its slot. A
-# sequence whose half interval cannot be fit counts every picture off-lattice
-# (never bless unproven); a single-picture sequence is trivially on-slot.
-# NOTE the honest limit: pic_order_cnt_lsb wrap inside one GOP would read as
-# off-lattice — broadcast GOPs sit far below MaxPicOrderCntLsb, and a FAIL here
-# is a defect until individually explained, so the conservative direction is
-# kept. Emits eval-able:  PL_ON=n PL_TOTAL=n PL_OFF=n PL_SEQS=n
+# pf_poc_lattice TABLE_FILE [MAX_POC_LSB] — the POC-lattice output gate's
+# checker (the record call it local gate 2: the strongest correctness evidence
+# for a field fill). TABLE_FILE carries one line per coded picture, DECODE
+# order: "idr,poc,pts" (idr 1|0, poc = pic_order_cnt_lsb, pts in stream
+# ticks). pic_order_cnt_lsb is POC MODULO MaxPicOrderCntLsb, so each sequence
+# is first UNWRAPPED to full POC per ITU-T H.264 §8.2.1.1 (PicOrderCntMsb
+# steps by MaxPicOrderCntLsb on a half-range jump between consecutive
+# pictures; msb resets at the IDR that heads the sequence). MAX_POC_LSB is the
+# SPS-derived 2^(log2_max_pic_order_cnt_lsb_minus4+4) — prefer passing it;
+# when absent/0 it is inferred per sequence as the next power of two above the
+# largest observed lsb (floor 16, the spec minimum — inference is only exact
+# when the stream uses its full lsb range, which a wrapping sequence does by
+# construction). Then per IDR-delimited sequence the presentation lattice is
+# PTS = base + POC * half_interval ; the half interval is FIT from the first
+# pictures of the sequence (first pair with distinct POC whose PTS delta / POC
+# delta is a positive integer) and base from the sequence's first picture,
+# then EVERY picture must sit on its slot. A sequence whose half interval
+# cannot be fit counts every picture off-lattice (never bless unproven); a
+# single-picture sequence is trivially on-slot.
+# PROVENANCE (1.15.2 Defect D): the shipped 1.14.0–1.15.1 function never
+# unwrapped — git shows the unwrap never existed in the repo, so the recorded
+# 2026-08-18 proving job (451,071/451,071 on-slot) ran a pre-extraction gate.
+# On broadcast long-IDR open-GOP (the field source: MaxPicOrderCntLsb 512,
+# 24 IDR sequences of ~18,795 pictures ≈ 73 wraps each) the un-unwrapped fit
+# false-FAILed a provably correct build at 3,179/451,071 — the survivors being
+# each sequence's pre-first-wrap head, exactly the wrap arithmetic. The
+# unwrapped gate restores 451,071/451,071 on the same artifact and still
+# fails a genuinely off-slot picture (test 76's negative control).
+# Emits eval-able:  PL_ON=n PL_TOTAL=n PL_OFF=n PL_SEQS=n
 pf_poc_lattice () {
-  awk -F, '
-    function endseq(   i, half, dp, dt, h, lim, base) {
+  awk -F, -v maxlsb="${2:-0}" '
+    function endseq(   i, half, dp, dt, h, lim, base, M, m, raw, prev, msb) {
       if (cnt == 0) return
       seqs++
       if (cnt == 1) { total++; on++; cnt = 0; return }
+      # unwrap pic_order_cnt_lsb -> full POC (§8.2.1.1), msb 0 at the sequence
+      # head; comparisons are between consecutive RAW lsb values
+      M = maxlsb + 0
+      if (M <= 0) { m = 0; for (i = 1; i <= cnt; i++) if (poc[i] > m) m = poc[i]; M = 16; while (M <= m) M *= 2 }
+      msb = 0; prev = poc[1]
+      for (i = 2; i <= cnt; i++) {
+        raw = poc[i]
+        if (raw < prev && prev - raw >= M / 2) msb += M
+        else if (raw > prev && raw - prev > M / 2) msb -= M
+        prev = raw; poc[i] = raw + msb
+      }
       half = 0; lim = (cnt < 16 ? cnt : 16)
       for (i = 2; i <= lim && !half; i++) {
         dp = poc[i] - poc[1]; dt = pts[i] - pts[1]
