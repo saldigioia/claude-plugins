@@ -4,6 +4,91 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.5 — "verify the POC gate's reach" round (WO-1.15.3 executed, 2026-08-27)
+
+`WO-1.15.3-VERIFY-POC-REACH.md`, filed 2026-08-27 and executed the same day,
+after 1.15.4 — so the round ships as **1.15.5** (no released 1.15.3 exists
+and versions only move forward; the WO keeps its filed name). The checkup's
+penciled "1.15.5 one-writer" round shifts to the next free number. Reserved
+tests **77–79** land here, each verified RED against 9b1c792 first
+(77: 28 red / 78: 12 red / 79: aborts on the missing script).
+
+- **Item 1 — capability pre-flight (`pf_poc_capability`, lib-paff.sh):** the
+  junction POC-lattice gate's verdict on a `pic_order_cnt_type != 0` source
+  was knowable from a 40-frame head probe in seconds, yet its discovery cost
+  the entire build (field-recorded: ~55 min mux + a 26-min whole-file output
+  parse to a foregone UNPROVEN, exit 1, 24.8 GB `.part` kept). The head
+  feature-probe is now captured once to a file and parsed for capability:
+  `why=no_pictures` folds in the old "parsed no coded picture" refusal (now
+  with the probe's rc — EMPTY ≠ ABSENT), `why=poc_type` is a new pre-flight
+  refusal in the precondition voice, exit 3, nothing written, naming the
+  manual route (`references/timeline-repair.md`) and the `auto.sh`
+  consequence. **No bypass flag, deliberately** (1.15.2 Defect-B lesson) —
+  and no attestation route either. `PCAP_MAXLSB` rides forward to the gate;
+  two known SPS captures that disagree refuse loudly (a changed SPS across a
+  `-c copy` indicts the source, not the gate). The census count-mismatch note
+  now states its consequence (count guard WILL trip → UNPROVEN ceiling) —
+  announced, not refused: that class has a legitimate multi-slice/non-VCL
+  population and the duration gate still judges it. Machine row
+  `PP_POC_CAPABILITY` (additive). Driver behavior per profile (Item 1 step
+  6) decided and documented in `auto.sh`: the established fallbacks stand
+  (PF_REORDER=no → flattening rebuild; reorder + derive signature → Rung
+  3-DERIVE — neither POC-gated), the refusal guarantees only that pairfill
+  itself writes nothing. Test 77 (unit lane on canned head logs +
+  integration on the appendix fixtures; `PF_HEAD_TRACE_FILE` hook).
+- **Item 2 — census-pass reuse (1.15.2 leftover 5.4):** `pf_trace_census`
+  now emits the per-picture `idr,poc` table + SPS `log2_max` value as
+  optional side files from the SAME whole-file pass (zero extra reads; the
+  awk grew four token matches), and the gate builds its table as
+  census-`idr,poc` ⨯ output-ffprobe-PTS — the output pays only its PTS list
+  instead of the ~20-minute header re-parse. Soundness is measured, not
+  argued: the gate's own extraction produced byte-identical tables across
+  ts → `-c copy` → mov (appendix 2026-08-27; pinned by test 78's A/B). The
+  license — copy-by-construction within the same run — is stated in the
+  code; the direct-output extraction is factored (`pf_poc_extract`) and kept
+  as the fallback arm. Cost model recorded in `references/knobs.md`.
+- **Item 3 — `scripts/poc-gate.sh`:** playbook step 7's "re-run the gate
+  against the `.part` standalone" now exists as a script (the field run had
+  hand-sourced lib-paff.sh). Direct extraction + `pf_poc_lattice`, same
+  human line and machine row; `--table CSV` judges a prepared table (the
+  unit lane's entry point — test 76's tables drive it as-is); `--maxlsb N`
+  explicit. Exit contract 0/1/**10**/2 — the 5.1 principle applied locally:
+  standalone there is no bless decision, so UNPROVEN is honest REVIEW
+  semantics (10), while inside pairfill the same verdict keeps exit 1 +
+  retention. Companions: the UNPROVEN branch gained its machine row
+  (`PP_POC_LATTICE unproven=1 why=… rows=… packets=…` — it previously
+  printed nothing machine-readable) and both retention messages name the
+  re-judge route. Test 79. **Considered and declined:** a `verify.sh --poc`
+  flag — verify's contract is route-agnostic lowest-cost-conclusive, and the
+  POC lattice is junction-specific and whole-file-parse expensive; a flag
+  there invites running it where it proves nothing. Recorded here so it is
+  not re-litigated.
+- **Item 4 — `pic_order_cnt_type` 2 doctrine:** position 1 (pre-flight-
+  announced UNPROVEN) shipped as the floor; position 2 shipped as a
+  doctrine sentence in `references/timeline-repair.md`, explicitly labeled
+  argument-not-measurement (type-2 lattice degenerates to a uniform ramp;
+  the duration histogram is the operative evidence). Position 3 (POC
+  reconstruction from `frame_num`, §8.2.1.3) **declined until a field case
+  demands it** — spec-heavy code with no measured demand, and
+  UNPROVEN ≠ FAILED already keeps the verdict honest. Type 1 stays
+  UNPROVEN, honestly labeled by the same pre-flight (no fixture source on
+  this bench: x264 emits only 0 and 2, measured).
+- **Skipped, recorded (Item 1 fix 5):** the optional `/clean` capability
+  line. `clean.sh` is the source clinic — report-only, source-domain, and
+  its findings deliberately route timestamp-profile matters to
+  `diagnose.sh` ("NOT clinic business"); the capability is a remux-rung
+  evidence property that pairfill itself now announces at pre-flight before
+  any cost, and `poc-gate.sh` covers the standalone ask. Adding it would
+  also have introduced the clinic's first trace_headers probe for a fact
+  the remux path surfaces for free.
+- Docs: reach map in `pairfill-paff.sh`'s header + `timeline-repair.md`;
+  `PP_CENSUS` / `PP_POC_CAPABILITY` / `PP_POC_LATTICE` rows added to
+  SKILL.md's machine-lines table (PP_CENSUS emitted since 2026-08-18,
+  tabled now); `poc-gate.sh` row in the task table; `PF_HEAD_TRACE_FILE`
+  hook + the cost-models section in `knobs.md`. Suite 283/283; the
+  1.15.2-Phase-5 leftovers 5.1/5.2/5.5/5.6 and the field follow-ups stay
+  open and are restated in the WO's closing ledger.
+
 ## 1.15.4 — "EMPTY ≠ ABSENT" round (2026-08-27)
 
 First round packaged by `CHECKUP-2026-08-27.md` (six-axis audit; findings

@@ -309,6 +309,15 @@ rm -f "$BEST_SAVE"   # a stale park from a killed earlier run must never be "res
 if [ "$PF_PAFF" = yes ]; then
   if [ "${PF_HALF_TS:-no}" = yes ]; then
     attempt P                                  # pair class: keep real PTS, fill mates
+    # WO-1.15.3 Item 1 step 6 (decided, deliberate): pairfill's capability
+    # pre-flight (pic_order_cnt_type != 0 -> exit 3, nothing built) lands here
+    # as a generic RESULT=FAIL like any pairfill non-OK, and the ESTABLISHED
+    # fallbacks stand: PF_REORDER=no proceeds to the flattening rebuild
+    # (doctrine-legal for a no-pyramid stream), reorder + derive signature
+    # escalates to Rung 3-DERIVE. NEITHER carries a POC gate — the deliverable
+    # is judged by its own rung's gates only, and pairfill's refusal message
+    # says exactly that. The refusal guarantees only that pairfill itself
+    # wrote nothing.
     if [ "$RESULT" != OK ]; then
       if [ "${PF_REORDER:-no}" = no ]; then
         echo "-- verdict $RESULT and no reorder pyramid -> field-rate rebuild --"

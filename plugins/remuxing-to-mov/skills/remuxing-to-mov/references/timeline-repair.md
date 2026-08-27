@@ -172,6 +172,26 @@ Preconditions (the script checks the whole file and refuses on a miss):
 first video packet carries a real PTS; untimestamped packets never occur
 back-to-back; timebase × field rate yields whole-tick pairs.
 
+**Junction-model POC-gate reach (WO-1.15.3, measured 2026-08-27).** The
+POC-lattice output gate — the junction model's strongest correctness evidence
+— can only evaluate `pic_order_cnt_type` 0 streams (the type that carries
+`pic_order_cnt_lsb`; every field source and x264-with-B stream measured).
+For type 2 (x264 `-bf 0`) and the unmeasured type 1 there is no lsb syntax
+element at all, the verdict is knowable from a 40-frame head probe in
+seconds, and `pairfill-paff.sh` refuses the junction build at pre-flight
+(exit 3, nothing written) instead of discovering it after the whole mux. The
+commands above remain the manual route for an operator who wants the
+artifact anyway — unproven, by hand. *Argument, not measurement:* for type 2
+the spec pins decode order = display order (no stored reordering), so the
+presentation lattice degenerates to a uniform ramp — which the remaining
+output gates (zero N/A, strictly monotonic DTS, the pair-tick duration
+histogram, span skew) already constrain tightly; the duration histogram is
+the operative evidence for that shape. No field case has demanded a
+`frame_num`-based POC reconstruction (H.264 §8.2.1.3), so none was built —
+UNPROVEN ≠ FAILED keeps the verdict honest. A kept `.part` can be re-judged
+standalone with `scripts/poc-gate.sh ARTIFACT` (exit 10 = UNPROVEN there:
+no bless decision is at stake standalone).
+
 **setts lessons — each cost a broken build in the incident:**
 - Unset timestamps reach `setts` expressions as **INT64_MIN, not NaN** — test
   `lt(PTS,-8e18)`, never `isnan()`. An `isnan()` filter matches nothing,

@@ -50,6 +50,7 @@ Added in 1.15.0 (source clinic):
 | `PF_PKT_TICKS_FILE` / `PF_PKT_FILE` / `PF_TRACE_FILE` / `PF_PPF_IN` / `PF_DECL_DEPTH_IN` / `PF_DTS_SOURCE_IN` | `lib-paff.sh` scanners | Synthetic timestamp shapes / trace_headers output / pre-measured sub-results into `pf_detect` / `pf_reorder_scan`. |
 | `DISC_DTS_FILE` / `DISC_FRAMEDUR_IN` | `disc_scan` | Synthetic DTS column / frame duration. |
 | `PP_SCAN_FILE` | `pairfill-paff.sh` | Synthetic pair-scan input. |
+| `PF_HEAD_TRACE_FILE` | `pairfill-paff.sh` | Canned HEAD trace_headers log into the junction POC-capability pre-flight (`pf_poc_capability`, WO-1.15.3) — drives the pic_order_cnt_type refusal hermetically. When only `PF_TRACE_FILE` is set, the head probe stays skipped (the canned census carries no head log to judge). |
 | `RTM_MUX_LOG_APPEND` | `remux.sh` | Lines appended to the mux log (confession-class tests). |
 | `RTM_LAYOUTS_FILE` | `resync.sh` | "channels,layout" lines bypassing the frame-level layout probe. |
 | `RTM_FORCE_NO_VCL` | `verify.sh` | Forces the degraded (no filter_units) essence path. |
@@ -57,3 +58,24 @@ Added in 1.15.0 (source clinic):
 | `RTM_BACKHAUL_GATED` | `backhaul_gate` (`lib-paff.sh`) | Caller already ran the gate — children skip the re-check. Set by drivers, not humans. |
 | `PF_SCAN_WINDOW` | `lib-paff.sh` | The one named window constant for both windowed advisory scans (P1.1; default 5000). |
 | `PF_SPS_NOISE_MAX`, `PF_PPF_WINDOW` | `lib-paff.sh` | SPS-parse noise ceiling / PPF probe window bounds. |
+
+## Cost models (measured, so nobody re-pays to rediscover them)
+
+**The junction POC-lattice gate (WO-1.15.3, field-recorded on the 23.68 GB
+2022-VMA artifact):** the gate's pre-1.15.3 direct-output arm paid a
+whole-file `trace_headers` parse of the OUTPUT — ~20 minutes of its 26m16s,
+roughly a third of the total ladder runtime — while `pf_trace_census` had
+already paid an identical whole-file pass over the same coded pictures on the
+SOURCE. Since WO-1.15.3 the census emits the per-picture `idr,poc` table and
+the SPS `log2_max` value as side files from that same pass (zero extra
+reads), and the gate reuses them: the output then pays only its ffprobe PTS
+list (I/O-bound, ~minutes on 24 GB). License: copy-by-construction within the
+same run (pairfill's video is unconditionally `-c copy`; tables measured
+byte-identical across ts → copy → mov, pinned by test 78). The
+direct-extraction arm keeps the old cost and says so when it runs — it
+remains the fallback (census without a POC table) and the standalone default
+(`scripts/poc-gate.sh`, which has no census in scope). The capability
+pre-flight (`pf_poc_capability`) is the other half of the same economy: a
+40-frame head probe (seconds) refuses the `pic_order_cnt_type != 0` class
+that pre-1.15.3 cost the entire build (~55 min mux + the 26-minute parse) to
+reach a foregone UNPROVEN.

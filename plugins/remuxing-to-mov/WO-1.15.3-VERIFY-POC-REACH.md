@@ -1,5 +1,11 @@
 # 1.15.3 Work Order — Verify the POC Gate's Reach
 
+> **Status (2026-08-27, later the same day): EXECUTED — shipped as 1.15.5**
+> (1.15.4 landed between filing and execution; no released 1.15.3 exists and
+> versions only move forward — the WO keeps its filed name). Execution record
+> at the end of this document; round detail in `CHANGELOG.md` § 1.15.5.
+> The original filing status is preserved below unedited.
+>
 > **Status (2026-08-27): FILED. Nothing here is applied.** This round is the
 > POC-shaped remainder of the 1.15.2 filing's Phase 5 — item 5.3 (the gate's
 > capability pre-flight) and item 5.4 (reusing the census `trace_headers` pass)
@@ -457,3 +463,64 @@ rebuild (`:300–302`) and on `PF_REORDER=yes` + derive signature it
 escalates to Rung 3-DERIVE — neither of which carries a POC gate. The
 pre-flight refusal guarantees only that pairfill itself writes nothing;
 Item 1 step 6 owns the per-profile driver behavior.
+
+---
+
+## Execution record (2026-08-27, shipped as 1.15.5)
+
+Executed same-day against 9b1c792 (the 1.15.4 tree). Every phase gate met;
+tests 77–79 written FIRST and verified RED against the pre-round tree
+(77: 28 red of 40, the 12 greens being pre-existing auto.sh code-shape pins;
+78: 12 red of 19; 79: aborts on the missing script), then green after the
+fixes — final: 77 = 40/40, 78 = 18/18, 79 = 19/19, all mode 755.
+
+**Phase 1 (Item 1)** — `pf_poc_capability` in `lib-paff.sh` (canned-log
+testable; the head probe's rc travels with its output per WO-1.15.4's
+EMPTY ≠ ABSENT); head probe captured once to a file, both consumers read it;
+`why=poc_type` refuses at pre-flight, exit 3, nothing written, no bypass and
+no attestation route; refusal names the manual route AND the per-profile
+auto.sh consequence (step 6 decided: established fallbacks stand, documented
+in auto.sh at the half_ts fallthrough); `PCAP_MAXLSB` carried to the gate
+with the disagree-loudly corroboration; census count-arm consequence line
+added (announce, not refuse — as recommended). `PP_POC_CAPABILITY` machine
+row (additive). Test-65 §7's hermetic path is preserved: with only
+`PF_TRACE_FILE` set the head probe stays skipped (documented in knobs.md);
+`PF_HEAD_TRACE_FILE` injects the head log for the hermetic refusal arm.
+The optional `/clean` capability line (fix 5) was SKIPPED — rationale
+recorded in the CHANGELOG (clinic is source-domain report-only; pairfill now
+announces capability itself pre-cost; poc-gate.sh covers the standalone ask).
+
+**Phase 2 (Item 2)** — `pf_trace_census` grew optional POC_OUT/SPS_OUT args
+(the spsf pattern; four new token matches, zero extra reads); the gate's
+preferred arm is census-`idr,poc` ⨯ output-PTS with the count guard intact;
+the direct extraction is factored as `pf_poc_extract` and kept as the
+fallback arm (canned-census path) and poc-gate.sh's default; the
+copy-by-construction license is stated at both the emitter and the consumer.
+Cost model recorded in `references/knobs.md` (new "Cost models" section).
+Test 78's A/B reproduced the appendix measurement: byte-identical tables,
+equal SPS captures, identical lattice verdicts through both arms, and the
+reuse arm engaged end-to-end through pairfill on the capable bench.
+
+**Phase 3 (Item 3)** — `scripts/poc-gate.sh` with the 0/1/10/2 contract and
+the two-contexts split stated in its header; `--table` is the unit lane's
+entry point (test 76's tables verified driving it); extraction/probe
+failures are UNPROVEN-with-rc (`why=probe_failed`), never accusations. The
+UNPROVEN branch's `PP_POC_LATTICE unproven=1 why= rows= packets=` row and
+the re-judge route on BOTH retention messages landed. The `verify.sh --poc`
+decline is recorded in the CHANGELOG.
+
+**Phase 4** — reach map in `pairfill-paff.sh`'s header; type-2 degeneracy
+sentence in `references/timeline-repair.md`, labeled argument-not-
+measurement; frame_num reconstruction declined until a field case demands
+it; SKILL.md machine-lines table gained `PP_CENSUS` / `PP_POC_CAPABILITY` /
+`PP_POC_LATTICE` rows and the task table a poc-gate.sh row. Suite 283/283;
+`claude plugin validate --strict` green on plugin and marketplace.
+
+**Leftover ledger (inherited by the next filing, unchanged from "What stays
+open"):** 5.1 UNPROVEN/FAILED audit across the remaining gates; 5.2 unit
+tables for `rewrap_nudges`/`rewrap_hard_confessions`; 5.5 verify.sh gate (g)
+content-hash fallback; 5.6 the wider provenance sweep; field follow-ups —
+`verify.sh --full` archival sign-off on the delivered 2022-VMA `feed.mov`,
+`lead-check.sh`'s ~37-minute cost on that class. Plus, from the
+CHECKUP-2026-08-27 packaging: the one-writer round (was penciled "1.15.5",
+now the next free number), jurisdiction, harness, docs.

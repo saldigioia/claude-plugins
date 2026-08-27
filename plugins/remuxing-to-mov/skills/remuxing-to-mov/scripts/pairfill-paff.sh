@@ -49,6 +49,26 @@
 # file at 3,179/451,071 until 1.15.2 Defect D restored it, pinned by test 76).
 # Any off-lattice picture is FAIL exit 1 with the artifact kept as .part.
 #
+# THE GATE'S REACH (measured 2026-08-27, WO-1.15.3 — what it can and cannot
+# judge, and WHEN each verdict is knowable):
+#   pic_order_cnt_type 0 (field sources; every x264-with-B stream)
+#     -> one lsb row per picture + SPS log2_max: EVALUATED (unwrapped, 1.15.2 D)
+#   pic_order_cnt_type 2 (x264 -bf 0; measured)  |  type 1 (unmeasured — no
+#   fixture source; x264 emits only 0 and 2)
+#     -> ZERO lsb rows, no log2_max (spec-conditional on type 0): the lattice
+#        can never be evaluated. Knowable from a 40-frame HEAD PROBE in
+#        seconds — so the junction path now REFUSES AT PRE-FLIGHT (exit 3,
+#        nothing built) instead of paying the whole mux + a whole-file output
+#        parse to reach a foregone UNPROVEN (field-recorded: ~55 min mux +
+#        26 min parse, 24.8 GB .part). pf_poc_capability, lib-paff.sh.
+#   picture/packet count mismatch (census PC_PICS != demux PP_N)
+#     -> UNPROVEN at the gate; knowable at CENSUS time, pre-mux — announced
+#        there (not refused: multi-slice/non-VCL framing is a legitimate
+#        population and the duration gate still judges those builds).
+# Standalone re-judge of a kept .part: scripts/poc-gate.sh (exit 10 for
+# UNPROVEN there — no bless decision is at stake standalone; here an unproven
+# build is never blessed, so this script keeps exit 1 + retention).
+#
 # setts LESSONS BAKED IN (each cost a broken build in the incident):
 #   * unset timestamps reach setts expressions as INT64_MIN, NOT NaN — test
 #     lt(PTS,-8e18), never isnan(); an isnan() filter silently does nothing and
@@ -216,19 +236,72 @@ if [ "$PP_MODEL" = junction ]; then
   # duration-histogram gate below. Head feature-probe first: a trace_headers
   # that parses nothing on this ffmpeg/file must refuse BEFORE the whole-file
   # pass (never build unproven), not after it.
-  if [ -z "${PF_TRACE_FILE:-}" ]; then
-    pp_headpics=$(ffmpeg -nostdin -hide_banner -nostats ${FF_INPUT_OPTS[@]+"${FF_INPUT_OPTS[@]}"} \
-        -i "$IN" -map 0:v:0 -c copy -frames:v 40 -bsf:v trace_headers -f null - 2>&1 | \
-      awk '{ for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"){ if($NF+0==0) n++; break } } END{ print n+0 }')
-    if [ "${pp_headpics:-0}" -eq 0 ]; then
+  # --- junction precondition 3 (WO-1.15.3 Item 1, the 1.15.2 Item C precedent
+  # applied here): the POC gate's capability is knowable from the SAME head
+  # probe in seconds — the build never asks. One ffmpeg run, captured once to
+  # a file; pf_poc_capability reads it, and the old "parsed no coded picture"
+  # refusal folds into PCAP_WHY=no_pictures. On PCAP_WHY=poc_type
+  # (pic_order_cnt_type != 0: zero pic_order_cnt_lsb rows — measured on the
+  # x264 -bf 0 mint) the junction model refuses at pre-flight, exit 3,
+  # NOTHING written — pre-round this discovery cost the entire build
+  # (field-recorded ~55 min mux + 26 min parse to a foregone UNPROVEN).
+  # NO bypass flag, deliberately (1.15.2 Defect-B lesson: a gate that can be
+  # waived into UNPROVEN-by-default is no gate); the manual route and the
+  # auto.sh consequence are named in the refusal instead.
+  # Test hooks: PF_HEAD_TRACE_FILE injects the head log; when only
+  # PF_TRACE_FILE (the census hook) is set, the head probe stays skipped as
+  # before (the canned census carries no head log to judge) and the gate's
+  # own captures decide, as they always did.
+  PP_HEADLOG=""
+  if [ -n "${PF_HEAD_TRACE_FILE:-}" ]; then
+    PP_HEADLOG="$PF_HEAD_TRACE_FILE"
+  elif [ -z "${PF_TRACE_FILE:-}" ]; then
+    PP_HEADLOG="$(mktemp)"; pp_hrc=0
+    # EMPTY != ABSENT (WO-1.15.4): the probe's exit status travels with its
+    # output — a failed probe lands in the no_pictures refusal WITH its rc.
+    ffmpeg -nostdin -hide_banner -nostats ${FF_INPUT_OPTS[@]+"${FF_INPUT_OPTS[@]}"} \
+        -i "$IN" -map 0:v:0 -c copy -frames:v 40 -bsf:v trace_headers -f null - \
+        >/dev/null 2>"$PP_HEADLOG" || pp_hrc=$?
+  fi
+  PCAP_MAXLSB=0   # no head verdict (canned-census path) -> nothing to corroborate
+  if [ -n "$PP_HEADLOG" ]; then
+    eval "$(pf_poc_capability "$PP_HEADLOG")"
+    [ -n "${PF_HEAD_TRACE_FILE:-}" ] || rm -f "$PP_HEADLOG"
+    echo "PP_POC_CAPABILITY ok=${PCAP_OK:-no} why=${PCAP_WHY:--} poc_type=${PCAP_POC_TYPE:--1} maxlsb=${PCAP_MAXLSB:-0} lsb_rows=${PCAP_LSB_ROWS:-0} pics=${PCAP_PICS:-0}"   # machine-readable (additive, WO-1.15.3)
+    if [ "${PCAP_WHY:-}" = no_pictures ]; then
       echo ">> JUNCTION MODEL REFUSED: trace_headers on this ffmpeg parsed no coded picture"
-      echo "   from the stream head — the census cannot be taken, and the junction fill is"
-      echo "   never built unproven. Nothing was built; the source is untouched."
+      echo "   from the stream head (probe rc=${pp_hrc:-0}) — the census cannot be taken, and"
+      echo "   the junction fill is never built unproven. Nothing was built; the source is"
+      echo "   untouched."
       exit 3
+    fi
+    if [ "${PCAP_OK:-no}" != yes ]; then
+      echo ">> JUNCTION MODEL REFUSED: pic_order_cnt_type=${PCAP_POC_TYPE:--1} — this stream carries no"
+      echo "   pic_order_cnt_lsb, so the POC-lattice output gate (the junction model's"
+      echo "   strongest correctness evidence) cannot evaluate any build from it. The build"
+      echo "   would end UNPROVEN at its final gate and could never be blessed."
+      echo "   Nothing was built; the source is untouched."
+      echo "   Manual route (unproven, by hand): the Rung 3-PAIR mux commands in"
+      echo "   references/timeline-repair.md build the artifact without this gate's evidence."
+      echo "   Under auto.sh this refusal lands as a generic pairfill FAIL and the ladder"
+      echo "   legally continues per profile (WO-1.15.3 Item 1 step 6): PF_REORDER=no falls"
+      echo "   through to the flattening rebuild; reorder + the derive signature escalates to"
+      echo "   Rung 3-DERIVE — NEITHER carries a POC gate, so that artifact is judged by its"
+      echo "   own rung's gates only."
+      exit 3
+    fi
+    if [ "${PCAP_MAXLSB:-0}" -gt 0 ]; then
+      echo "   junction POC-gate capability: poc_type=${PCAP_POC_TYPE} MaxPicOrderCntLsb=${PCAP_MAXLSB} (head probe: ${PCAP_LSB_ROWS} lsb rows / ${PCAP_PICS} pictures)"
+    else
+      echo "   junction POC-gate capability: poc_type=${PCAP_POC_TYPE} (head probe: ${PCAP_LSB_ROWS} lsb rows / ${PCAP_PICS} pictures; SPS log2_max not in the head window)"
     fi
   fi
   echo "-- junction census (whole-file trace_headers; demux + header parse, no decode) --"
-  eval "$(pf_trace_census "$IN")"
+  # side files (WO-1.15.3 Item 2): the census pass also emits the per-picture
+  # idr,poc table + the SPS log2_max value, so the POC gate below reuses them
+  # instead of re-parsing the whole output (~20 min on a 24 GB artifact).
+  PP_CEN_POC="$(mktemp)"; PP_CEN_SPS="$(mktemp)"
+  eval "$(pf_trace_census "$IN" "$PP_CEN_POC" "$PP_CEN_SPS")"
   if [ "${PC_OK:-no}" != yes ]; then
     echo ">> JUNCTION MODEL REFUSED: the whole-file trace_headers census parsed no coded"
     echo "   pictures — unprovable cadence, nothing built."
@@ -244,8 +317,17 @@ if [ "$PP_MODEL" = junction ]; then
   fi
   [ "$PC_STRUCT_HIST" = none ] && \
     echo "   note: no pic_timing pic_struct carried — no repeat/doubling signaled; the census stands on the field/frame split"
-  [ "${PC_PICS:-0}" -eq "${PP_N:-0}" ] || \
+  # count-arm consequence (WO-1.15.3 Item 1 fix 3): the gate's count guard
+  # trips iff PC_PICS != PP_N (the fill leaves 0 N/A and -c copy preserves the
+  # packet count, so pp_nb = PP_N and pp_na is the census picture count) — the
+  # census knows the UNPROVEN outcome before the mux starts. ANNOUNCED, not
+  # refused: unlike the poc_type arm this class has a legitimate population
+  # (multi-slice / non-VCL framing) and the duration gate still judges it.
+  [ "${PC_PICS:-0}" -eq "${PP_N:-0}" ] || {
     echo "   note: census pictures ($PC_PICS) != demux packets ($PP_N) — multi-slice or non-VCL framing; the duration gate still judges the written timeline"
+    echo "   consequence: the POC gate's count guard WILL trip on this mismatch — the build"
+    echo "   cannot end better than UNPROVEN (exit 1, .part kept, re-judge route named there)."
+  }
   echo "PP_CENSUS pics=$PC_PICS fields=$PC_FIELDS frames=$PC_FRAMES pic_struct_bad=${PC_STRUCT_BAD:-0}${PP_ATTESTED:+ attested=$PP_ATTESTED}"   # machine-readable (additive, 2026-08-18)
 fi
 
@@ -455,50 +537,82 @@ rm -f "$MUXLOG"
 if [ "$PP_JM" -eq 1 ]; then
   echo "-- POC-lattice gate (junction model): every picture on its presentation slot --"
   PP_POCA="$(mktemp)"; PP_POCB="$(mktemp)"; PP_POCT="$(mktemp)"; PP_SPS="$(mktemp)"
-  # the same pass also captures the SPS's log2_max_pic_order_cnt_lsb_minus4 —
-  # pf_poc_lattice needs MaxPicOrderCntLsb to unwrap the lsb (1.15.2 Defect D)
-  ffmpeg -nostdin -hide_banner -nostats -i "$PART" -map 0:v:0 -c copy \
-      -bsf:v trace_headers -f null - 2>&1 | \
-    awk -v spsf="$PP_SPS" '{ name=""
-           for(i=1;i<=NF;i++) if($i=="nal_unit_type"||$i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
-           if(name=="") next
-           v=$NF+0
-           if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; next }
-           if(name=="nal_unit_type"){ nal=v; next }
-           if(name=="first_mb_in_slice"){ if(v==0){ pend=1; idr=(nal==5)?1:0 }; next }
-           if(pend){ printf "%d,%d\n", idr, v; pend=0 } }
-         END{ if(l2 != "") printf "%d\n", l2 > spsf }' > "$PP_POCA"
+  # TWO ARMS (WO-1.15.3 Item 2, the 1.15.2 leftover 5.4). Preferred: reuse the
+  # census-emitted idr,poc table + SPS value — the census already paid a
+  # whole-file trace_headers pass over the SAME coded pictures on the source,
+  # and this run's video is -c copy BY CONSTRUCTION, so the output's
+  # per-picture idr,poc sequence IS the source's, picture for picture
+  # (measured byte-identical across ts -> -c copy -> mov, 2026-08-27; pinned
+  # by test 78; corroborated at sign-off by verify.sh gate (b) VCL identity).
+  # The license is COPY-BY-CONSTRUCTION WITHIN THE SAME RUN — a future
+  # non-copy path must NOT inherit it and must take the direct arm below.
+  # Fallback: the direct-output extraction (pf_poc_extract — the old
+  # whole-file output parse), kept for a census that carried no POC table
+  # (canned-census test path) and as poc-gate.sh's standalone arm.
+  if [ -s "${PP_CEN_POC:-/nonexistent}" ]; then
+    cp "$PP_CEN_POC" "$PP_POCA"
+    [ -s "${PP_CEN_SPS:-/nonexistent}" ] && cp "$PP_CEN_SPS" "$PP_SPS"
+    echo "   (census-pass reuse: per-picture idr,poc from the source census — the output"
+    echo "    pays only its ffprobe PTS list; standalone re-judge: scripts/poc-gate.sh)"
+  else
+    pf_poc_extract "$PART" "$PP_POCA" "$PP_SPS"
+    echo "   (direct-output extraction: the census carried no POC table — whole-file"
+    echo "    output header parse, the pre-reuse cost)"
+  fi
   ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$PART" 2>/dev/null | \
     awk -F, 'NF && $1!="N/A"{ print $1+0 }' > "$PP_POCB"
   pp_na=$(grep -c . "$PP_POCA" || true); pp_nb=$(grep -c . "$PP_POCB" || true)
   if [ "${pp_na:-0}" -eq 0 ] || [ "${pp_na:-0}" -ne "${pp_nb:-1}" ]; then
     # UNPROVEN, not FAILED (the 1.15.2 rule): this branch is a claim about the
     # GATE's reach, not about the artifact — but an unproven build is still
-    # never blessed, so the exit and the retention are unchanged.
+    # never blessed, so the exit and the retention are unchanged. (The
+    # poc_type=0 precondition means the pre-flight now catches the zero-row
+    # arm before any build; the count arm was announced at census time.)
+    pp_why=count; [ "${pp_na:-0}" -eq 0 ] && pp_why=poc_type
     echo ">> POC-LATTICE GATE UNPROVEN — POC not extractable or picture/packet counts differ"
     echo "   (POC rows=$pp_na, timestamped packets=$pp_nb; pic_order_cnt_type != 0 streams"
     echo "    carry no pic_order_cnt_lsb and the lattice cannot be evaluated — never"
     echo "    blessed unproven; this is not evidence the artifact is bad)."
-    echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes; delete: rm \"$PART\")"
-    rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT" "$PP_SPS"; exit 1
+    echo "PP_POC_LATTICE unproven=1 why=$pp_why rows=$pp_na packets=$pp_nb"   # machine-readable (additive, WO-1.15.3)
+    echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes; delete: rm \"$PART\";"
+    echo "    re-judge: scripts/poc-gate.sh \"$PART\")"
+    rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT" "$PP_SPS" "$PP_CEN_POC" "$PP_CEN_SPS"; exit 1
   fi
   PP_L2=$(head -1 "$PP_SPS" 2>/dev/null || true)
   PP_MAXLSB=0
   case "${PP_L2:-}" in ''|*[!0-9]*) ;; *) [ "$PP_L2" -le 12 ] && PP_MAXLSB=$((1 << (PP_L2 + 4)));; esac
-  if [ "$PP_MAXLSB" -gt 0 ]; then
+  # corroboration (WO-1.15.3 Item 1 fix 4): the head probe's PCAP_MAXLSB rides
+  # forward to here. Two known captures that DISAGREE mean the SPS lsb range
+  # is not one value across this stream/run — the single-MaxPicOrderCntLsb
+  # unwrap is invalid and an SPS that changed across a -c copy is evidence of
+  # something much worse than a gate problem. Refuse loudly, keep the .part.
+  if [ "${PCAP_MAXLSB:-0}" -gt 0 ] && [ "$PP_MAXLSB" -gt 0 ] && [ "$PP_MAXLSB" -ne "${PCAP_MAXLSB:-0}" ]; then
+    echo ">> SPS DISAGREEMENT — head-probe MaxPicOrderCntLsb=${PCAP_MAXLSB} vs this pass's $PP_MAXLSB:"
+    echo "   the lsb range is not constant across the stream, the single-value unwrap is"
+    echo "   invalid, and an SPS that changes across a -c copy points at the source, not"
+    echo "   the gate. NOT blessing."
+    echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes; delete: rm \"$PART\";"
+    echo "    re-judge: scripts/poc-gate.sh \"$PART\")"
+    rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT" "$PP_SPS" "$PP_CEN_POC" "$PP_CEN_SPS"; exit 1
+  fi
+  if [ "$PP_MAXLSB" -eq 0 ] && [ "${PCAP_MAXLSB:-0}" -gt 0 ]; then
+    PP_MAXLSB=${PCAP_MAXLSB}
+    echo "   MaxPicOrderCntLsb=$PP_MAXLSB (carried from the head probe; this pass's capture had no SPS value)"
+  elif [ "$PP_MAXLSB" -gt 0 ]; then
     echo "   MaxPicOrderCntLsb=$PP_MAXLSB (SPS log2_max_pic_order_cnt_lsb_minus4=$PP_L2); lsb unwrapped per H.264 8.2.1.1"
   else
     echo "   MaxPicOrderCntLsb: SPS value unavailable — inferred per sequence (next power of two above the largest lsb)"
   fi
   paste -d, "$PP_POCA" "$PP_POCB" > "$PP_POCT"
   eval "$(pf_poc_lattice "$PP_POCT" "$PP_MAXLSB")"
-  rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT" "$PP_SPS"
+  rm -f "$PP_POCA" "$PP_POCB" "$PP_POCT" "$PP_SPS" "$PP_CEN_POC" "$PP_CEN_SPS"
   echo "   on_slot=$PL_ON/$PL_TOTAL  off_lattice=$PL_OFF  (IDR sequences=$PL_SEQS)"
   echo "PP_POC_LATTICE on_slot=$PL_ON total=$PL_TOTAL off=$PL_OFF"   # machine-readable (additive, 2026-08-18)
   if [ "${PL_OFF:-1}" -ne 0 ]; then
     echo ">> POC-LATTICE GATE FAILED — $PL_OFF picture(s) off their presentation slot:"
     echo "   the written timeline is not the derived lattice. NOT blessing."
-    echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes; delete: rm \"$PART\")"
+    echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes; delete: rm \"$PART\";"
+    echo "    re-judge: scripts/poc-gate.sh \"$PART\")"
     exit 1
   fi
 fi

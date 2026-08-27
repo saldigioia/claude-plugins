@@ -1043,10 +1043,11 @@ pf_setts_probe () {
     -f null - >/dev/null 2>&1
 }
 
-# pf_trace_census INPUT — whole-file trace_headers census of the video track:
-# coded pictures (first_mb_in_slice==0), field/frame split (field_pic_flag),
-# and the pic_struct histogram from pic_timing SEI. Demux + header parse only,
-# no decode; the video bits are never touched. Emits eval-able lines:
+# pf_trace_census INPUT [POC_OUT [SPS_OUT]] — whole-file trace_headers census
+# of the video track: coded pictures (first_mb_in_slice==0), field/frame split
+# (field_pic_flag), and the pic_struct histogram from pic_timing SEI. Demux +
+# header parse only, no decode; the video bits are never touched. Emits
+# eval-able lines:
 #   PC_PICS=n PC_FIELDS=n PC_FRAMES=n PC_STRUCT_BAD=n PC_STRUCT_HIST=k:v,...
 #   PC_OK=yes|no
 # PC_FRAMES = pictures whose field_pic_flag is 0 OR absent (a progressive SPS
@@ -1056,19 +1057,32 @@ pf_setts_probe () {
 # operator's WARNING on the 2026-08-18 record). PC_STRUCT_HIST is `none` when
 # the stream carries no pic_timing pic_struct at all.
 # PC_OK=no (zero pictures parsed) = trace_headers unusable on this ffmpeg/file.
+# POC_OUT/SPS_OUT (WO-1.15.3 Item 2, the 1.15.2 leftover 5.4): optional side
+# files, the spsf pattern from the POC gate's own extraction. When given, the
+# SAME pass also writes one "idr,poc" line per coded picture (decode order,
+# first slice only — the pend discipline) to POC_OUT and the SPS
+# log2_max_pic_order_cnt_lsb_minus4 value to SPS_OUT — zero extra reads; the
+# awk grows four token matches. This is what lets pairfill's POC-lattice gate
+# skip its ~20-minute whole-file re-parse of the output (the field-recorded
+# cost): the reuse license is COPY-BY-CONSTRUCTION WITHIN THE SAME RUN — the
+# tables were measured byte-identical across ts -> -c copy -> mov (2026-08-27
+# appendix; pinned by test 78). A future non-copy path must NOT inherit it.
 # Test hook: PF_TRACE_FILE=<canned trace_headers log> bypasses ffmpeg.
 pf_trace_census () {
   { if [ -n "${PF_TRACE_FILE:-}" ]; then cat "$PF_TRACE_FILE"; else
       ffmpeg -nostdin -hide_banner -nostats ${FF_INPUT_OPTS[@]+"${FF_INPUT_OPTS[@]}"} \
         -i "${1:?pf_trace_census needs INPUT}" -map 0:v:0 -c copy \
         -bsf:v trace_headers -f null - 2>&1; fi; } | \
-  awk '
+  awk -v pocf="${2:-}" -v spsf="${3:-}" '
     { name=""
-      for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"||$i=="field_pic_flag"||$i=="pic_struct"){ name=$i; break }
+      for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"||$i=="field_pic_flag"||$i=="pic_struct"||$i=="nal_unit_type"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
       if(name=="") next
       v=$NF+0
-      if(name=="first_mb_in_slice"){ if(v==0){ pics++; pend=1 }; next }
+      if(name=="nal_unit_type"){ nal=v; next }
+      if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; next }
+      if(name=="first_mb_in_slice"){ if(v==0){ pics++; pend=1; pendp=1; idr=(nal==5)?1:0 }; next }
       if(name=="field_pic_flag"){ if(pend){ pend=0; if(v==1) fields++ }; next }
+      if(name=="pic_order_cnt_lsb"){ if(pendp){ pendp=0; if(pocf!="") printf "%d,%d\n", idr, v > pocf }; next }
       # pic_struct (exact token — pic_struct_present_flag never matches here)
       hist[v]++; nps++
       if(v==0||v==5||v==6||v==7||v==8) bad++
@@ -1076,9 +1090,71 @@ pf_trace_census () {
     END{
       hs=""; for(k=0;k<=15;k++) if(hist[k]>0) hs=hs (hs==""?"":",") k ":" hist[k]
       if(nps+0==0) hs="none"
+      if(spsf!="" && l2 != "") printf "%d\n", l2 > spsf
       printf "PC_PICS=%d\nPC_FIELDS=%d\nPC_FRAMES=%d\nPC_STRUCT_BAD=%d\nPC_STRUCT_HIST=%s\nPC_OK=%s\n", \
         pics+0, fields+0, pics-fields, bad+0, hs, (pics+0>0?"yes":"no")
     }'
+}
+
+# pf_poc_capability HEAD_TRACE_LOG — the POC gate's capability, read from a
+# HEAD trace_headers log in seconds (WO-1.15.3 Item 1; the 1.15.2 Item C
+# precedent: never build to a foregone verdict). Text-in/text-out over a file,
+# unit-testable from canned logs (test 65 §3 pattern; test 77). Emits:
+#   PCAP_POC_TYPE=n|-1  (SPS pic_order_cnt_type; -1 = not seen in the log)
+#   PCAP_MAXLSB=n|0     (1 << (log2_max_pic_order_cnt_lsb_minus4 + 4); 0 = no
+#                        SPS value — spec-conditional on poc_type 0)
+#   PCAP_LSB_ROWS=n     (first-slice pic_order_cnt_lsb rows — the pend
+#                        discipline; multi-slice never double-counts)
+#   PCAP_PICS=n         (coded pictures, first_mb_in_slice==0)
+#   PCAP_OK=yes|no  PCAP_WHY=poc_type|no_pictures|-
+# PCAP_WHY=no_pictures folds in the old head-probe "parsed no coded picture"
+# refusal; PCAP_WHY=poc_type is the measured type-2 class (x264 -bf 0): the
+# stream carries no pic_order_cnt_lsb, the lattice can never be evaluated, and
+# a junction build from it could only end UNPROVEN.
+pf_poc_capability () {
+  awk '
+    { name=""
+      for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"||$i=="pic_order_cnt_type"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
+      if(name=="") next
+      v=$NF+0
+      if(name=="pic_order_cnt_type"){ ptype=v; tseen=1; next }
+      if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; l2seen=1; next }
+      if(name=="first_mb_in_slice"){ if(v==0){ pics++; pendp=1 }; next }
+      if(pendp){ pendp=0; rows++ }
+    }
+    END{
+      maxlsb=0
+      if(l2seen && l2+0>=0 && l2+0<=12){ maxlsb=16; for(i=0;i<l2+0;i++) maxlsb*=2 }
+      ok="yes"; why="-"
+      if(pics+0==0){ ok="no"; why="no_pictures" }
+      else if(rows+0==0){ ok="no"; why="poc_type" }
+      printf "PCAP_POC_TYPE=%d\nPCAP_MAXLSB=%d\nPCAP_LSB_ROWS=%d\nPCAP_PICS=%d\nPCAP_OK=%s\nPCAP_WHY=%s\n", \
+        (tseen? ptype : -1), maxlsb, rows+0, pics+0, ok, why
+    }' "${1:?pf_poc_capability needs HEAD_TRACE_LOG}"
+}
+
+# pf_poc_extract ARTIFACT POC_OUT SPS_OUT — the POC gate's direct-output
+# extraction, factored (WO-1.15.3): one whole-file trace_headers pass over
+# ARTIFACT's video track writing one "idr,poc" line per coded picture (decode
+# order, first slice only) to POC_OUT and the SPS log2_max value to SPS_OUT.
+# This is the FALLBACK arm — pairfill's gate prefers the census-emitted table
+# (same rows, already paid for; test 78 pins the two arms byte-identical on a
+# copy) and poc-gate.sh uses this arm by default (a bare artifact has no
+# census in scope). Whole-file header parse: ~20 min on a 24 GB artifact —
+# the cost the census reuse exists to avoid (references/knobs.md).
+pf_poc_extract () {
+  ffmpeg -nostdin -hide_banner -nostats ${FF_INPUT_OPTS[@]+"${FF_INPUT_OPTS[@]}"} \
+      -i "${1:?pf_poc_extract needs ARTIFACT}" -map 0:v:0 -c copy \
+      -bsf:v trace_headers -f null - 2>&1 | \
+    awk -v spsf="${3:?pf_poc_extract needs SPS_OUT}" '{ name=""
+           for(i=1;i<=NF;i++) if($i=="nal_unit_type"||$i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
+           if(name=="") next
+           v=$NF+0
+           if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; next }
+           if(name=="nal_unit_type"){ nal=v; next }
+           if(name=="first_mb_in_slice"){ if(v==0){ pend=1; idr=(nal==5)?1:0 }; next }
+           if(pend){ printf "%d,%d\n", idr, v; pend=0 } }
+         END{ if(l2 != "") printf "%d\n", l2 > spsf }' > "${2:?pf_poc_extract needs POC_OUT}"
 }
 
 # pf_poc_lattice TABLE_FILE [MAX_POC_LSB] — the POC-lattice output gate's
