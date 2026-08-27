@@ -38,9 +38,10 @@ video, Dolby E audio — or a child script's own refusal).
   Doctrine: `references/source-clinic.md`.
 - **Escalation ladder** — stop at the first rung that produces a clean,
   verified file: pure copy → copy video + PCM audio → regenerate timestamps →
-  timeline repair (pair-mate PTS fill for pair-timestamped/reordered PAFF, or
-  elementary-stream rebuild when no reorder survives) → scoped re-encode (the
-  documented last resort).
+  timeline repair by MEASURED profile (pair-mate PTS fill for half-timestamped
+  PAFF; DTS re-derivation — Rung 3-DERIVE, any codec — for PTS-complete
+  reordered streams; elementary-stream rebuild when no reorder survives) →
+  scoped re-encode (the documented last resort).
 - **Glitch diagnosis** — a decode-to-null / MKV strict-mux / DTS-monotonicity /
   forward-gap ladder that separates damaged captures from the timestamp defects
   behind scrub-tearing PAFF remuxes and gap-collapse audio desync, and routes
@@ -57,11 +58,12 @@ video, Dolby E audio — or a child script's own refusal).
 - **Opt-in QuickTime metadata** — `metadata.sh` embeds title/description/etc. in the
   proper QuickTime `mdta` format and drops the generic chapter "menu"; never applied
   automatically (the default deliverable is metadata-free).
-- **Verification of every output** — decoded-pixel identity (timestamp-agnostic
-  MD5), a whole-file output-timeline gate (N/A timestamps, strict DTS,
-  duration histogram), a scrub gate, an A/V duration-parity (sync) gate, and a
-  presentation-ORDER check on `--full`; playable ≠ valid ≠ lossless ≠ in-sync ≠
-  in-order, so all are checked.
+- **Verification of every output** — coded-bitstream (VCL) identity at the
+  default tier, a whole-file output-timeline gate (N/A timestamps, strict DTS,
+  duration histogram), a scrub gate, an A/V duration-parity (sync) gate — and
+  on `--full`, the decoded-frame multiset plus the presentation-ORDER check
+  (the decoded-pixel proofs are `--full`'s, not every run's); playable ≠
+  valid ≠ lossless ≠ in-sync ≠ in-order, so all are checked.
 - **Lossless container swap before any re-encode** — some MPEG-2 4:2:2 masters
   verify lossless, open in QuickTime, and render as garbage; no MOV sample-entry
   retag fixes them (ffmpeg writes one generic body for every MPEG-2 fourcc).

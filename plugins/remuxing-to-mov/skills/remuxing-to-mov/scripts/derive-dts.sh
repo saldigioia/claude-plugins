@@ -260,7 +260,7 @@ echo "-- output gate 2/4: PTS multiset identity vs source (offset-normalized) --
 # is applied to ALL streams identically, so a global rebase cancels out of
 # both the video identity and A/V sync.
 pts_norm () {
-  local tb; tb=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$1" 2>/dev/null | head -1)
+  local tb; tb=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$1" 2>/dev/null)
   ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$1" 2>/dev/null | \
     awk -F, -v tb="$tb" 'BEGIN{ split(tb,a,"/"); if(a[2]+0==0){a[1]=1;a[2]=1} }
       NF && $1!="N/A" { v[++n]=$1+0; if(n==1||$1+0<mn) mn=$1+0 }

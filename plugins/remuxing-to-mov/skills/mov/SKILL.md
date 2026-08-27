@@ -80,10 +80,12 @@ bash "${CLAUDE_PLUGIN_ROOT}/skills/remuxing-to-mov/scripts/mov.sh" <INPUT> [OUTP
   the video pre-roll while the audio pre-roll survives. The `MOV_SUMMARY`
   machine line records the outcome: `idr_trim=none|<N>|skipped|failed`.
 - Field-coded (PAFF) input is auto-routed to the right timeline repair by its
-  timestamp profile: pair-timestamped/reordered streams get the pair-mate PTS
-  fill (real PTS kept, original audio preserved bit-exact in the dual-track);
-  only a no-reorder stream gets the elementary rebuild (original audio not
-  bit-exact preserved on that path — the script says so).
+  MEASURED timestamp profile (the 1.14 doctrine): half-timestamped streams get
+  the pair-mate PTS fill (real PTS kept, original audio preserved bit-exact in
+  the dual-track); PTS-complete reordered streams get the DTS re-derivation
+  (Rung 3-DERIVE, `derive-dts.sh` — any codec); only a no-reorder stream gets
+  the elementary rebuild (original audio not bit-exact preserved on that
+  path — the script says so).
 - A copy mux whose log confesses invented timing (`pts has no value` /
   `Timestamps are unset`) is a hard stop — the script refuses to bless the
   output and points at `diagnose.sh`. Relay that verbatim; never ship the file.

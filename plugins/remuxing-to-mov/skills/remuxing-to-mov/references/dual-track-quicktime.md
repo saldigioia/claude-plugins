@@ -14,10 +14,17 @@ never overwrites the source; the originals are always kept. Video is always `-c:
 (bit-identical). Use `scripts/dual-track.sh`.
 
 > When a single track is enough: if the source audio is *already* QuickTime-playable AND
-> you don't need a separate access/preservation split (e.g. AAC/ALAC), a plain
-> `remux.sh` copy is fine. Reach for dual-track whenever the original is *not* QuickTime-
-> playable (DTS-HD MA, MP2) or whenever you want a guaranteed-playable PCM track alongside
-> a preserved original. When unsure, default to dual-track.
+> you don't need a separate access/preservation split, a plain `remux.sh` copy is fine —
+> and since the native-audio classifier landed, that is what the DRIVERS choose
+> automatically for the QT-native class: AAC, ALAC, MP3, PCM — and
+> **E-AC-3 is QuickTime-native** too (copy-single in `remux.sh`/`pairfill-paff.sh`/`mov.sh`; the
+> AC-3 row below applies to E-AC-3 only when you *explicitly* dual-track it for an
+> access/preservation split). The drivers dual-track AC-3/DTS/MP2 by themselves.
+> Reach for `dual-track.sh` directly when the original is *not* QuickTime-playable
+> (DTS-HD MA, MP2) or when you want a guaranteed-playable PCM track alongside a
+> preserved original — it is the operator's tool, not the default the drivers force
+> (F7 doc-sync 1.15.9: the old "when unsure, default to dual-track" predates the
+> classifier).
 
 ## Audio handling rules (what track 1 should be)
 

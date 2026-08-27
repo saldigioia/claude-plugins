@@ -142,7 +142,7 @@ if [ "$RATE" = unknown ] || [ -z "$RATE" ]; then
     exit 3
   fi
 fi
-TB=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+TB=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 TBDEN=${TB##*/}; case "$TBDEN" in ''|*[!0-9]*) echo "unusable stream time_base '$TB'" >&2; exit 3;; esac
 RN=${RATE%%/*}; RD=${RATE##*/}; [ "$RN" = "$RATE" ] && RD=1   # "50" -> 50/1
 read -r PAIR A B <<EOF
@@ -366,13 +366,13 @@ if [ "${NAUD:-0}" -gt 1 ]; then
   echo "**          them separately, or run the manual pairfill mux with extra"
   echo "**          -map 0:a:N entries (references/timeline-repair.md, Rung 3-PAIR)."
 fi
-acodec=$(ffp -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
-alang=$(ffp -v error -select_streams a:0 -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+acodec=$(ffp1 -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
+alang=$(ffp1 -v error -select_streams a:0 -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 case "$alang" in ""|und|unknown) alang=eng;; esac
 DRC=(); case "$acodec" in ac3|eac3) DRC=(-drc_scale 0);; esac
 # PF_CENSUS_* : the audio plan, recorded by the same case that builds the mux
 # args, so the post-mux census (D5) asserts exactly what this run intended.
-pf_vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+pf_vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 AARGS=(); PF_CENSUS_N=1; PF_CENSUS_C="${pf_vcodec:-?}"
 case "$acodec" in
   "") echo "   audio: none";;
@@ -393,7 +393,7 @@ case "$acodec" in
     AARGS=(-map 0:a:0 -c:a pcm_s24le -metadata:s:a:0 language="$alang");;
 esac
 
-cprim=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+cprim=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 MOVFLAGS="+faststart"; { [ -n "$cprim" ] && [ "$cprim" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 
 # The repair itself. lt(x,-8e18) is the unset test (INT64_MIN, not NaN); the DTS

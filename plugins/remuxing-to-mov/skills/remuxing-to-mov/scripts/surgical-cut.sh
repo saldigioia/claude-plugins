@@ -69,14 +69,14 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never th
 
 echo "== surgical-cut: $IN -> $OUT =="
 
-CONT=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+CONT=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$CONT" in *mpegts*) ;; *)
   echo "not an mpegts-family source (container=$CONT) — the deterministic-index recipe" >&2
   echo "is measured on mpegts; other containers route through the remux ladder" >&2
   echo "(references/cutting-concat.md)." >&2
   exit 2;;
 esac
-NPROG=$(ffp -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+NPROG=$(ffp1 -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 if [ "${NPROG:-1}" -gt 1 ] 2>/dev/null; then
   echo "multi-program TS ($NPROG programs): isolate the program first (known-limits.md):" >&2
   echo "  ffmpeg -nostdin -i \"$IN\" -map 0:p:<PROGRAM_NUM> -c copy PROG.ts" >&2
@@ -98,7 +98,7 @@ if [ "${k_key:-0}" -ne 1 ]; then
   echo "the splice KEYFRAME), or pick the keyframe index deliberately." >&2
   exit 2
 fi
-TB=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+TB=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 TICK=${TB##*/}; case "$TICK" in ''|*[!0-9]*) TICK=90000;; esac
 K_REF="${k_dts:-}"; { [ -z "$K_REF" ] || [ "$K_REF" = N/A ]; } && K_REF="$k_pts"
 if [ "$OFF" = auto ]; then
@@ -108,13 +108,13 @@ fi
 echo "   target: video packet $VLT (pts=${k_pts:-na} dts=${k_dts:-na} size=${k_size}B, keyframe); offset ${OFF}s"
 
 # --- the loss statement + Tier-2 consent ------------------------------------------
-FIRST_VPTS=$(ffp -v error -select_streams v:0 -read_intervals '%+#1' -show_entries packet=pts -of csv=p=0 "$IN" 2>/dev/null | head -1 | tr -d ,)
+FIRST_VPTS=$(ffp1 -v error -select_streams v:0 -read_intervals '%+#1' -show_entries packet=pts -of csv=p=0 "$IN" 2>/dev/null | tr -d ,)
 VLOSS=na
 [ -n "$FIRST_VPTS" ] && [ "$FIRST_VPTS" != N/A ] && [ -n "$k_pts" ] && [ "$k_pts" != N/A ] && \
   VLOSS=$(awk "BEGIN{printf \"%.3f\", (($k_pts)-($FIRST_VPTS))/$TICK}")
 ALOSS=na
 if [ -n "$APTS" ]; then
-  FIRST_APTS=$(ffp -v error -select_streams a:0 -read_intervals '%+#1' -show_entries packet=pts -of csv=p=0 "$IN" 2>/dev/null | head -1 | tr -d ,)
+  FIRST_APTS=$(ffp1 -v error -select_streams a:0 -read_intervals '%+#1' -show_entries packet=pts -of csv=p=0 "$IN" 2>/dev/null | tr -d ,)
   [ -n "$FIRST_APTS" ] && [ "$FIRST_APTS" != N/A ] && \
     ALOSS=$(awk "BEGIN{v=(($APTS)-($FIRST_APTS))/$TICK; if(v<0)v=0; printf \"%.3f\", v}")
 fi

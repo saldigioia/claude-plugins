@@ -109,7 +109,7 @@ backhaul_gate "$IN" || exit $?
 # stack trace and littered a 0-byte .part. Exit 11, nothing written. The
 # probed vcodec also drives the hvc1 tag below (one probe, two uses). Dolby E
 # is per-track and policy-aware — checked on the KEPT set in the mux loop.
-vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 # CONTAINER-SCOPED (D2, 1.13): "unroutable" was always a MOV fact. VP9/AV1 are
 # refused because the MOV muxer rejects them — MP4 takes both with -c copy (the
 # refusal's own named route), so on --container mp4 they are routable and must
@@ -361,7 +361,7 @@ if [ -n "$KEPT" ]; then
       # encoding on this path is a recorded 1.12 candidate; today the
       # depth-true access build is dual-track.sh --pcm auto (where the class
       # allows a preserved original) or a manual -c:a pcm_s24le remux.
-      sfmt=$(ffp -v error -select_streams "a:$ord" -show_entries stream=sample_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+      sfmt=$(ffp1 -v error -select_streams "a:$ord" -show_entries stream=sample_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
       case "$sfmt" in
         s32|s32p|s64|s64p)
           echo "** WARN audio a:$ord: decoder-native format '$sfmt' exceeds 16-bit — the PCM"
@@ -407,7 +407,7 @@ VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
 [ "$FMT" = mp4 ] && [ "$vcodec" = mpeg2video ] && VTAG="-tag:v mp4v"
 
 # --- color: +write_colr is redundant on modern ffmpeg but harmless; include only if tagged ---
-cp=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+cp=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 
 trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)

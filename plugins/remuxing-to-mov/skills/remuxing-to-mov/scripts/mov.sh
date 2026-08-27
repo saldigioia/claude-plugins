@@ -126,10 +126,13 @@ esac; }
 # An executed run (`bash mov.sh ...`) is not a source, so it never returns here.
 if [ "${RTM_TEST:-0}" = 1 ] && [ "${BASH_SOURCE[0]:-}" != "$0" ]; then return 0; fi
 
-IN="${1:?usage: mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul] [--no-idr-trim] [--audio-keep POLICY] [metadata flags]}"; shift
+IN="${1:?usage: mov.sh INPUT [OUTPUT.mov] [--always-dual] [--full] [--force-backhaul] [--no-idr-trim] [--audio-keep POLICY] [--mp4-swap] [metadata flags]}"; shift
 OUT=""; ALWAYS=0; FULL=""; MDARGS=(); AKEEP=all; FORCE_BACKHAUL=0; NOIDRTRIM=0; MP4SWAP=0
-# optional positional OUTPUT (the next arg, only if it isn't a --flag)
-if [ "${1:-}" != "" ] && [ "${1#--}" = "${1:-}" ]; then OUT="$1"; shift; fi
+# optional positional OUTPUT (the next arg, only if it isn't a -flag of ANY
+# dash depth — F6 WO-1.15.9: `mov.sh in.ts -full` used to take the typo as the
+# OUTPUT filename and build a file named "-full"; a leading dash now falls
+# through to the option loop, which rejects it as an unknown opt, exit 2)
+case "${1:-}" in ''|-*) : ;; *) OUT="$1"; shift;; esac
 while [ $# -gt 0 ]; do case "$1" in
   --always-dual) ALWAYS=1; shift;;
   --full)        FULL="--full"; shift;;
@@ -354,7 +357,7 @@ case "$CH_WARN_SECS" in ''|*[!0-9]*) CH_WARN_SECS=2900;; esac
 CH_DROP_SECS="${RTM_CHAPTER_TS_DROP_SECS:-5965}"   # 2^32/720000 = 5965.2 s (contested zone)
 case "$CH_DROP_SECS" in ''|*[!0-9]*) CH_DROP_SECS=5965;; esac
 CH_N=$(ffp -v error -show_chapters -of csv=p=0 "$IN" 2>/dev/null | grep -c . || true)
-CH_DUR=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+CH_DUR=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 CH_DUR_S=${CH_DUR%%.*}
 case "$CH_DUR_S" in ''|*[!0-9]*) CH_DUR_S=0;; esac
 if [ "${CH_N:-0}" -ge 1 ] && [ "$CH_DUR_S" -gt "$CH_WARN_SECS" ]; then
@@ -496,16 +499,27 @@ if [ "$PF_PAFF" = yes ]; then
     echo "   ladder's --audio-keep applies there). Nothing was written." >&2
     exit 2
   fi
-  set +e; bash "$SELF_DIR/auto.sh" "$IN" "$OUT" $FULL; rc=$?; set -e
-  if [ "$rc" -eq 0 ] && [ "${#MDARGS[@]}" -gt 0 ]; then
+  # F5 (WO-1.15.9): --mp4-swap rides through to auto.sh, which OWNS the swap
+  # (it fires on a post-build fidelity FAIL) — the flag used to be accepted
+  # here and silently ignored on this path, the --audio-keep class of trap.
+  MSFLAG=""; [ "$MP4SWAP" -eq 1 ] && MSFLAG="--mp4-swap"
+  set +e; bash "$SELF_DIR/auto.sh" "$IN" "$OUT" $FULL $MSFLAG; rc=$?; set -e
+  # F5 (WO-1.15.9): metadata applies on REVIEW (10) too, matching the
+  # non-PAFF path's unconditional application — a rc=10 build is a blessed
+  # artifact with a look-item, and the requested tags used to be dropped
+  # silently. A REVIEW floor survives the re-verify (the 10 may have come
+  # from auto's other gates, e.g. playability — a clean re-verify of the
+  # container rewrite does not clear those).
+  if { [ "$rc" -eq 0 ] || [ "$rc" -eq 10 ]; } && [ "${#MDARGS[@]}" -gt 0 ]; then
+    mdfloor=$rc
     apply_metadata "$OUT" || rc=$?
-    if [ "$rc" -eq 0 ]; then
+    if [ "$rc" -eq 0 ] || [ "$rc" -eq 10 ]; then
       # the metadata pass REWRITES the container after auto's verify — always
       # verify the file actually shipped, never its pre-rewrite ancestor
       echo "-- re-verify after metadata pass --"
       set +e; o=$(bash "$SELF_DIR/verify.sh" "$IN" "$OUT" $FULL 2>&1); set -e
       printf '%s\n' "$o" | sed 's/^/   /'
-      case "$o" in *">> OK"*) : ;; *">> REVIEW"*) rc=10;; *) rc=1;; esac
+      case "$o" in *">> OK"*) rc=$mdfloor ;; *">> REVIEW"*) rc=10;; *) rc=1;; esac
     fi
   fi
   trim_cleanup "$rc"

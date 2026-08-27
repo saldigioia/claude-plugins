@@ -75,8 +75,8 @@ fi
 trap 'rtm_unlock' EXIT
 rtm_lock "$OUT" || exit 2
 
-VC=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-PIX=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+VC=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+PIX=$(ffp1 -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 echo "== mp4-swap: $IN -> $OUT =="
 echo "   container-swap rung: same bitstream (video stream-copied), ISO container."
 case "$VC" in

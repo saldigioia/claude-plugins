@@ -4,6 +4,43 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.9 — "docs + hygiene" round (2026-08-27)
+
+`WO-1.15.9-DOCS-HYGIENE.md` — the final checkup round: **F2, F5, F6, F7**
+plus the deferred hygiene (**D3**, the dim-scan D1 sibling). Test **91**,
+red-verified against e3110b9 (19 red of 26).
+
+- **F5:** `--mp4-swap` now rides mov.sh's PAFF path through to auto.sh
+  (which owns the swap) instead of being parsed and silently ignored — the
+  --audio-keep class of trap; usage string names it. PAFF REVIEW builds
+  (rc=10) apply requested metadata (was rc=0 only, while the non-PAFF path
+  applies unconditionally), with a REVIEW floor surviving the re-verify.
+- **F6:** parsers reject what they shrugged at — `diagnose.sh IN --deep`
+  (a silent no-op reading as "diagnosed deep"), stray third args to
+  clock/gop-probe/ts-health, the `--kvv` mode typo (fell back to human: a
+  --kv consumer got zero rows, exit 0), and `mov.sh in.ts -full` (built a
+  file named "-full") — all exit 2 naming the stray.
+- **F2:** the retired "reordered → pairfill" doctrine (the exact 1.14
+  misroute preserved as instructions) is gone from README, skills/mov,
+  and SKILL.md's hard-won facts — all route by MEASURED profile and name
+  Rung 3-DERIVE; `timeline-repair.md` finally carries a 3-DERIVE section
+  and the widened junction precondition (it asserted strict-pair a version
+  behind the code); rebuild-paff's scope-limit routes by profile.
+- **F7:** README's "decoded-pixel identity for every output" scoped to
+  --full (the default arbiter is VCL identity, and the text says so);
+  dual-track-quicktime.md aligned with the classifier (E-AC-3 is
+  QuickTime-native/copy-single in the drivers; "when unsure, default to
+  dual-track" predated the classifier and is gone).
+- **D3:** 94 `ffp … | head -1` sites converted to `ffp1` (the 1.15.2
+  SIGPIPE class — multi-line producers on program-bearing TS; ffp1
+  byte-identical on single-line queries, doctrine since 1.15.2, previously
+  used at 2 sites); chained sites became `ffp1 … | tr`; the
+  no-sites-remain sweep pinned in test 91. dim-scan's `grep|head|awk`
+  assignment (D1 sibling) became a single early-exit awk.
+- Residuals in the WO: F6 scoped to the measured offenders; direct
+  `ffprobe | head -1` sites outside the measured class left; clock.sh's
+  numeric-seconds-only PLAYER_TIME (pre-existing, surfaced and recorded).
+
 ## 1.15.8 — "the harness counts what it cannot see" round (2026-08-27)
 
 `WO-1.15.8-HARNESS.md` — the checkup round packaged as "harness"

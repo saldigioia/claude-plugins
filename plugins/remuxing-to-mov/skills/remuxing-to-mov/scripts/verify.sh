@@ -127,7 +127,7 @@ phash () { ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -c 
 # and the reason decoded framemd5 is NOT used here: it FALSE-FAILs field-coded
 # (PAFF) streams (field-vs-frame packaging) and any re-timed rebuild.
 vcl_hash () { local b=""; \
-  [ "$(ffp -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$1" 2>/dev/null | head -1)" = true ] && b="h264_mp4toannexb,"; \
+  [ "$(ffp1 -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$1" 2>/dev/null)" = true ] && b="h264_mp4toannexb,"; \
   ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -c:v copy -bsf:v "${b}filter_units=remove_types=6|7|8|9" -f streamhash -hash md5 - 2>/dev/null || true; }
 sp=$(phash "$SRC"); op=$(phash "$OUT")
 if [ -n "$sp" ] && [ "$sp" = "$op" ]; then
@@ -421,7 +421,7 @@ echo "-- (f) A/V duration parity (sync) --"
 # OPEN QUESTION surfaced, not papered over (dossier): the BBC resync run moved
 # Δ from −2.2s to +1.9s — aresample overfill on multi-gap sources. An audio-LONG
 # delta is called out by direction wherever it lands (inside or beyond budget).
-sdur () { ffp -v error -select_streams "$1" -show_entries stream=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1; }
+sdur () { ffp1 -v error -select_streams "$1" -show_entries stream=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null; }
 # EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the audio census is
 # captured WITH its exit status — the old `| grep -c . || true` read a FAILED
 # probe as "no audio tracks", silently disarming this gate. A failed census is
@@ -606,7 +606,7 @@ if [ "$g_cen_rc" -eq 0 ]; then
   # retiring a phantom track, and a FAIL->OK move may never be silent.
   g_naud_raw=$(printf '%s\n' "$g_cen" | awk 'NF{n++} END{print n+0}')
 fi
-g_ofmt=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+g_ofmt=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
 g_qtff=0; case ",$g_ofmt," in *,mov,*|*,mp4,*) g_qtff=1;; esac
 if [ "$g_cen_rc" -ne 0 ]; then
   echo "   audio census probe FAILED (ffprobe rc=$g_cen_rc) — audio playability UNPROVEN, not N/A."
@@ -795,8 +795,8 @@ else
   g_mp2_naked=0
   gi=0
   while [ "$gi" -lt "$g_naud" ]; do
-    g_tag=$(ffp -v error -select_streams "a:$gi" -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
-    g_cod=$(ffp -v error -select_streams "a:$gi" -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+    g_tag=$(ffp1 -v error -select_streams "a:$gi" -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
+    g_cod=$(ffp1 -v error -select_streams "a:$gi" -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
     g_tag_ok=1
     if [ "$g_qtff" -eq 1 ]; then
       case "$g_tag" in
@@ -1051,14 +1051,14 @@ echo "-- master-purity (video-stream writing-library signatures) --"
 # be CATALOGUED as. rung4.sh derivatives also carry mdta provenance keys.
 vsig () {  # $1 file -> comma list of video writing-library signatures ("" = none)
   local f="$1" tag sei
-  tag=$(ffp -v error -select_streams v:0 -show_entries stream_tags=encoder -of default=nw=1:nk=1 "$f" 2>/dev/null | head -1)
+  tag=$(ffp1 -v error -select_streams v:0 -show_entries stream_tags=encoder -of default=nw=1:nk=1 "$f" 2>/dev/null)
   case "$tag" in *x264*|*x265*|*Lavc*) : ;; *) tag="";; esac
   sei=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$f" -map 0:v:0 -frames:v 60 -c copy -f mpegts - 2>/dev/null | \
         LC_ALL=C grep -aoE 'x264|x265|Lavc' | sort -u | paste -sd, - || true)
   printf '%s' "${tag:+$tag }${sei}"
 }
 osig=$(vsig "$OUT"); ssig=$(vsig "$SRC")
-r4tag=$(ffp -v error -show_entries format_tags=com.apple.quicktime.rung4.reencoded-with-attestation -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+r4tag=$(ffp1 -v error -show_entries format_tags=com.apple.quicktime.rung4.reencoded-with-attestation -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
 if [ -z "$osig" ]; then
   echo "   no writing-library signature in the output video — master-purity consistent."
 elif [ -n "$r4tag" ]; then
@@ -1160,7 +1160,7 @@ fi
 
 if [ "$SIG" -eq 1 ]; then
   echo "-- (--signaling) color / HDR / caption preservation (source vs output) --"
-  sg () { ffp -v error -select_streams v:0 -show_entries stream="$2" -of default=nw=1:nk=1 "$1" 2>/dev/null | head -1; }
+  sg () { ffp1 -v error -select_streams v:0 -show_entries stream="$2" -of default=nw=1:nk=1 "$1" 2>/dev/null; }
   sdrift=0
   # sample_aspect_ratio rides the pasp atom — anamorphic broadcast (e.g. 40:33)
   # displays stretched/squeezed if it drops, and nothing else checks it (QTFF
@@ -1177,17 +1177,17 @@ if [ "$SIG" -eq 1 ]; then
     # output (e.g. an MKV cross-check) has no such tag to assert, and calling its
     # absence DRIFT was a false verdict. Same container test gate (g) computes
     # (g_qtff): format_name contains mov/mp4. Non-QTFF -> announced skip.
-    sg_ofmt=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+    sg_ofmt=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
     sg_qtff=0; case ",$sg_ofmt," in *,mov,*|*,mp4,*) sg_qtff=1;; esac
     if [ "$sg_qtff" -eq 1 ]; then
-      t=$(ffp -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+      t=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
       [ "$t" = hvc1 ] && echo "   HEVC tag=hvc1 (QuickTime-playable)" || { echo "   HEVC tag=$t — NOT hvc1; QuickTime won't play it (DRIFT)"; sdrift=1; }
     else
       echo "   HEVC tag: output container '$sg_ofmt' is not QTFF — hvc1 assertion skipped (tag N/A)"
     fi
   fi
-  ccs=$(ffp -v error -select_streams v:0 -show_entries stream=closed_captions -of default=nw=1:nk=1 "$SRC" 2>/dev/null | head -1)
-  cco=$(ffp -v error -select_streams v:0 -show_entries stream=closed_captions -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+  ccs=$(ffp1 -v error -select_streams v:0 -show_entries stream=closed_captions -of default=nw=1:nk=1 "$SRC" 2>/dev/null)
+  cco=$(ffp1 -v error -select_streams v:0 -show_entries stream=closed_captions -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
   if [ "${ccs:-0}" = 1 ] && [ "${cco:-0}" != 1 ]; then echo "   closed captions: present in source, MISSING in output (DRIFT)"; sdrift=1
   else echo "   closed captions: source=${ccs:-0} output=${cco:-0}"; fi
   hs=$(ffp -v error -select_streams v:0 -read_intervals "%+#1" -show_entries frame=side_data_type -of csv=p=0 "$SRC" 2>/dev/null | tr '\n' ';')
@@ -1202,14 +1202,14 @@ fi
 if [ "$AUD" -eq 1 ]; then
   echo "-- (--audio) dual-track audio fidelity (PCM access + preserved original) --"
   na=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
-  a0c=$(ffp -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+  a0c=$(ffp1 -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
   if [ "${na:-0}" -lt 2 ]; then
     echo "   output has ${na:-0} audio track(s); dual-track checks need PCM access + original. Skipping."
   elif case "$a0c" in pcm_*) false;; *) true;; esac; then
     echo "   a:0 is '$a0c', not PCM — not a dual-track-access layout. Skipping."
   else
     raw=${a0c#pcm_}
-    a1c=$(ffp -v error -select_streams a:1 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+    a1c=$(ffp1 -v error -select_streams a:1 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
     drc=""; case "$a1c" in ac3|eac3) drc="-drc_scale 0";; esac     # match dual-track.sh's default
     s1=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$SRC" -map 0:a:0 -c copy -f streamhash -hash md5 - 2>/dev/null || true)
     o1=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$OUT" -map 0:a:1 -c copy -f streamhash -hash md5 - 2>/dev/null || true)
@@ -1226,7 +1226,7 @@ if [ "$AUD" -eq 1 ]; then
       # PURPOSE: every other preserved-original codec (ac3/eac3/dts/mp2)
       # copies frame-for-frame, so a raw-hash mismatch there stays a FAIL.
       a1_ok=0
-      s0c=$(ffp -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$SRC" 2>/dev/null | head -1)
+      s0c=$(ffp1 -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$SRC" 2>/dev/null)
       if [ "$s0c" = aac ] && [ "$a1c" = aac ]; then
         s1a=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$SRC" -map 0:a:0 -c copy -bsf:a aac_adtstoasc -f streamhash -hash md5 - 2>/dev/null || true)
         if [ -n "$s1a" ] && [ "$s1a" = "$o1" ]; then
@@ -1266,8 +1266,8 @@ if [ "$AUD" -eq 1 ]; then
     if [ "$d0" = "$d1" ]; then
       echo "   access track (a:0 PCM): == decoded original, aligned."
     else
-      ach=$(ffp -v error -select_streams a:0 -show_entries stream=channels    -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
-      asr=$(ffp -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+      ach=$(ffp1 -v error -select_streams a:0 -show_entries stream=channels    -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
+      asr=$(ffp1 -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
       case "$a0c" in pcm_s16le) bps=2;; pcm_s24le) bps=3;; pcm_s32le|pcm_f32le) bps=4;; pcm_s8|pcm_u8) bps=1;; *) bps=0;; esac
       case "$ach" in ''|*[!0-9]*) ach=0;; esac
       case "$asr" in ''|*[!0-9]*) asr=0;; esac

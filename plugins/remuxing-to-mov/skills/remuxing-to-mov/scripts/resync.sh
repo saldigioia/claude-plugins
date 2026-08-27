@@ -53,9 +53,9 @@ esac; done
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
 
-vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
-cp=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+cp=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 
 echo "== resync: $IN -> $OUT =="
@@ -84,7 +84,7 @@ case "$CH_WARN_SECS" in ''|*[!0-9]*) CH_WARN_SECS=2900;; esac
 CH_DROP_SECS="${RTM_CHAPTER_TS_DROP_SECS:-5965}"   # 2^32/720000 = 5965.2 s (contested zone)
 case "$CH_DROP_SECS" in ''|*[!0-9]*) CH_DROP_SECS=5965;; esac
 CH_N=$(ffp -v error -show_chapters -of csv=p=0 "$IN" 2>/dev/null | grep -c . || true)
-CH_DUR=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+CH_DUR=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 CH_DUR_S=${CH_DUR%%.*}
 case "$CH_DUR_S" in ''|*[!0-9]*) CH_DUR_S=0;; esac
 if [ "${CH_N:-0}" -ge 1 ] && [ "$CH_DUR_S" -gt "$CH_WARN_SECS" ]; then

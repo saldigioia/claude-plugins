@@ -94,7 +94,7 @@ trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (A2; WORK s
 rtm_writer_preflight "$OUT" "$IN" "$WORK" || exit 2
 
 # 1) video -> raw Annex-B H.264. TS/PS already Annex-B; AVCC (MKV/MOV) needs the bsf.
-isavc=$(ffp -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+isavc=$(ffp1 -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 BSF=""; [ "$isavc" = true ] && BSF="-bsf:v h264_mp4toannexb"
 # shellcheck disable=SC2086
 ffmpeg -nostdin -y "${FF_INPUT_OPTS[@]}" -i "$IN" -map 0:v:0 -c:v copy $BSF -f h264 "$WORK/v.h264"
@@ -126,7 +126,7 @@ while [ "$i" -lt "$NA" ]; do
   AIN+=(-i "$WORK/a$i.wav"); AMAP+=(-map "$((i+1)):0")
   # PRESERVE the real per-track language; default to eng only if the source has
   # none (PS/.mpg carry none). Hard-coding eng would silently relabel FR/ES/commentary.
-  lang=$(ffp -v error -select_streams "a:$i" -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  lang=$(ffp1 -v error -select_streams "a:$i" -show_entries stream_tags=language -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   case "$lang" in ""|und|unknown) lang=eng;; esac
   AMETA+=("-metadata:s:a:$i" "language=$lang")
   i=$((i+1))
@@ -134,7 +134,7 @@ done
 [ "$NA" -gt 0 ] || echo "note: no audio streams found; rebuilding video only"
 
 # 3) rebuild from zero at the field rate
-cp=$(ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+cp=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
 PART="$(rtm_part "$OUT")"; MUXLOG="$WORK/mux.log"   # extension-keeping (D6)
 # ${arr[@]+...} expansions keep bash 3.2 (macOS default) happy under set -u with empty arrays
@@ -173,7 +173,7 @@ fi
 # elementary video plus one WAV per audio track) — exactly the shape where a
 # quietly unmapped input goes unnoticed. Video codec comes from the elementary
 # stream; every audio track is pcm_s16le by construction.
-RB_C="$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)"   # the SOURCE codec, not the artifact reading itself
+RB_C="$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)"   # the SOURCE codec, not the artifact reading itself
 i=0; while [ "$i" -lt "$NA" ]; do RB_C="$RB_C,pcm_s16le"; i=$((i+1)); done
 census_rc=0
 mux_census "$PART" "$((1 + NA))" "$RB_C" rebuild-paff "$IN" || census_rc=$?

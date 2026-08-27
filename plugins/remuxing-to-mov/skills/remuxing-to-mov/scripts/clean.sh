@@ -47,8 +47,8 @@ set +e; PKV=$(bash "$SELF_DIR/probe.sh" "$IN" --kv 2>/dev/null); prc=$?; set -e
 # relabeled 1 (= this contract's DAMAGED-adjacent FAIL; WO-1.15.4 C4)
 [ -n "$PKV" ] || { echo "probe.sh could not read the source (rc=$prc)" >&2; [ "$prc" -eq 2 ] && exit 2; exit 1; }
 pget () { printf '%s\n' "$PKV" | sed -n "s/^$1=//p" | head -1; }
-CONT=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-ST=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+CONT=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+ST=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$ST" in ''|N/A) ST=0;; esac
 IS_TS=no; case "$CONT" in *mpegts*) IS_TS=yes;; esac
 echo "   container=$CONT video=$(pget PR_VCODEC)/$(pget PR_PIX_FMT) audio_tracks=$(pget PR_AUD_COUNT) paff=$(pget PF_PAFF) start_time=${ST}s"

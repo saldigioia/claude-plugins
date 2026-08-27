@@ -47,9 +47,9 @@ BLACK="${RTM_LEAD_LUMA_BLACK:-48}"
 
 echo "== lead-check: $IN (head ${W}s, black-luma ceiling $BLACK) =="
 
-ST=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+ST=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$ST" in ''|N/A) ST=0;; esac
-TB=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+TB=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 # B3 (WO-1.15.7): parse the FULL num/den timebase — `${TB##*/}` kept the
 # denominator only, which is numerator-blind on the AVI class (1001/30000).
 # TICK is real ticks-per-second (den/num, possibly fractional; awk-only use).

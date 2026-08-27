@@ -59,7 +59,10 @@ else
   grep '^CHANGE ' "$TMP/scan" | while read -r _ pts from to; do
     echo "   CHANGE at pts ${pts}s: $from -> $to"
   done
-  FIRST_CH=$(grep '^CHANGE ' "$TMP/scan" | head -1 | awk '{print $2}')
+  # awk reads the file directly and exits on the first hit — the old
+  # grep|head|awk shape was the D1 SIGPIPE class in ASSIGNMENT position
+  # (a ~1900-CHANGE scan could kill the run under pipefail; WO-1.15.9)
+  FIRST_CH=$(awk '/^CHANGE /{print $2; exit}' "$TMP/scan")
   echo ">> MID-STREAM RESOLUTION CHANGE — the class no downstream gate catches:"
   echo "   a -c copy .mov of this file would declare the FIRST resolution in stsd while"
   echo "   half its samples decode at another (known-limits.md, measured 2026-08-14)."

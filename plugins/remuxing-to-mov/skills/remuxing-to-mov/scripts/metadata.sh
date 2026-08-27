@@ -48,7 +48,7 @@ while [ $# -gt 0 ]; do case "$1" in
 esac; done
 [ "${#MD[@]}" -gt 0 ] || { echo "no metadata fields given — metadata.sh embeds nothing on its own" >&2; exit 2; }
 
-vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 VTAG=(); [ "$vcodec" = hevc ] && VTAG=(-tag:v hvc1)
 trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
 rtm_writer_preflight "$OUT" "$IN" || exit 2

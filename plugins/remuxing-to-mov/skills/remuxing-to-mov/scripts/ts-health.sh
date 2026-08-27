@@ -55,6 +55,10 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: ts-health.sh INPUT [--kv]}"; MODE="${2:-human}"
+# F6 (WO-1.15.9): a MODE typo used to fall back to human silently — a --kvv
+# consumer got zero KV rows and an exit 0. Only the two documented modes exist.
+case "$MODE" in human|--kv) ;; *) echo "unknown mode: $MODE (only --kv)" >&2; exit 2;; esac
+[ $# -le 2 ] || { echo "unknown opt: $3" >&2; exit 2; }
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"
@@ -78,15 +82,15 @@ if [ "$pf_rc" -ne 0 ]; then
   exit 2
 fi
 # --- cheap header facts ---------------------------------------------------------
-fdur_fmt=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+fdur_fmt=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$fdur_fmt" in ''|N/A) fdur_fmt=0;; esac
-start_t=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+start_t=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$start_t" in ''|N/A) start_t=0;; esac
-vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-pixfmt=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-vidx=$(ffp -v error -select_streams v:0 -show_entries stream=index -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-tb=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-rfr=$(ffp -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+pixfmt=$(ffp1 -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+vidx=$(ffp1 -v error -select_streams v:0 -show_entries stream=index -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+tb=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+rfr=$(ffp1 -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 # B3 (WO-1.15.7): the old `tickrate=${tb##*/}` kept the DENOMINATOR only —
 # fine for 1/90000 and mkv 1/1000, numerator-BLIND for the AVI class
 # (1001/30000: frame duration computed as ~1001 ticks against a 1-tick
@@ -182,7 +186,7 @@ fi
 
 # audio header-duration parity vs video (cheap; TS often reports only format
 # duration — then parity is N/A here and verify.sh gate (f) owns it post-build)
-vdur=$(ffp -v error -select_streams v:0 -show_entries stream=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vdur=$(ffp1 -v error -select_streams v:0 -show_entries stream=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 worst_ad=0
 if [ -n "$vdur" ] && [ "$vdur" != N/A ]; then
   while IFS=, read -r _aidx adur; do

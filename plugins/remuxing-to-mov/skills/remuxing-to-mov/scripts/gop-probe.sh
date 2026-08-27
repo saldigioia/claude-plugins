@@ -19,6 +19,7 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: gop-probe.sh INPUT [CUT_TIME]}"; T="${2:-}"
+[ $# -le 2 ] || { echo "unknown opt: $3" >&2; exit 2; }   # F6 (WO-1.15.9): never shrug at strays
 [ -n "${GOP_PROBE_CSV:-}" ] || [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 

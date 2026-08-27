@@ -135,10 +135,10 @@ fi
 
 # --- 3. copy-cut both tracks at the IDR -----------------------------------------
 # -ss is relative to container start_time (WO 1.3 — see header); clamp at 0.
-ST=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+ST=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$ST" in ''|N/A) ST=0; echo "   note: container reports no start_time — treating it as 0";; esac
 REL=$(awk "BEGIN{r=($IDR_PTS)-($ST); if(r<0)r=0; printf \"%.6f\", r}")
-SRC_DUR=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+SRC_DUR=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$SRC_DUR" in ''|N/A) SRC_DUR="";; esac
 echo "   copy-cut: -ss $REL (relative: IDR pts $IDR_PTS - start_time $ST) — all streams, -c copy"
 # atomic part-file, but with the REAL extension kept ("x.part….ts", not "x.ts.part"):
@@ -204,7 +204,7 @@ echo "   gates: first packet = the source IDR (key, ${o_size}B); ts-health pre-k
 # (c) duration sanity: the cut should be source-minus-trim; a breach means the
 #     seek snapped somewhere else entirely (e.g. a whole GOP early/late).
 if [ -n "$SRC_DUR" ]; then
-  OUT_DUR=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$PART" 2>/dev/null | head -1)
+  OUT_DUR=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$PART" 2>/dev/null)
   case "$OUT_DUR" in ''|N/A) OUT_DUR="";; esac
   if [ -n "$OUT_DUR" ]; then
     if ! awk "BEGIN{d=($OUT_DUR)-(($SRC_DUR)-($REL)); if(d<0)d=-d; exit !(d<=1.5)}"; then

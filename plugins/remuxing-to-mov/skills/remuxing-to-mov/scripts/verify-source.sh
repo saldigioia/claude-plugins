@@ -87,8 +87,8 @@ downgrade () { # downgrade REVIEW|FAIL "reason"
 echo "== verify-source: $OUT vs $SRC =="
 
 # --- container-family sanity ------------------------------------------------------
-sfmt=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$SRC" 2>/dev/null | head -1)
-ofmt=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+sfmt=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$SRC" 2>/dev/null)
+ofmt=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
 case "$ofmt" in
   *mov*|*mp4*|*m4a*)
     echo "OUTPUT is MP4-family ($ofmt) — that is verify.sh territory (the QTFF gates)." >&2
@@ -307,8 +307,8 @@ headluma=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$OUT" -map 0:v:0 -
   awk -F'[:= ]+' '/pts_time/{t=$NF} /YAVG/{printf "%s%s@%.0f", (n++?" ":""), t, $NF}' || true)
 echo "   head decode (pts@luma-mean): ${headluma:-<no frames decoded>}"
 [ -n "$headluma" ] || downgrade REVIEW "head decode produced no frames"
-sdur=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$SRC" 2>/dev/null | head -1)
-odur=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+sdur=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$SRC" 2>/dev/null)
+odur=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
 DUR_DELTA=na
 if [ -n "$sdur" ] && [ "$sdur" != N/A ] && [ -n "$odur" ] && [ "$odur" != N/A ]; then
   DUR_DELTA=$(awk "BEGIN{printf \"%.3f\", ($odur) - (($sdur) - ($TRIM))}")

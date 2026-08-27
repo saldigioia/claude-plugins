@@ -30,13 +30,14 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap: no stray code escapes
 IN="${1:?usage: clock.sh INPUT PLAYER_TIME}"
 PT="${2:?need PLAYER_TIME (seconds, as the player displays it)}"
+[ $# -le 2 ] || { echo "unknown opt: $3" >&2; exit 2; }   # F6 (WO-1.15.9): never shrug at strays
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 case "$PT" in ''|*[!0-9.]*) echo "PLAYER_TIME must be numeric seconds: $PT" >&2; exit 2;; esac
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 
 W="${RTM_CLOCK_WINDOW:-3}"
 
-ST=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+ST=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$ST" in ''|N/A) ST=0; echo "   note: container reports no start_time — treating it as 0";; esac
 RAW=$(awk "BEGIN{printf \"%.6f\", ($PT)+($ST)}")
 

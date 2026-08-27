@@ -75,10 +75,10 @@ if [ "${NAUD:-0}" -gt 1 ]; then
   echo "**          policy; PCM access per layout, no originals), or run the"
   echo "**          manual mux with extra -map 0:a:N entries."
 fi
-acodec=$(ffp -v error -select_streams a:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
-afmt=$(  ffp -v error -select_streams a:0 -show_entries stream=sample_fmt   -of default=nw=1:nk=1 "$IN" | head -1)
-vcodec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN" | head -1)
-cp=$(    ffp -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" | head -1)
+acodec=$(ffp1 -v error -select_streams a:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN")
+afmt=$(  ffp1 -v error -select_streams a:0 -show_entries stream=sample_fmt   -of default=nw=1:nk=1 "$IN")
+vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name   -of default=nw=1:nk=1 "$IN")
+cp=$(    ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN")
 [ -n "$acodec" ] || { echo "no audio stream found in $IN" >&2; exit 2; }
 # the preserved-original contract needs a MOV-copyable codec; FLAC/Opus/Vorbis/
 # TrueHD are hard-rejected by the MOV muxer — refuse early with the route,
@@ -204,7 +204,7 @@ if [ -n "$SS" ] || [ -n "$TO" ]; then
   npkt=$(ffp -v error -select_streams v:0 -show_entries packet=dts -of csv=p=0 \
            -read_intervals '%+#1' "$TMP" 2>/dev/null | grep -c . || true)
   if [ ! -s "$TMP" ] || [ "${npkt:-0}" -eq 0 ]; then
-    st=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+    st=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null)
     { [ -n "$st" ] && [ "$st" != "N/A" ]; } || st=unknown
     rm -f "$TMP"
     echo ">> cut produced no video: -ss beyond end of file? (--ss is relative to start_time=$st, not absolute PTS)" >&2

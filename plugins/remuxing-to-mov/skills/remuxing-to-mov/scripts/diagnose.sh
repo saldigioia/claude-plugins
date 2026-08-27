@@ -18,6 +18,9 @@ set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: diagnose.sh INPUT}"
+# F6 (WO-1.15.9): reject stray arguments — `diagnose.sh IN --deep` used to be
+# a silent no-op (--deep is clean.sh's flag), which reads as "diagnosed deep".
+[ $# -le 1 ] || { echo "unknown opt: $2 (diagnose.sh takes only INPUT; --deep belongs to clean.sh)" >&2; exit 2; }
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # shared PAFF detection
@@ -124,8 +127,8 @@ if [ "${DRV_UNK:-0}" -eq 1 ]; then
 fi
 
 # backhaul/contribution profile facts — they reframe every verdict below.
-CONT=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-PIX=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+CONT=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+PIX=$(ffp1 -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 IS_TS=no; case "$CONT" in *mpegts*) IS_TS=yes;; esac
 if qt_contribution_profile "$PIX"; then
   # 1.11 (WO 4.1 demotion; wording fixed in the WO 5.2 messaging pass): the

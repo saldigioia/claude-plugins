@@ -59,14 +59,14 @@ TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never th
 echo "== zero-base: $IN -> $OUT =="
 
 # --- pre-flight -------------------------------------------------------------------
-CONT=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+CONT=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$CONT" in *mpegts*) ;; *)
   echo "not an mpegts-family source (container=$CONT)." >&2
   echo "zero-base is the mpegts re-wrap: matroska/MP4 timelines start at zero by" >&2
   echo "construction or belong to the remux ladder (scripts/remux.sh)." >&2
   exit 2;;
 esac
-NPROG=$(ffp -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+NPROG=$(ffp1 -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 if [ "${NPROG:-1}" -gt 1 ] 2>/dev/null; then
   echo "multi-program TS ($NPROG programs): the mpegts muxer cannot reconstruct that" >&2
   echo "layout from -map 0 — isolate the program first (known-limits.md):" >&2
@@ -137,14 +137,14 @@ fi
 eval "$(ffp -v error -select_streams v:0 -read_intervals '%+#1' \
           -show_entries packet=pts,dts -of csv=p=0 "$IN" 2>/dev/null | \
         awk -F, 'NR==1{printf "fp=%s fd=%s\n", $1, $2} END{if(NR==0) print "fp=na fd=na"}')"
-TB=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+TB=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 TICK=${TB##*/}; case "$TICK" in ''|*[!0-9]*) TICK=90000;; esac
 if [ "$fp" != na ] && [ "$fp" != N/A ] && [ "$fd" != na ] && [ "$fd" != N/A ]; then
   FLOOR=$(awk "BEGIN{printf \"%.6f\", (($fp)-($fd))/$TICK}")
 else
   FLOOR=unknown
 fi
-ST_SRC=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+ST_SRC=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 echo "   source start_time: ${ST_SRC:-?}s; first video packet pts=$fp dts=$fd (tickrate $TICK)"
 if [ "$FLOOR" = unknown ]; then
   echo "   floor: unknown (first video packet carries no timestamps — the missing-ts class"
@@ -231,7 +231,7 @@ esac
 [ "$census_rc" -eq 10 ] && VERDICT=review
 
 mv -f "$PART" "$OUT"
-ST_OUT=$(ffp -v error -show_entries format=start_time -of default=nw=1:nk=1 "$OUT" 2>/dev/null | head -1)
+ST_OUT=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
 echo "wrote: $OUT"
 echo "   start_time: ${ST_SRC:-?}s -> ${ST_OUT:-?}s (floor ${FLOOR}s); essence byte-identical,"
 echo "   PID/program layout preserved. The source is untouched and remains the original."

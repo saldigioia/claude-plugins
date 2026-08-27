@@ -62,12 +62,12 @@ aud_manifest_kv () {
 ms_tb_scan () {
   MS_TB=no; TS_HINT=""; MS_ALT=""
   local tb fr num den
-  tb=$(ffp -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  tb=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   [ "$tb" = 1/1000 ] || return 0
   MS_TB=yes
   MS_ALT=$(ffp -v error -select_streams v:0 -read_intervals '%+#120' -show_entries packet=duration -of csv=p=0 "$IN" 2>/dev/null | \
     grep -v -e N/A -e '^$' | sort | uniq -c | sort -rn | head -2 | awk '{printf "%s%sx%sms", sep, $1, $2; sep=" "}')
-  fr=$(ffp -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  fr=$(ffp1 -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   num=${fr%%/*}; den=${fr##*/}
   case "$den" in
     1001) TS_HINT=$num;;                                   # 30000/1001 -> 30000
@@ -145,12 +145,12 @@ probe_struct () {
   local mode="$1" q="ffp -v error -select_streams"
   local container vcodec vtag isavc acodec aaction rung rung_json cmd cp ct cs cr pixfmt vnat
   local tag_advice tagadv_json nprog
-  container=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  container=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   # F12 (WO-1.15.7): multi-program topology must reach the MACHINE consumers —
   # the human-mode advisory below (":263-era") never made it into --kv/--json,
   # so clean.sh printed a "ready to run" zero-base command that refuses exit 2
   # on a 2-program TS (measured). 0 = container carries no program concept.
-  nprog=$(ffp -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+  nprog=$(ffp1 -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
   case "$nprog" in ''|*[!0-9]*) nprog=0;; esac
   vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
   vtag=$($q v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
@@ -282,7 +282,7 @@ echo "container : $container"
 # program survives --audio-keep all. Measured 2026-08-14 on constructed
 # 2-program fixtures in both PAT orders; the advisory exists so the session
 # knows the mux is choosing a program, not taking "the" video.
-nprog=$(ffp -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+nprog=$(ffp1 -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 case "$nprog" in ''|*[!0-9]*) nprog=0;; esac
 if [ "$nprog" -gt 1 ]; then
   echo "   NOTE $nprog programs in this mux: v:0 = the FIRST video in PAT/PMT order wins; other programs' video is NOT mapped (their audio survives keep-all). Another program: -map 0:p:N intermediate — references/known-limits.md"
@@ -291,7 +291,7 @@ fi
 # ~26.5 h. ffmpeg unwraps ONE rollover on read (ts-health.sh counts observed
 # wraps); >=2 wraps (~53 h) is the NAMED LIMITATION — ambiguous epochs, no
 # route repairs it. Advisory fires at >24 h, approaching the horizon.
-dur=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+dur=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 if awk -v d="${dur:-0}" 'BEGIN{exit !(d+0>86400)}' 2>/dev/null; then
   echo "   NOTE duration $(awk -v d="$dur" 'BEGIN{printf "%.1f", d/3600}') h (>24 h): 33-bit PTS wraps at ~26.5 h — ffmpeg unwraps ONE rollover; >=2 wraps (~53 h) break. Prove the output timeline: verify.sh gate (d) — references/known-limits.md"
 fi
@@ -303,7 +303,7 @@ ffp -v error -select_streams v:0 -show_entries \
 # stsd sample entry + Dolby Vision config visibility (QTFF audit 5-5e): the DV
 # playability split rides the sample-entry fourcc (dvh1 plays where the hev1
 # family fails); ffprobe's codec_tag_string alone can miss the dvcC/dvvC box.
-vtag_h=$(ffp -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vtag_h=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 mp4_atom_scan "$container" "$vtag_h"
 if [ -n "${STSD_ENTRY:-}" ] && [ "$STSD_ENTRY" != "[0][0][0][0]" ]; then
   echo "stsd sample entry: $STSD_ENTRY${STSD_DV:+ (+Dolby Vision dvcC/dvvC config box)}"
@@ -321,8 +321,8 @@ fi
 # falsified on the bench 2026-08-13 and demoted to the shared post-build
 # proof (lib-paff contribution_advisory, so probe and the builders never
 # diverge on the announcement).
-vcod_h=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-pix_h=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+vcod_h=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+pix_h=$(ffp1 -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$(vnative "$vcod_h" "$pix_h")" in
   yes) case "$vcod_h" in mpeg4|mjpeg|dvvideo|prores)
     echo "   QT-native, measured (bench 2026-08-14, macOS 26.6.1/ffmpeg 9.0.1): $vcod_h"
@@ -449,7 +449,7 @@ if [ "${dbe_n:-0}" -gt 0 ]; then
 fi
 
 echo "-- bitstream format --"
-isavc=$(ffp -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1 || true)
+isavc=$(ffp1 -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 case "$isavc" in
   true)  echo "AVCC (MP4/MKV/MOV) -> add -bsf:v h264_mp4toannexb when EXTRACTING to raw .h264" ;;
   false) echo "Annex-B (TS/PS)    -> NO bitstream filter needed when extracting to raw .h264" ;;

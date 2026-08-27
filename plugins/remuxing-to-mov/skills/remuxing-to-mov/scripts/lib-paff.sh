@@ -226,7 +226,7 @@ pf_ppf_probe () {
 pf_dts_source () {
   local c="${PF_DTS_SOURCE_IN:-}"
   case "$c" in carried|reconstructed) printf '%s' "$c"; return 0;; esac
-  c=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "${1:-}" 2>/dev/null | head -1)
+  c=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "${1:-}" 2>/dev/null)
   case "$c" in
     *matroska*|*webm*)                 printf 'reconstructed';;
     h264|hevc|mpegvideo|m4v|*,h264,*|*,hevc,*|*,mpegvideo,*|*,m4v,*) printf 'reconstructed';;
@@ -508,7 +508,7 @@ pf_suggest_field_rate () {
 # the widened window too — see the comment at the check below.
 pf_detect () {
   IN="$1"
-  pf_codec=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  pf_codec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   # --- probe-layer self-heal (WO 1.2): a video stream the container NAMES
   # (codec_name from the PMT/header) whose PARAMETERS never resolved (width
   # unreadable) is precisely the window-undershoot class from the lib-probe.sh
@@ -521,7 +521,7 @@ pf_detect () {
   # it by design; it keeps its own window). Read-only: a wider window changes
   # how much of the source is READ during probing, never what is written. The
   # note goes to stderr — stdout must stay eval-safe.
-  pf_w=$(ffp -v error -select_streams v:0 -show_entries stream=width -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  pf_w=$(ffp1 -v error -select_streams v:0 -show_entries stream=width -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   if [ -n "$pf_codec" ]; then
     case "${pf_w:-}" in ''|0|N/A)
       echo "   note: $pf_codec stream parameters invisible at the current probe window — re-probing wide (1G); consider RTM_PROBESIZE" >&2
@@ -530,9 +530,9 @@ pf_detect () {
       ;;
     esac
   fi
-  pf_field=$(ffp -v error -select_streams v:0 -show_entries stream=field_order -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  pf_af=$(ffp -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  pf_rf=$(ffp -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  pf_field=$(ffp1 -v error -select_streams v:0 -show_entries stream=field_order -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  pf_af=$(ffp1 -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  pf_rf=$(ffp1 -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   # shellcheck disable=SC2046  # word splitting is the point: "RATE TOTAL MISSING SPANRATE METHOD"
   set -- $(pf_coded_rate "$IN")
   pf_cr="${1:-0}"; pf_tot="${2:-0}"; pf_miss="${3:-0}"; pf_crspan="${4:-0}"; pf_rmeth="${5:-span}"
@@ -669,7 +669,7 @@ disc_scan () {
   if [ -n "${DISC_DTS_FILE:-}" ]; then
     ts=$(cat "$DISC_DTS_FILE"); fdur="${DISC_FRAMEDUR_IN:-0}"
   else
-    rf=$(ffp -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+    rf=$(ffp1 -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null)
     fdur=$(pf_eval_fps "${rf:-0}")
     fdur=$(awk "BEGIN{f=${fdur:-0}+0; if(f>0) printf \"%.6f\",1/f; else print 0}")
     ts=$(ffp -v error -select_streams v:0 -show_entries packet=pts_time,dts_time -of csv=p=0 "$IN" 2>/dev/null)
@@ -967,7 +967,7 @@ backhaul_rot_warn () {
   local in="${1:?backhaul_rot_warn needs INPUT}" vc="${2:-}" cont="${3:-}"
   [ "$vc" = mpeg2video ] || return 1
   if [ -z "$cont" ]; then
-    cont=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$in" 2>/dev/null | head -1)
+    cont=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$in" 2>/dev/null)
   fi
   case "$cont" in *mpegts*) : ;; *) return 1;; esac
   eval "$(disc_scan "$in")"
@@ -1002,10 +1002,10 @@ backhaul_gate () {
   [ "${RTM_BACKHAUL_GATED:-0}" = 1 ] && return 0
   [ "${RTM_FORCE_BACKHAUL:-0}" = 1 ] && return 0
   if [ -z "$vc" ]; then
-    vc=$(ffp -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$in" 2>/dev/null | head -1)
+    vc=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$in" 2>/dev/null)
   fi
   if [ -z "$pix" ]; then
-    pix=$(ffp -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$in" 2>/dev/null | head -1)
+    pix=$(ffp1 -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$in" 2>/dev/null)
   fi
   # 4:2:2 arm (WO 4.1): advisory only — matches yuv422p* at every bit depth
   # (the old exact 8-bit match let yuv422p10le sources slip through unannounced).

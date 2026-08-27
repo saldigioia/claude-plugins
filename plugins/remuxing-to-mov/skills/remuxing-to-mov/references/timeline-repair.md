@@ -169,8 +169,15 @@ ffmpeg -nostdin -y -drc_scale 0 -i IN.ts \
 ```
 
 Preconditions (the script checks the whole file and refuses on a miss):
-first video packet carries a real PTS; untimestamped packets never occur
-back-to-back; timebase × field rate yields whole-tick pairs.
+first video packet carries a real PTS; strict pair alternation — WIDENED
+2026-08-18 (F2 doc-sync 1.15.9; the code carried this a version ahead of
+this page): a run of exactly TWO untimestamped packets is the
+DISPLACED-TIMESTAMP junction class (the PES timestamp rides the SECOND
+field of its pair; nothing missing, no clock jump) and routes to the
+announced JUNCTION MODEL — census-gated (uniform field cadence proven by a
+whole-file `trace_headers` pass) with the POC-lattice output gate as its
+strongest evidence; runs deeper than two still refuse (exit 3, attestation
+route named); timebase × field rate yields whole-tick pairs.
 
 **Junction-model POC-gate reach (WO-1.15.3, measured 2026-08-27).** The
 POC-lattice output gate — the junction model's strongest correctness evidence
@@ -204,6 +211,22 @@ no bless decision is at stake standalone).
   0 N/A-PTS packets, strictly monotonic DTS, a duration histogram of exactly
   the two field durations. `pairfill-paff.sh` runs these gates before blessing.
 
+**Rung 3-DERIVE — DTS re-derivation (`derive-dts.sh IN OUT.mov`):** the
+1.14 rung this page never carried (F2, fixed 1.15.9 — its absence from "the
+full repair ladder" was the retired misroute preserved as instructions).
+THE repair for the **PTS-complete reordered** class, ANY codec: every packet
+carries a real PTS (`nopts_frac ≈ 0`), a reorder pyramid rides them
+(`reorder=yes`), and the DTS column is absent, demuxer-reconstructed, or
+rotten — so it is **discarded and re-derived from the sorted PTS column**
+(PyAV writes the intermediate; the declared reorder depth from the SPS
+bounds the shift). Routing: `probe.sh`/`diagnose.sh` measure the profile;
+`auto.sh` escalates here when pair-fill's signature is absent (half_ts=no)
+or refused. Its own gates judge the output (timeline battery + verify);
+an unparseable/mismatched declared depth REFUSES (exit 3) without `--force`
+or the recorded attestation — never restamped on a guess. Pairfill is for
+the half-timestamped class only; the flattening rebuild below is for
+no-surviving-reorder only — the rung must match the measured profile.
+
 **Rung 3 — full timeline rebuild (`rebuild-paff.sh IN OUT RATE [TS]`):**
 Discard container timestamps and re-derive at the true field rate. Video stays
 bit-identical; the H.264 parser rebuilds proper access units on re-ingest.
@@ -216,7 +239,9 @@ packets on the incident capture) that plays the pictures **shuffled** — a
 different way of being broken, and one that decodes clean, scrubs clean, and
 passes every hash gate. Only a framemd5 presentation-ORDER compare sees it.
 `rebuild-paff.sh` therefore scans the source first and **refuses** when the
-surviving timestamps show reordering (use `pairfill-paff.sh`, which keeps them);
+surviving timestamps show reordering — route by measured profile instead:
+`pairfill-paff.sh` when half-timestamped (it keeps the real PTS),
+`derive-dts.sh` (Rung 3-DERIVE) when PTS-complete;
 `--force` overrides only with proof that decode order == display order.
 ```
 # 1) video -> raw Annex-B (TS/PS: no bsf; MKV/MOV: -bsf:v h264_mp4toannexb)

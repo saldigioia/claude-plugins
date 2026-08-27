@@ -486,8 +486,12 @@ referenced files.
   seekable, and that gap is where PAFF corrupts silently. `probe.sh`/
   `diagnose.sh` detect PAFF (coded-picture rate ≈ 2× frame rate, **counting
   every packet — untimestamped ones included**, else pair-timestamped captures
-  false-read 1×) and route: pair-timestamped or reordered → `pairfill-paff.sh`
-  (keeps every real PTS); no surviving reorder → `rebuild-paff.sh`. `verify.sh`
+  false-read 1×) and route by MEASURED profile (the 1.14 doctrine; F2 fixed
+  1.15.9 — "reordered → pairfill" was the retired pre-1.14 route preserved as
+  instructions): half-timestamped → `pairfill-paff.sh` (keeps every real
+  PTS); PTS-complete reordered (any codec — DTS absent/reconstructed/rotten
+  alike) → `derive-dts.sh` Rung 3-DERIVE; no surviving reorder →
+  `rebuild-paff.sh`. `verify.sh`
   adds a **scrub gate** (an ffmpeg keyframe seek alone stays clean on the broken
   file, so it is not enough). Decoded `framemd5` FALSE-FAILs field-coded
   streams, so the **Annex-B packet hash** is the lossless arbiter there.
