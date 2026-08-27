@@ -285,7 +285,7 @@ if [ -n "$FV" ] && [ "$h_key" -ne 1 ]; then
 fi
 # bounded head decode: first frames' PTS + mean luma (the picture-at-zero proof;
 # report-only — the cut script owns its own strict first-AU gate)
-headluma=$(ffmpeg -nostdin -v error -i "$OUT" -map 0:v:0 -frames:v 8 \
+headluma=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$OUT" -map 0:v:0 -frames:v 8 \
   -vf signalstats,metadata=print:file=- -f null - 2>/dev/null | \
   awk -F'[:= ]+' '/pts_time/{t=$NF} /YAVG/{printf "%s%s@%.0f", (n++?" ":""), t, $NF}' || true)
 echo "   head decode (pts@luma-mean): ${headluma:-<no frames decoded>}"

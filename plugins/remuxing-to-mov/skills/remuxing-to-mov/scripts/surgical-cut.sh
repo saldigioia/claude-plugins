@@ -82,7 +82,10 @@ if [ "${NPROG:-1}" -gt 1 ] 2>/dev/null; then
   echo "  ffmpeg -nostdin -i \"$IN\" -map 0:p:<PROGRAM_NUM> -c copy PROG.ts" >&2
   exit 2
 fi
-ffmpeg -hide_banner -bsfs 2>/dev/null | grep -qw noise || { echo "this ffmpeg lacks the 'noise' bitstream filter" >&2; exit 2; }
+# herestring, never `ffmpeg | grep -q`: grep -q closes the pipe early and a
+# SIGPIPE under pipefail reads back as a false "missing" (the doctor.sh rule)
+SC_BSFS=$(ffmpeg -hide_banner -bsfs 2>/dev/null || true)
+grep -qw noise <<<"$SC_BSFS" || { echo "this ffmpeg lacks the 'noise' bitstream filter" >&2; exit 2; }
 
 # --- the target packet: pts/dts/size from the census (never a seek) ---------------
 eval "$(ffp -v error -select_streams v:0 -read_intervals "%+#$((VLT+2))" \

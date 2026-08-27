@@ -415,7 +415,12 @@ pf_depth_note () {
 # these lines were treated as cosmetic and the shipped files were unwatchable).
 mux_confessions () {
   [ -f "${1:-}" ] || { echo 0; return; }
-  grep -ciE 'pts has no value|timestamps are unset|non-?monotonic dts' "$1" || true
+  # same confession vocabulary as mux_confessions_scoped below — the 1.14 fix
+  # broadened only the scoped copy and left this one narrow, so its sole caller
+  # (derive-dts chapter re-attach) could miss the 4.4-era "Non-monotonous"/"non
+  # monotonically increasing" spellings and BLESS a confessed mux
+  # (CHECKUP-2026-08-27 A4). Keep the two patterns in lockstep.
+  grep -ciE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$1" || true
 }
 
 # mux_confessions_scoped LOGFILE [VIDEO_OUT_INDEX] — the same confession

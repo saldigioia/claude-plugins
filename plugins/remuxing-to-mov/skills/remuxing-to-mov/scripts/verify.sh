@@ -738,7 +738,9 @@ else
   # not the fix either — a codec legitimately repeats across tracks, and
   # collapsing that would under-count a real two-MP2 source. Pairing the index
   # with the codec dedupes the listing artifact and keeps genuine repeats.
-  g_src_mp2=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$SRC" 2>/dev/null | LC_ALL=C sort -u | grep -c ',mp2$' || true)
+  # ,mp2,?$ not ,mp2$: a stream row carrying side data gains a trailing comma
+  # ("0,mp2,") and a $-anchored grep goes blind on it (CHECKUP-2026-08-27 F8)
+  g_src_mp2=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$SRC" 2>/dev/null | LC_ALL=C sort -u | grep -cE ',mp2,?$' || true)
   g_has_pcm=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c ',pcm_' || true)
   g_mp2_naked=0
   gi=0

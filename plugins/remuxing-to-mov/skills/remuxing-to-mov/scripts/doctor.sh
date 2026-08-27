@@ -7,6 +7,7 @@
 # Exit: 0 if all REQUIRED capabilities are present, 1 otherwise. Missing
 #       RECOMMENDED capabilities only degrade specific checks (never silently).
 set -euo pipefail
+export LC_ALL=C   # comma-decimal locales disarm awk float parsing (CHECKUP-2026-08-27 A3; rationale in lib-probe.sh, which this script does not source)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 KV=0; [ "${1:-}" = "--kv" ] && KV=1

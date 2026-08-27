@@ -86,9 +86,10 @@
 #            mov.sh itself issues are the UNROUTABLE codecs (WO 5.2: VC-1 /
 #            VP9 / AV1 video, Dolby E audio — no lossless MOV of these classes
 #            exists, so the honest answer is the routes out, pre-flight, never
-#            a raw muxer stack trace). An 11 can also propagate from a child's
-#            own refusal — e.g. resync.sh's mid-stream layout guard via
-#            auto.sh.
+#            a raw muxer stack trace). A child's refusal — e.g. resync.sh's
+#            mid-stream layout guard (11) — does NOT propagate as 11 through
+#            auto.sh today: it is flattened to FAIL (CHECKUP-2026-08-27 C5;
+#            the old claim here that it propagates was false).
 set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes

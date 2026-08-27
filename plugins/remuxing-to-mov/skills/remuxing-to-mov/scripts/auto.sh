@@ -32,15 +32,18 @@
 #       verify judge (WO 4.2). auto.sh itself refuses only the UNROUTABLE
 #       codecs pre-flight (VC-1/VP9/AV1 video, Dolby E audio — the shared
 #       WO 5.2 gate, added here in the 1.11 fix round so a direct run can
-#       never die in a raw muxer error); an 11 can also propagate from a
-#       child's own refusal — e.g. resync.sh's mid-stream layout guard on the
-#       Rung 3-SYNC escalation.)
+#       never die in a raw muxer error). A child's own refusal — e.g.
+#       resync.sh's mid-stream layout guard (11) — does NOT propagate as 11
+#       today: attempt_resync/attempt flatten it to RESULT=FAIL
+#       (CHECKUP-2026-08-27 C5 records the gap; the old claim here that a
+#       child 11 propagates was false).
 # WO 2.3: the final verdict is the grade of the BEST verified artifact at OUT —
 # a failed escalation is reported separately and never condemns a prior rung —
 # and a REVIEW that is solely gate (f)'s gap-collapse escalates to resync.sh
 # (video bit-identical, audio re-timed; honestly capped at REVIEW), never to a
 # timestamp-profile repair for a problem the file has proven it does not have.
 set -euo pipefail
+export LC_ALL=C   # comma-decimal locales disarm awk float parsing (CHECKUP-2026-08-27 A3; rationale in lib-probe.sh, which this script does not source)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 IN="${1:?usage: auto.sh INPUT OUTPUT.mov [--dry-run] [--all-audio] [--full] [--audio MODE]}"

@@ -28,6 +28,7 @@
 #   - Refuses to overwrite an existing sidecar: deleting a recorded waiver is
 #     the operator's deliberate act, never a side effect.
 set -euo pipefail
+export LC_ALL=C   # comma-decimal locales disarm awk float parsing (CHECKUP-2026-08-27 A3; rationale in lib-probe.sh, which this script does not source)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 SRC="${1:?usage: waiver.sh SOURCE OUTPUT --attest \"...\" --coverage \"...\" --proof \"...\" [--proof ...]}"

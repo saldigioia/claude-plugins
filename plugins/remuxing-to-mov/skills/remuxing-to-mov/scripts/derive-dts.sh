@@ -215,7 +215,7 @@ if [ "$NCHAP" -gt 0 ]; then
   if [ "${conf:-0}" -gt 0 ]; then
     echo ">> HARD STOP: the chapter pass logged $conf timeline confession(s) — the muxer"
     echo "   invented timing on a stream this rung just derived. NOT blessing."
-    grep -iE 'pts has no value|timestamps are unset|non-?monotonic dts' "$MUXLOG" | head -4 | sed 's/^/   /'
+    grep -m4 -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sed 's/^/   /'
     echo "   Kept: $PART (log: $MUXLOG)"; exit 1
   fi
   rm -f "$MUXLOG" "$PYOUT"

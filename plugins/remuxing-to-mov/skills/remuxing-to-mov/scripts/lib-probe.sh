@@ -38,6 +38,16 @@
 # Read-only: the wrappers widen how much of the source is READ during probing;
 # they never change what is written.
 
+# C locale, tree-wide: under a comma-decimal locale (de_DE etc.) macOS awk
+# truncates float INPUT at the period and prints comma decimals, which re-enter
+# other awk program texts and ffmpeg args — measured (CHECKUP-2026-08-27 A3):
+# verify gate (f) silently passed a 2.543 s A/V desync, ts-health died rc=2
+# with no output. ffprobe itself always emits C-locale periods; the corruption
+# is purely consumer-side, so one pin here (sourced by every entry point that
+# opens an input) closes it. Entry points that don't source this lib carry
+# their own copy of this line.
+export LC_ALL=C
+
 # An array, not a string: a future spaced value must not word-split apart.
 # Never empty, so "${FF_INPUT_OPTS[@]}" stays safe under bash 3.2 set -u.
 FF_INPUT_OPTS=(-probesize "${RTM_PROBESIZE:-200M}" -analyzeduration "${RTM_ANALYZEDURATION:-200M}")

@@ -70,6 +70,7 @@
 #
 # NOTE: the macOS path cannot be exercised on Linux/CI; validate on a real Mac.
 set -euo pipefail
+export LC_ALL=C   # comma-decimal locales disarm awk float parsing (CHECKUP-2026-08-27 A3; rationale in lib-probe.sh, which this script does not source)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
 RTM_EXIT_OK="0 1 2 3 10 11" # + this script's documented 3 (SKIP: not macOS / no qlmanage; suite-pinned)
