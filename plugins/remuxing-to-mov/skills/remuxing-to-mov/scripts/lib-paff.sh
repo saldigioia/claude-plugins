@@ -408,6 +408,18 @@ pf_depth_note () {
   return 0
 }
 
+# The muxer's confession vocabulary — ONE definition (WO-1.15.17 Item 3). This
+# alternation decides whether a mux ADMITTED to inventing timing, and it had
+# FIVE byte-identical copies: the two counters below, plus the display greps in
+# derive-dts.sh, remux.sh and pairfill-paff.sh. Only the first two were held in
+# lockstep (test 84's A4 pin), and 1.14 had already broadened one copy and left
+# the other narrow — the three unpinned ones could drift the same way unseen.
+# Callers grep -iE "$RTM_CONFESSION_RE"; the FLAGS stay per-site (counting vs
+# display, -m4 vs sort|uniq) because that is presentation, not the fact.
+# lib-rewrap.sh deliberately keeps a NARROWER pattern: it splits the same log
+# into nudges and hard confessions, which is a different question.
+RTM_CONFESSION_RE='pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts'
+
 # mux_confessions LOGFILE — count the muxer's own admissions that it INVENTED
 # timing: "pts has no value", "Timestamps are unset in a packet", non-monotonic
 # DTS nudges. Any nonzero count on a MOV mux is a HARD STOP: the video bits may
@@ -420,7 +432,7 @@ mux_confessions () {
   # (derive-dts chapter re-attach) could miss the 4.4-era "Non-monotonous"/"non
   # monotonically increasing" spellings and BLESS a confessed mux
   # (CHECKUP-2026-08-27 A4). Keep the two patterns in lockstep.
-  grep -ciE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$1" || true
+  grep -ciE "$RTM_CONFESSION_RE" "$1" || true
 }
 
 # mux_confessions_scoped LOGFILE [VIDEO_OUT_INDEX] — the same confession
@@ -445,7 +457,7 @@ mux_confessions () {
 mux_confessions_scoped () {
   local log="${1:-}" vidx="${2:-0}"
   if [ ! -f "$log" ]; then echo "MC_TOTAL=0 MC_VIDEO=0 MC_AUDSUB=0 MC_UNATTR=0"; return 0; fi
-  { grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$log" 2>/dev/null || true; } | \
+  { grep -iE "$RTM_CONFESSION_RE" "$log" 2>/dev/null || true; } | \
   awk -v vidx="$vidx" '
     { line=tolower($0); tot++
       if (line ~ /\[aost#/ || line ~ /\[sost#/) { aud++; next }

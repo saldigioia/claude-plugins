@@ -443,7 +443,7 @@ if [ "${conf:-0}" -gt 0 ]; then
   # path, unfindable without it. awk reads to EOF (the ffp1 doctrine applied
   # to a display pipeline); || true is belt-and-braces on a pure-display line
   # whose verdict was already decided by the confession counter.
-  grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sort | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /' || true
+  grep -iE "$RTM_CONFESSION_RE" "$MUXLOG" | sort | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /' || true
   echo "   The muxer invented timing for packets the source never timestamped."
   echo "   NOT blessing the output (kept at $PART; log: $MUXLOG)."
   echo "   Run scripts/diagnose.sh \"$IN\" — it routes by MEASURED profile:"
@@ -465,7 +465,7 @@ rm -f "$MUXLOG"
 # muxer honored it, and a silently dropped stream shipped green.
 census_rc=0
 mux_census "$PART" "$((1 + outi))" "$vcodec$CENSUS_C" remux "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing the output; kept at $PART."
   echo "   Re-run with -v verbose to see what the muxer said about the missing stream,"
   echo "   or map it by hand (references/known-limits.md)."
@@ -477,5 +477,5 @@ echo "verify with: scripts/verify.sh \"$IN\" \"$OUT\""
 # REVIEW propagation (1.14): an unexpected-surplus census or an audio/subtitle
 # confession class blesses the complete artifact and exits 10 ("look"), never
 # 1 ("broken") — every planned stream is present and the notes above say where.
-if [ "$census_rc" -eq 10 ] || [ "${RMX_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
+if rtm_census_review "$census_rc" || [ "${RMX_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
 exit 0

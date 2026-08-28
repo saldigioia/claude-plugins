@@ -455,7 +455,7 @@ if [ "${conf:-0}" -gt 0 ]; then
   # early close SIGPIPEd the sort on large muxlogs and the ERR trap ate the
   # "Kept:" pointer below — the mktemp log became unfindable. awk reads to
   # EOF; || true is belt-and-braces on a pure-display pipeline.
-  grep -iE 'pts has no value|timestamps are unset|non-?monoton(ic|ous) dts|non monotonically increasing dts' "$MUXLOG" | sort | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /' || true
+  grep -iE "$RTM_CONFESSION_RE" "$MUXLOG" | sort | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /' || true
   echo "   NOT blessing the output. Kept: $PART (log: $MUXLOG)"; exit 1
 fi
 PF_CONF_REVIEW=0
@@ -622,7 +622,7 @@ fi
 # track the muxer quietly dropped would sail past every one of them.
 census_rc=0
 mux_census "$PART" "$PF_CENSUS_N" "$PF_CENSUS_C" pairfill-paff "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing the output. Kept: $PART"
   exit 1
 fi
@@ -636,5 +636,5 @@ echo "   container timeline, not the decode; a FAIL there is a defect until ever
 echo "   is individually explained)"
 # REVIEW propagation (1.14): an unexpected-surplus census or an audio/subtitle
 # confession class blesses the complete artifact and exits 10 ("look"), never 1.
-if [ "$census_rc" -eq 10 ] || [ "${PF_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
+if rtm_census_review "$census_rc" || [ "${PF_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
 exit 0

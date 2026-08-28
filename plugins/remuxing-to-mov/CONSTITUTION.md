@@ -161,10 +161,21 @@ multi-program code at all.
 ### IV.3 — Duplication not yet removed must be held in lockstep
 **Rule.** Where a fact is still duplicated, a guard pins the copies to the
 semantic that matters, so drift fails the bench instead of shipping.
-**Currently standing under this amendment.** The `census_rc` contract: 9
-genuinely different implementations across 10 builders, uniform on the
-semantic (rc 0 or 10 acceptable), pinned but not refactored.
-**Test.** `bash tests/regression.d/94-rot-sweep.sh` §4.
+**Currently standing under this amendment.** The QuickTime-native audio table
+`aac|alac|mp3|pcm_*|eac3` — four case arms (`mov.sh` twice, `remux.sh`,
+`pairfill-paff.sh`), deliberately NOT centralized: `mov.sh`'s classifiers are
+sourced by the `RTM_TEST` harness, and each arm reads at its point of
+decision. E-AC-3's membership has drifted before — 1.15.9 F7 found the
+dual-track reference page still calling it a dual-track class rounds after the
+code classified it native.
+**Discharged (1.15.17).** The `census_rc` contract stood here from 1.15.15 —
+9 implementations across 10 builders, uniform on the semantic, pinned but not
+refactored. It now has one writer (`rtm_census_failed` / `rtm_census_review`
+in `lib-mux.sh`) and lives under IV.1. So does the muxer's confession
+vocabulary: five byte-identical copies of which only two were pinned, now
+`RTM_CONFESSION_RE`.
+**Test.** `bash tests/regression.d/94-rot-sweep.sh` §8 (the table held in
+step); §4 and §7 pin the two that were discharged.
 
 ---
 
@@ -199,8 +210,17 @@ A mutation test whose restore is wrong can therefore report success while
 having deleted the very thing under test. Back up by copy, and verify the
 restore, not just the red.
 
-**Test.** Mutate, observe red, restore, observe green, and confirm the file is
-whole:
+**Test.** `bash tests/mutation-audit.sh` runs the whole roster mechanically
+(WO-1.15.17): for every tree-wide guard it introduces the exact defect into a
+THROWAWAY COPY of the plugin and requires that guard's assertion to flip
+PASS -> FAIL, then introduces a benign PROSE mention of the same idiom and
+requires it to stay PASS (V.3's half, automated). The real tree is never
+written to, which retires the restore hazard above by construction. Two lanes,
+because a guard fails in two directions; `MA_KEEP=1` keeps every sandbox and
+log for inspection.
+
+By hand, on one guard — mutate, observe red, restore, observe green, and
+confirm the file is whole:
 ```
 cp scripts/lib-probe.sh /tmp/lib-probe.bak
 sed -i '' 's/BEGIN{ n=0 }/BEGIN{ }/' scripts/lib-probe.sh
@@ -232,6 +252,7 @@ and verified RED before the fix.
 **Test.**
 ```
 bash tests/regression.sh                                   # expect: FAILED: 0
+bash tests/mutation-audit.sh    # when a tree-wide guard changed (V.2)
 cd ../../.. && claude plugin validate ./plugins/remuxing-to-mov --strict
                 claude plugin validate . --strict
 diff -rq --exclude=__pycache__ --exclude=fixtures \

@@ -226,6 +226,31 @@ Exit 0 = every assertion passed. It synthesizes its own fixtures in a temp dir
     `--video-drop-between` arm are exercised at count 0 / mechanism level
     here and await the next real class member for operator verification.
 
+## Mutation audit (`tests/mutation-audit.sh`) — the guards' own test
+
+`regression.sh` proves the code. Nothing proved the *guards*: a tree-wide sweep
+that greps `scripts/` can pass green while matching nothing at all. Two of the
+standing sweep's five guards were vacuous when first written (1.15.15), and the
+older ones had never been mutation-tested.
+
+`bash tests/mutation-audit.sh` runs the roster mechanically, in two lanes:
+
+- **defect** — introduce the exact defect the guard claims to catch; the guard's
+  assertion must flip PASS → FAIL (`CAUGHT`, else `MISSED`).
+- **prose** — introduce a benign COMMENT quoting the same idiom; the guard must
+  stay PASS (`CLEAN`, else `FALSE-POSITIVE`). A guard that cries wolf gets
+  disabled, and then its class is unguarded *and believed guarded*.
+
+Every case runs in a throwaway copy of the plugin (fixtures symlinked, never
+copied), so the real tree is never written to — which retires the restore hazard
+CONSTITUTION.md V.2 records. `MA_JOBS=N` sets parallelism, `MA_KEEP=1` keeps the
+sandboxes and logs, and a mutation that changes nothing reports `MUTATE-NOOP`
+rather than masquerading as a vacuous guard.
+
+It is deliberately NOT in `regression.d/` (the runner would enrol it) and NOT
+part of the bench: it costs many minutes and mutates a tree copy. Run it
+whenever a tree-wide guard is added or changed — V.4 lists it beside the suite.
+
 ## Synthesis limit (why some things aren't tested directly)
 
 `libx264` cannot mint true broadcast PAFF (separate field pictures), and the

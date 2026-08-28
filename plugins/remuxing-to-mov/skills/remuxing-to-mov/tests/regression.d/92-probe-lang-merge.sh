@@ -49,6 +49,20 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
+
+# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
+# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
+# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
+# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
+# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
+# source in this suite (94 §10 sweeps for it).
+# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
+# call site left the `--` in place, so the pattern became "--" and the guard
+# matched every long option in the file — PASS, guarding nothing. Measured
+# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
+# round). The `--` below is what protects a pattern that starts with a dash.
+grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
+grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
 ff () { ffmpeg -nostdin -hide_banner -loglevel error "$@"; }
 kv () { bash "$SC/probe.sh" "$1" --kv 2>/dev/null; }
 kvget () { printf '%s\n' "$2" | sed -n "s/^$1=//p" | tr -d "'"; }
@@ -107,7 +121,14 @@ echo "== 4. class guard: no stream_tags query rides a keep-first dedupe =="
 # stream_tags). A file-level grep false-positives on remux.sh, which holds a
 # tags query AND — for the non-audio OTHERS list — a legitimate keep-first
 # `seen[$1]++` over index/codec/type, fields identical in both views.
-offenders=$(grep -lE 'idx in seen\) *next' "$SC"/*.sh || true)
+offenders=""
+for _f in "$SC"/*.sh; do
+  # comments stripped and BASENAMES reported: an un-stripped grep is satisfied
+  # by a comment that merely quotes the idiom (measured FALSE-POSITIVE
+  # 2026-08-28, tests/mutation-audit.sh case P10), and a full sandbox path in a
+  # failure line is unreadable.
+  sed 's/#.*//' "$_f" | grepqe 'idx in seen\) *next' && offenders="$offenders $(basename "$_f")"
+done
 [ -z "$offenders" ] && ok "the keep-first manifest idiom (idx in seen) survives nowhere in scripts/" \
   || no "keep-first dedupe over the per-track manifest still in: $offenders"
 # ONE WRITER (1.15.14). 1.15.10 fixed the COPY; it did not fix the COPYING —
@@ -116,9 +137,14 @@ offenders=$(grep -lE 'idx in seen\) *next' "$SC"/*.sh || true)
 # The fact now has a single home. These pins are the class guard: not "does
 # probe.sh merge correctly" (a per-copy question that scales with copies) but
 # "does the merge exist exactly once" — which stays one assertion forever.
-n_merge=$(grep -l 'G\[o\]=="und"' "$SC"/*.sh 2>/dev/null | wc -l | tr -d ' ')
-[ "$n_merge" = 1 ] && ok "the WO 3.4 merge exists in exactly ONE file ($n_merge)" \
-  || no "the merge is duplicated across $n_merge files — the 1.15.10 shape is back"
+# count OCCURRENCES over comment-stripped source, never FILES: `grep -l` is
+# blind to a second copy pasted into the SAME file (measured MISSED 2026-08-28,
+# mutation-audit case G11b — the identical blind spot 94 §5 was rewritten to
+# close), and an un-stripped grep trips on a comment that quotes the idiom
+# (measured FALSE-POSITIVE, case P11).
+n_merge=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -c 'G\[o\]=="und"')
+[ "$n_merge" = 1 ] && ok "the WO 3.4 merge exists exactly once in scripts/ ($n_merge)" \
+  || no "the merge appears $n_merge time(s) in scripts/ — want exactly 1 (the shared writer)"
 grep -q 'G\[o\]=="und"' "$SC/lib-probe.sh" && ok "…and that file is lib-probe.sh (the shared writer)" \
   || no "the merge is not in lib-probe.sh"
 for consumer in probe.sh remux.sh; do

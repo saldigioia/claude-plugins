@@ -407,6 +407,35 @@ ffprobe -v error -show_chapters -of csv=p=0 OUT.mov   # expect every chapter
 
 ---
 
+### Scratch cannot be redirected on macOS (`TMPDIR` is ignored)
+
+Every script stages its working files under `mktemp` / `mktemp -d`, and on
+macOS neither honours `TMPDIR` — nor does `-t`. Both land in the per-user
+`/var/folders/…/T`. Re-measured on this bench (Darwin 25.6.0, 2026-08-28,
+WO-1.15.17 Item 3):
+
+```
+TMPDIR=/tmp/matmp mktemp -d                        -> /var/folders/…/T/tmp.lth11t0UfV
+TMPDIR=/tmp/matmp mktemp -d -t rtmtest             -> /var/folders/…/T/rtmtest.UnzkW3nJ90
+TMPDIR=/tmp/matmp mktemp -d "$TMPDIR/rtm.XXXXXX"   -> /tmp/matmp/rtm.QBFLdY
+```
+
+Only an **explicit template** obeys the variable. The tree has 14 bare
+`mktemp -d` sites and ~12 bare `mktemp` file sites, all affected identically.
+
+- **Consequence**: an operator cannot move a build's scratch onto another
+  volume. The boot volume must have room for whatever the rung stages there.
+  `rebuild-paff.sh` is the one that matters — it writes roughly 1× the
+  source's media (elementary video + one WAV per audio track) before its mux
+  starts; the copy rungs stage only logs and probe output.
+- **Not a defect in the disk pre-flight**: `rtm_disk_preflight` is handed the
+  ACTUAL staging path (`rebuild-paff.sh` passes its own `$WORK`), so it
+  measures the volume that will really be written, wherever `mktemp` put it.
+  The limitation is operator control, not measurement.
+- Status: named limitation. No route around it in this plugin; adding
+  `-p "$TMPDIR"`-style templates tree-wide would be a behaviour change to 26
+  sites for a knob nobody has asked for, so it is written down instead.
+
 ## Verified non-issues (do not "fix" these)
 
 ### ADTS AAC → MOV copy: the bitstream filter is automatic

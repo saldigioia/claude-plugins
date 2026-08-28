@@ -96,7 +96,9 @@ t_has "$rsrc" "HARNESS_SKIPS" "…and surfaces the skip tally in the final banne
 
 echo
 echo "== 3. E7: test 14 derives its roster from the tree =="
-esrc=$(cat "$HERE/14-exit-codes.sh")
+esrc=$(sed 's/#.*//' "$HERE/14-exit-codes.sh")   # comment-stripped: this file
+# DISCUSSES the retired hand-kept roster in its own header, and an un-stripped
+# read would be satisfied (or tripped) by the prose rather than the code.
 t_hasnt "$esrc" 'ENTRY="auto batch derive-dts' "the hand-kept roster string is gone"
 t_has "$esrc" 'lib-*)' "the roster is derived from scripts/*.sh minus lib-*"
 for e in clean clock dim-scan lead-check mp4-swap surgical-cut verify-source zero-base; do

@@ -113,7 +113,7 @@ R4_NA=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$
 R4_N=1; [ "${R4_NA:-0}" -gt 0 ] && R4_N=2
 census_rc=0
 mux_census "$PART" "$R4_N" "" rung4 "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo ">> NOT blessing the re-encode; kept at $PART for inspection." >&2
   exit 1
 fi

@@ -177,7 +177,7 @@ RB_C="$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of de
 i=0; while [ "$i" -lt "$NA" ]; do RB_C="$RB_C,pcm_s16le"; i=$((i+1)); done
 census_rc=0
 mux_census "$PART" "$((1 + NA))" "$RB_C" rebuild-paff "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing the output; kept at $PART (log: $MUXLOG; intermediates in $WORK)."
   exit 1
 fi

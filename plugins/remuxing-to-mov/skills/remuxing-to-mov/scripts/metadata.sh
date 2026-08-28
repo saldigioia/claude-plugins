@@ -73,7 +73,7 @@ MD_C=$(ffp -v error -show_entries stream=index,codec_type,codec_name -of csv=p=0
 MD_N=$(printf '%s' "$MD_C" | awk -F, '{print ($0=="" ? 0 : NF)}')
 census_rc=0
 mux_census "$PART" "$MD_N" "$MD_C" metadata "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing the tagged output; kept at $PART (the untagged input is untouched)." >&2
   exit 1
 fi
@@ -93,7 +93,7 @@ done
 [ "$miss" -eq 0 ] || { echo ">> REVIEW: some keys did not round-trip (see above)."; exit 1; }
 # REVIEW propagation (1.14): an unexpected-surplus census still blesses the
 # complete artifact and exits 10 ("look"), never 1.
-if [ "${census_rc:-0}" -eq 10 ]; then
+if rtm_census_review "${census_rc:-0}"; then
   echo ">> REVIEW: metadata embedded, but the census flagged an unexpected surplus stream (see RMX_CENSUS above)."
   exit 10
 fi

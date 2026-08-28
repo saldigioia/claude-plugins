@@ -45,6 +45,20 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
+
+# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
+# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
+# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
+# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
+# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
+# source in this suite (94 §10 sweeps for it).
+# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
+# call site left the `--` in place, so the pattern became "--" and the guard
+# matched every long option in the file — PASS, guarding nothing. Measured
+# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
+# round). The `--` below is what protects a pattern that starts with a dash.
+grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
+grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
 hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 
@@ -100,7 +114,13 @@ hasnt "$o" "MOV_PLAYABILITY" "control: no playability pass on 4:2:0 (only-when-d
 
 echo
 echo "== 3. grep-audit: no pix_fmt-based refusal (exit-11) path survives anywhere =="
-qtu=$(grep -l "profile=qt-undecodable" "$SC"/*.sh 2>/dev/null || true)
+# comment-stripped + basenames: an un-stripped grep is satisfied by a comment
+# recording that 1.11 REMOVED this line (measured FALSE-POSITIVE 2026-08-28,
+# tests/mutation-audit.sh case P13).
+qtu=""
+for _f in "$SC"/*.sh; do
+  sed 's/#.*//' "$_f" | grepq "profile=qt-undecodable" && qtu="$qtu $(basename "$_f")"
+done
 [ -z "$qtu" ] && ok "no script emits MOV_REFUSED profile=qt-undecodable" \
   || no "qt-undecodable refusal line still present in: $qtu"
 # shape audit: a live (non-comment) yuv422p line followed within 8 lines by an

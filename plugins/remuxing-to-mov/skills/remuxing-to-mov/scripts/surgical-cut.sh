@@ -206,7 +206,7 @@ SC_C=$(ffp -v error -show_entries stream=index,codec_name -of csv=p=0 "$IN" 2>/d
 SC_N=$(printf '%s' "$SC_C" | awk -F, '{print ($0=="" ? 0 : NF)}')
 census_rc=0
 mux_census "$PART" "$SC_N" "$SC_C" surgical-cut "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing; kept at $PART." >&2
   exit 1
 fi
@@ -227,7 +227,7 @@ case "$vrc" in
   10) VERDICT=review;;
   *)  echo ">> verification FAILED (rc=$vrc). NOT blessing; evidence kept at $PART." >&2; exit 1;;
 esac
-[ "$census_rc" -eq 10 ] && VERDICT=review
+if rtm_census_review "$census_rc"; then VERDICT=review; fi
 
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"

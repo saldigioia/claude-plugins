@@ -4,6 +4,197 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.17 — the guards' own audit (2026-08-28)
+
+1.15.15 built the standing sweep and recorded that **two of its five guards
+were vacuous on first draft** — one satisfied by the COMMENT describing the
+idiom, one using `grep -l` so a second definition inside one file was
+invisible. Both would have shipped green while guarding nothing. The older
+tree-wide guards had never been mutation-tested at all. This round tests the
+tests.
+
+**`tests/mutation-audit.sh` — the guards' own test.** Two lanes, because a
+guard fails in two directions: *defect* introduces the exact defect the guard
+claims to catch and requires its assertion to flip PASS → FAIL; *prose*
+introduces a benign COMMENT quoting the same idiom and requires it to stay
+PASS. Every case runs in a throwaway copy of the plugin (fixtures symlinked,
+never copied), so the real tree is never written to — which retires by
+construction the restore hazard CONSTITUTION.md V.2 records. Four harness
+properties earned the hard way while writing it, each after a case reported a
+finding that was really a harness bug:
+
+- a mutation whose regex matches nothing reports `MUTATE-NOOP` instead of
+  masquerading as a vacuous guard (the `BEGIN{n=0}` mutation matched nothing —
+  a `; ?` that required a semicolon the tree does not have — and read MISSED);
+- **a mutation must not land in a COMMENT.** Re-aimed, that same mutation hit
+  the comment ABOVE the code that explains why `BEGIN{n=0}` is load-bearing.
+  Mutating prose proves nothing; it is now line-anchored;
+- a verdict is decided by whether the guard's PASS line survived plus the run's
+  own exit status — never by matching one marker against both wordings, because
+  house style gives an assertion two different ones ("defined exactly once" vs
+  "has 2 definitions");
+- a guard that emits ONE PASS LINE PER ITEM (93 §4 judges every offered route)
+  needs the FAIL text named instead, or the items that legitimately keep passing
+  read as MISSED — hence the optional `FAILMARK` column.
+
+And one mutation was simply wrong: `perl -pi -e 's/…/if [ "$ZB_RC" -ge 0 ]/'`
+writes an EMPTY `$ZB_RC`, because in a Perl replacement that is a Perl variable.
+It produced `[ "" -ge 0 ]`, so the clinic offered no route at all and the case
+looked like a caught defect for entirely the wrong reason.
+
+**Measured, 37 cases over 23 tree-wide assertions in 10 test files** (the work
+order named 8; the sweep found two more — 73 §2's `program=` class guard and
+88 §8's locale sweep). **20 of 25 defect cases CAUGHT; 6 of 12 prose cases
+CLEAN.** The eleven that were not:
+
+- **Three guards were VACUOUS.** `92` §4's merge count used `grep -l`, counting
+  FILES — a second copy pasted into `lib-probe.sh` itself was invisible (the
+  identical blind spot 94 §5 was rewritten to close, still live one file over).
+  `88` §8 accepted a script that merely *mentioned* `lib-probe.sh` in a comment,
+  so a new entry point could ship with the float gates locale-exposed while
+  naming the lib that pins them. `93` §5 asserted `--preflight-only` appears in
+  `clean.sh` — and `clean.sh`'s own comment says `--preflight-only`, so the
+  mutation that broke the actual zero-base CALL left the guard green. All three
+  now read comment-stripped source and count occurrences, not files;
+  re-mutated to CAUGHT.
+- **Six guards FALSE-POSITIVED on prose** — 94 §4 (`census_rc`), 92 §4
+  (`idx in seen`), 92 §4 (the merge), 41 §3 (`qt-undecodable`), 73 §2
+  (`program= | head`), 93 §6 (`NPROG`): each is a bare `grep` over unstripped
+  source, and each tripped on a comment that recorded the defect it forbids.
+  A guard that cries wolf gets disabled, and then its class is unguarded AND
+  believed guarded (V.3). All six strip comments now and report basenames
+  instead of full sandbox paths.
+- **Two were harness bugs, not findings** (`MUTATE-NOOP`, and a mutation that
+  ADDS a roster row having no baseline line to lose) — both fixed in the
+  harness, both re-run CAUGHT.
+
+**And then the harness caught a defect in this round's own hardening.** The
+comment-stripping fixes above read source as `sed 's/#.*//' "$f" | grep -q PAT`
+— and so did two of 1.15.15's original guards. `grep -q` closes the pipe on the
+FIRST match and SIGPIPEs its writer: the same early-exit shape as the 1.15.2
+`ffp … | head -1` field defect, which test 91 §5 pins for `scripts/` and nothing
+pinned for the suite's own guards. Measured on `verify.sh` (95 KB):
+`printf: write error: Broken pipe`, and under `pipefail` the non-zero pipeline
+flipped 88 §8 from PASS to a **FALSE FAIL** naming a file that does source
+`lib-probe.sh`. The same code passed on the bench and failed in the audit's
+sandbox — a load-dependent race, which is precisely why a green bench is not
+evidence that a guard is sound. Every source-scanning reader in the suite now goes through
+`grepq`/`grepqe` (`grep -c`, reads to EOF), and **94 §10** sweeps for the shape,
+excluding only this section and `mutation-audit.sh` — the one file whose job is
+to author the defects these guards forbid.
+
+**And then it caught a third.** Converting `grep -q -- 'PAT'` to `grepq -- 'PAT'`
+left the `--` in place — but the helper takes the pattern as `$1`, so two of
+93 §5's pins searched for the literal string `--`, matched every long option in
+`clean.sh`, and went green while guarding nothing. The mutation that breaks the
+actual `zero-base --preflight-only` CALL passed straight through it. `grepq` now
+swallows a leading `--` instead of searching for it, and the call sites are
+fixed. Three vacuous guards found in the pre-existing suite, and three more
+introduced and caught in this round's own work — the harness earned itself
+several times over, and none of the three would have shown on a green bench.
+
+**Item 4 — the census verdict has one writer.** `rc 0 or 10 is acceptable,
+anything else is a census failure` was re-implemented in all 10 builders.
+Measured before flattening: the semantic was uniform — no builder differed on
+anything but wording — so this was a maintenance hazard, not a live defect.
+`rtm_census_failed` / `rtm_census_review` (lib-mux.sh) own the verdict; the
+stage name, message, retention pointer, exit contract and machine rows stay
+per-builder, because that is presentation, not the fact (IV.1). Both predicates
+fail CLOSED on an unreadable rc (III.1): a code nobody could read is never a
+blessing. Test 94 §4 now pins the single writer rather than the uniformity of
+copies, and IV.3 discharges `census_rc`.
+
+**Item 3 — the classes not yet swept, named and settled.**
+
+- **`set +e` regions — enumerated, guard added (94 §6).** 42 real regions (the
+  work order's ~45 counted comment mentions). Every one restores `set -e`, the
+  longest spans 3 lines, and none exits while errexit is disarmed. The guard
+  pairs the tokens IN ORDER over comment-stripped source: 29 of the 42 are
+  written `set +e; cmd; rc=$?; set -e` on ONE line, and a line-wise reader calls
+  every one of them unbalanced — measured, and the reason the first draft of
+  this analysis was wrong.
+- **A new class, met in this round's own harness (94 §9).** `local a="$1"
+  b="pre-$a"` does NOT work: `local` is a builtin, so every argument is
+  word-expanded BEFORE any assignment, and `$a` there is the CALLER's `a` under
+  dynamic scope — or empty. Measured on this bench, bash 3.2.57:
+  `f(){ local a="$1" b="pre-$a"; echo "$b"; }; f XYZ` prints `pre-`. The
+  mutation harness shipped with it — `local id="$1" sb="$OUTDIR/sb-$id"` named
+  every sandbox from whatever `id` the caller happened to hold: unique per case
+  by luck, EMPTY for every baseline, so ten baselines silently overwrote one
+  directory. Swept: `scripts/` is clean, the harness was the only instance, and
+  the class is now enumerated every run. The detector is deliberately narrow
+  (simple `local NAME=VALUE` words, plain string search so a value cannot inject
+  a regex) and unit-checked against the legitimate multi-assignment `local`s in
+  `lib-mux.sh`, which it must not flag.
+
+- **The confession vocabulary had FIVE copies, and only two were pinned.**
+  `84`'s A4 lockstep held `lib-paff.sh`'s two counters byte-identical; the same
+  alternation also sat in `derive-dts.sh`, `remux.sh` and `pairfill-paff.sh`
+  display greps, unguarded — free to drift exactly the way 1.14 drifted the
+  pair A4 was written for. One definition now (`RTM_CONFESSION_RE`), the flags
+  stay per-site, A4 pins the writer, and 94 §7 counts the copies.
+  `lib-rewrap.sh` keeps its deliberately narrower pattern: splitting nudges from
+  hard confessions is a different question.
+- **The QuickTime-native audio table stays duplicated, and is now held in
+  step (94 §8).** `aac|alac|mp3|pcm_*|eac3` appears as a case arm four times
+  (mov.sh twice, remux.sh, pairfill-paff.sh) and is deliberately not
+  centralized — mov.sh's classifiers are sourced by the `RTM_TEST` harness and
+  each arm reads at its point of decision. E-AC-3's membership has drifted
+  before (1.15.9 F7 found the reference page still calling it a dual-track class
+  rounds after the code classified it native). It moves into IV.3's standing
+  slot as `census_rc` leaves it.
+- **The clinic's OTHER routes.** 1.15.13 made `clean.sh` ask `zero-base` for
+  its own verdict, and 93 §4 pinned the invariant — for that one route. The
+  clinic prints three ready-to-run commands. §4 now reads the routes out of the
+  clinic's OWN output and judges every Tier-1 command it offers, so a route
+  added later joins the invariant the day it lands; a `midgop` profile
+  (`late-sps.ts`) was added so the `trim-to-idr` arm is actually exercised
+  rather than never offered. Measured: 3 offered routes across 4 profiles, none
+  refuses at pre-flight. Tier 2 is deliberately out of scope — the clinic's own
+  verdict line says Tier-2 needs the operator's `--discard-content`.
+- **Cross-script condition modelling: investigated, one instance, no others.**
+  `auto.sh` does not model its children — it ATTEMPTS a rung and reacts to
+  `RESULT`, and its own comment records that pairfill's capability refusal
+  "lands here as a generic RESULT=FAIL". `mov.sh` hands the PAFF path to
+  `auto.sh`. `diagnose.sh` is report-only; the one fully-formed command it
+  prints is `resync.sh`, whose only refusal (exit 11, mid-stream layout change)
+  is discovered by measuring layouts mid-run — not a foregone pre-flight
+  refusal, and not knowable without doing resync's own work. Recorded, not
+  changed.
+- **Scratch cannot be redirected on macOS — named limitation, written down.**
+  Re-measured 2026-08-28: `mktemp -d` and `mktemp -d -t PREFIX` both ignore
+  `TMPDIR` and land in `/var/folders/…/T`; only an explicit template obeys it.
+  14 `mktemp -d` sites and ~12 bare `mktemp` sites are affected identically. It
+  is NOT a defect in the disk pre-flight — `rtm_disk_preflight` receives the
+  ACTUAL staging path (`rebuild-paff.sh` passes its own `$WORK`), so it measures
+  the volume that really gets written. The limit is operator control, and it is
+  now in `references/known-limits.md`.
+- **Investigated and sound, no guard owed:** the codec RANK table
+  (lossless/lossy-high/lossy-low) exists once, in remux.sh's plan awk —
+  `auto.sh`'s `rank` is a different fact (verdict ranking); the QTFF
+  sample-entry allowlist exists once, in verify.sh (its second appearance is the
+  comment that documents it).
+
+CONSTITUTION.md updated where this round falsified it: IV.3's standing example,
+V.2's test (the harness), V.4's ship checklist. `tests/README.md` documents the
+harness as the guards' own test.
+
+Suite 292/292 green (the banner counts one row per sub-suite; the changed files
+grew inside it — 94: 7 -> 16 assertions, 93: 19 -> 22, 84: 18 -> 20), and the
+final `tests/mutation-audit.sh` sweep is **49/49 in contract** on the shipped
+tree: 32 defect cases CAUGHT, 17 prose cases CLEAN, none missed, none crying
+wolf. `claude plugin validate --strict` green on plugin and marketplace.
+
+Residuals recorded here rather than fixed: `zero-base.sh` returns rc=1 (not a
+pre-flight refusal) on the mid-GOP fixture the clinic offers it for — a measured
+outcome from its own gates, which the clinic could not know without running it,
+so the invariant deliberately forbids only rc=2. Tier-2 routes stay outside the
+invariant, because the clinic's own verdict line says Tier-2 needs the
+operator's `--discard-content`. The 94 §9 detector is narrow by choice (simple
+`local NAME=VALUE` words, one-line function bodies included, `;`-separated
+fragments): an exotic shape can slip past it, which beats a guard that cries
+wolf.
+
 ## 1.15.16 — CONSTITUTION.md (2026-08-27)
 
 The rules of this plugin were distributed across work orders, checkups,

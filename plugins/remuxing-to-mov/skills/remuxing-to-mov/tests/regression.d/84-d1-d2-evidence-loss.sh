@@ -33,6 +33,20 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
+
+# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
+# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
+# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
+# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
+# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
+# source in this suite (94 §10 sweeps for it).
+# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
+# call site left the `--` in place, so the pattern became "--" and the guard
+# matched every long option in the file — PASS, guarding nothing. Measured
+# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
+# round). The `--` below is what protects a pattern that starts with a dash.
+grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
+grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
 hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 ff () { ffmpeg -nostdin -hide_banner -loglevel error "$@"; }
@@ -128,12 +142,19 @@ grep -q 'arms_rc=\$?' "$SC/lead-check.sh" \
   || no "qt-groups proof captures missing"
 
 echo
-echo "== A4 lockstep: the two confession vocabularies are byte-identical =="
-narrow=$(sed -n 's/.*grep -ciE '\''\([^'\'']*\)'\''.*/\1/p' "$SC/lib-paff.sh" | head -1)
-scoped=$(sed -n 's/.*grep -iE '\''\([^'\'']*\)'\''.*"\$log".*/\1/p' "$SC/lib-paff.sh" | head -1)
-{ [ -n "$narrow" ] && [ "$narrow" = "$scoped" ]; } \
-  && ok "mux_confessions and mux_confessions_scoped share one vocabulary (lockstep held)" \
-  || no "confession regexes diverged (narrow=[$narrow] scoped=[$scoped])"
+echo "== A4: the confession vocabulary has ONE writer =="
+# Was a lockstep pin over the two regex LITERALS in lib-paff.sh. 1.15.17 found
+# the same alternation in three more places (derive-dts.sh, remux.sh,
+# pairfill-paff.sh display greps) that this pin never saw — five copies, two
+# guarded. There is one definition now (RTM_CONFESSION_RE); the tree-wide count
+# is test 94 §7, and what stays here is the BEHAVIOUR the lockstep protected.
+grep -q '^RTM_CONFESSION_RE=' "$SC/lib-paff.sh" \
+  && ok "the confession vocabulary is defined once, in lib-paff.sh" \
+  || no "RTM_CONFESSION_RE is not defined in lib-paff.sh"
+for _fn in mux_confessions mux_confessions_scoped; do
+  sed -n "/^$_fn *() *{/,/^}/p" "$SC/lib-paff.sh" | grepq 'RTM_CONFESSION_RE' \
+    && ok "$_fn reads the shared vocabulary" || no "$_fn carries a private copy again"
+done
 printf '[mov @ 0x1] Non-monotonous DTS in output stream 0:0; previous 5, current 3\n[mov @ 0x1] non monotonically increasing dts to muxer in stream 0\n' > "$WORK/44.log"
 [ "$(mux_confessions "$WORK/44.log")" -eq 2 ] \
   && ok "the narrow copy counts the 4.4-era spellings (2/2)" \

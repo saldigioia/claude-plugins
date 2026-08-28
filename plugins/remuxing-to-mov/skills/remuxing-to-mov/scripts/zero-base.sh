@@ -253,7 +253,7 @@ ZB_C=$(ffp -v error -show_entries stream=index,codec_name -of csv=p=0 "$IN" 2>/d
 ZB_N=$(printf '%s' "$ZB_C" | awk -F, '{print ($0=="" ? 0 : NF)}')
 census_rc=0
 mux_census "$PART" "$ZB_N" "$ZB_C" zero-base "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing; kept at $PART." >&2
   exit 1
 fi
@@ -271,7 +271,7 @@ case "$vrc" in
 esac
 # an unexpected-surplus census (rc 10) blesses the complete build but demotes
 # the verdict to REVIEW — the trim-to-idr propagation rule
-[ "$census_rc" -eq 10 ] && VERDICT=review
+if rtm_census_review "$census_rc"; then VERDICT=review; fi
 
 mv -f "$PART" "$OUT"
 ST_OUT=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$OUT" 2>/dev/null)

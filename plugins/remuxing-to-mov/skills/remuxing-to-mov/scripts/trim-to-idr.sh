@@ -224,7 +224,7 @@ TTI_C=$(ffp -v error -show_entries stream=index,codec_name -of csv=p=0 "$IN" 2>/
 TTI_N=$(printf '%s' "$TTI_C" | awk -F, '{print ($0=="" ? 0 : NF)}')
 census_rc=0
 mux_census "$PART" "$TTI_N" "$TTI_C" trim-to-idr "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing the cut; kept at $PART." >&2
   exit 1
 fi

@@ -223,7 +223,7 @@ fi
 # deliverable's promise gone, and nothing checked it before this.
 census_rc=0
 mux_census "$PART" 3 "$vcodec,$PCMC,$acodec" dual-track "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing the output; kept at $PART. The access+original pair is the"
   echo "   contract of this tool — a missing track means the promise was not kept."
   exit 1
@@ -235,5 +235,5 @@ echo "  a=\$(ffmpeg -v error ${DRC:+$DRC }-i \"$OUT\" -map 0:a:0 -f ${PCMC#pcm_}
 echo "  b=\$(ffmpeg -v error ${DRC:+$DRC }-i \"$OUT\" -map 0:a:1 -c:a $PCMC -f ${PCMC#pcm_} - | md5sum); [ \"\$a\" = \"\$b\" ] && echo ALIGNED"
 # REVIEW propagation (1.14): an unexpected-surplus census or an audio/subtitle
 # confession class blesses the complete artifact and exits 10 ("look"), never 1.
-if [ "$census_rc" -eq 10 ] || [ "${DT_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
+if rtm_census_review "$census_rc" || [ "${DT_CONF_REVIEW:-0}" -eq 10 ]; then exit 10; fi
 exit 0

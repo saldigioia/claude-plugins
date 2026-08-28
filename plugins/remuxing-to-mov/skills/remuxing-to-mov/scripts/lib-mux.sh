@@ -185,6 +185,32 @@ rtm_writer_preflight () {
   return 0
 }
 
+# --- the census VERDICT, given one writer (WO-1.15.17 Item 4) -----------------
+# Ten builders consume mux_census, and each re-implemented the same sentence:
+# "rc 0 or 10 is acceptable, anything else is a census failure". The wrapping
+# differs legitimately per builder — the stage name, the message wording, the
+# retention pointer, the exit contract, the machine rows — and STAYS per
+# builder. The verdict is one fact, and adding an acceptable rc used to mean
+# finding and editing ten sites. Share the FACT, not the presentation (1.15.14).
+#
+#   rtm_census_failed RC   the census could not confirm the plan -> do not bless
+#   rtm_census_review RC   complete, but an unexpected surplus -> REVIEW
+#
+# Both are PREDICATES for an `if`; never the last command of a script (a false
+# return here is a verdict, not an error). A non-numeric rc fails CLOSED for
+# rtm_census_failed and reads not-review for rtm_census_review — EMPTY is not
+# ABSENT (WO-1.15.4): a rc nobody could read is never a blessing.
+rtm_census_failed () {
+  local rc="${1:-}"
+  case "$rc" in ''|*[!0-9]*) return 0;; esac
+  [ "$rc" -ne 0 ] && [ "$rc" -ne 10 ]
+}
+rtm_census_review () {
+  local rc="${1:-}"
+  case "$rc" in ''|*[!0-9]*) return 1;; esac
+  [ "$rc" -eq 10 ]
+}
+
 # mux_census FILE PLANNED_N PLANNED_CODECS_CSV [STAGE] [SOURCE]
 #   PLANNED_N            how many streams the builder mapped (its own plan)
 #   PLANNED_CODECS_CSV   expected codec_name per output stream; "?" for a slot

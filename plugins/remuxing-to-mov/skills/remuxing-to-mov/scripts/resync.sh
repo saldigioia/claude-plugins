@@ -181,7 +181,7 @@ for spec in $ASPECS; do
 done
 census_rc=0
 mux_census "$PART" "$RS_N" "$RS_C" resync "$IN" || census_rc=$?
-if [ "$census_rc" -ne 0 ] && [ "$census_rc" -ne 10 ]; then
+if rtm_census_failed "$census_rc"; then
   echo "   NOT blessing the output; kept at $PART."
   exit 1
 fi
@@ -199,7 +199,7 @@ case "$o" in
   *">> OK"*)     echo ">> DONE: $OUT — video bit-identical, audio re-timed to the picture."
                  # REVIEW propagation (1.14): an unexpected-surplus census still
                  # blesses the complete artifact and exits 10 ("look"), never 1.
-                 if [ "${census_rc:-0}" -eq 10 ]; then
+                 if rtm_census_review "${census_rc:-0}"; then
                    echo ">> REVIEW: the census flagged an unexpected surplus stream (see RMX_CENSUS above)."
                    exit 10
                  fi

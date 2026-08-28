@@ -26,6 +26,20 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
+
+# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
+# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
+# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
+# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
+# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
+# source in this suite (94 §10 sweeps for it).
+# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
+# call site left the `--` in place, so the pattern became "--" and the guard
+# matched every long option in the file — PASS, guarding nothing. Measured
+# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
+# round). The `--` below is what protects a pattern that starts with a dash.
+grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
+grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
 ff () { ffmpeg -nostdin -hide_banner -loglevel error "$@"; }
 
 echo "== fixture: 3-stream single-program TS (v + 2a, custom PIDs + PMT) =="
@@ -56,10 +70,15 @@ done
 
 echo
 echo "== 2. class guard: program= queries are ffp1, never bare | head =="
-n_ffp1=$(grep -c 'ffp1 .*program=' "$SC/lib-rewrap.sh" || true)
+n_ffp1=$(sed 's/#.*//' "$SC/lib-rewrap.sh" | grep -c 'ffp1 .*program=' || true)
 [ "${n_ffp1:-0}" -eq 2 ] && ok "both lib-rewrap program= sites ride ffp1 ($n_ffp1)" \
   || no "expected 2 ffp1 program= sites in lib-rewrap.sh, found ${n_ffp1:-0}"
-offenders=$(grep -lE 'program=[a-z_]+.*\|[[:space:]]*head' "$SC"/*.sh || true)
+# comment-stripped + basenames: an un-stripped grep is satisfied by a comment
+# saying "never do this" (measured FALSE-POSITIVE 2026-08-28, case P19).
+offenders=""
+for _f in "$SC"/*.sh; do
+  sed 's/#.*//' "$_f" | grepqe 'program=[a-z_]+.*\|[[:space:]]*head' && offenders="$offenders $(basename "$_f")"
+done
 [ -z "$offenders" ] && ok "no program= query in scripts/ pipes into head (the armed shape)" \
   || no "program= | head reintroduced in: $offenders"
 
