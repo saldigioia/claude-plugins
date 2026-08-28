@@ -50,22 +50,13 @@ pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
 
-# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
-# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
-# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
-# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
-# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
-# source in this suite (94 §10 sweeps for it).
-# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
-# call site left the `--` in place, so the pattern became "--" and the guard
-# matched every long option in the file — PASS, guarding nothing. Measured
-# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
-# round). The `--` below is what protects a pattern that starts with a dash.
-grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
-grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
+. "$TESTS/lib-harness.sh"   # grepq/grepqe + rtm_strip_comments: one definition (tests/lib-harness.sh)
 ff () { ffmpeg -nostdin -hide_banner -loglevel error "$@"; }
 kv () { bash "$SC/probe.sh" "$1" --kv 2>/dev/null; }
-kvget () { printf '%s\n' "$2" | sed -n "s/^$1=//p" | tr -d "'"; }
+# kvval KEY KV — quote-stripped value. Named apart from tests 88/89's `kvget KV KEY`
+# (opposite argument order): the same name with a swapped signature is a trap
+# the day one of them is hoisted into lib-harness.sh.
+kvval () { printf '%s\n' "$2" | sed -n "s/^$1=//p" | tr -d "'"; }
 
 for f in multilang.ts dupe_lang.ts; do
   [ -f "$FIX/$f" ] || { echo "== regenerating missing fixture: $f =="; bash "$TESTS/make-fixtures.sh" "$f" || { echo "fixture build failed"; exit 2; }; }
@@ -83,8 +74,8 @@ tagged=$(ffprobe -v error -select_streams a -show_entries stream=index:stream_ta
 echo
 echo "== 1. multilang.ts: --kv reads the real languages, in track order =="
 K=$(kv "$FIX/multilang.ts")
-l0=$(kvget PR_AUD_0_LANG "$K"); l1=$(kvget PR_AUD_1_LANG "$K"); l2=$(kvget PR_AUD_2_LANG "$K")
-cnt=$(kvget PR_AUD_COUNT "$K")
+l0=$(kvval PR_AUD_0_LANG "$K"); l1=$(kvval PR_AUD_1_LANG "$K"); l2=$(kvval PR_AUD_2_LANG "$K")
+cnt=$(kvval PR_AUD_COUNT "$K")
 [ "$l0" = eng ] && ok "PR_AUD_0_LANG=eng" || no "PR_AUD_0_LANG=${l0:-<empty>} (want eng)"
 [ "$l1" = spa ] && ok "PR_AUD_1_LANG=spa" || no "PR_AUD_1_LANG=${l1:-<empty>} (want spa)"
 [ "$l2" = eng ] && ok "PR_AUD_2_LANG=eng" || no "PR_AUD_2_LANG=${l2:-<empty>} (want eng)"
@@ -94,9 +85,9 @@ case "$l0$l1$l2" in *und*) no "a track still reads und — the keep-first dedupe
 
 echo
 echo "== 2. the merge is field-by-field: non-language fields survive, slots hold =="
-c0=$(kvget PR_AUD_0_CODEC "$K"); c2=$(kvget PR_AUD_2_CODEC "$K")
-h0=$(kvget PR_AUD_0_CHANNELS "$K"); h2=$(kvget PR_AUD_2_CHANNELS "$K")
-y0=$(kvget PR_AUD_0_LAYOUT "$K"); y2=$(kvget PR_AUD_2_LAYOUT "$K")
+c0=$(kvval PR_AUD_0_CODEC "$K"); c2=$(kvval PR_AUD_2_CODEC "$K")
+h0=$(kvval PR_AUD_0_CHANNELS "$K"); h2=$(kvval PR_AUD_2_CHANNELS "$K")
+y0=$(kvval PR_AUD_0_LAYOUT "$K"); y2=$(kvval PR_AUD_2_LAYOUT "$K")
 [ "$c0" = ac3 ] && [ "$c2" = ac3 ] && ok "codecs intact (ac3/ac3)" || no "codec clobbered by the merge (a:0=$c0 a:2=$c2)"
 [ "$h0" = 2 ] && [ "$h2" = 6 ] && ok "channels intact (2 / 6) — no whole-record replacement" || no "channels clobbered (a:0=$h0 a:2=$h2, want 2/6)"
 [ "$y0" = stereo ] && ok "a:0 layout stereo" || no "a:0 layout=$y0 (want stereo)"
@@ -127,7 +118,7 @@ for _f in "$SC"/*.sh; do
   # by a comment that merely quotes the idiom (measured FALSE-POSITIVE
   # 2026-08-28, tests/mutation-audit.sh case P10), and a full sandbox path in a
   # failure line is unreadable.
-  sed 's/#.*//' "$_f" | grepqe 'idx in seen\) *next' && offenders="$offenders $(basename "$_f")"
+  rtm_strip_comments "$_f" | grepqe 'idx in seen\) *next' && offenders="$offenders $(basename "$_f")"
 done
 [ -z "$offenders" ] && ok "the keep-first manifest idiom (idx in seen) survives nowhere in scripts/" \
   || no "keep-first dedupe over the per-track manifest still in: $offenders"
@@ -142,28 +133,34 @@ done
 # mutation-audit case G11b — the identical blind spot 94 §5 was rewritten to
 # close), and an un-stripped grep trips on a comment that quotes the idiom
 # (measured FALSE-POSITIVE, case P11).
-n_merge=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -c 'G\[o\]=="und"')
+n_merge=$(cat "$SC"/*.sh 2>/dev/null | rtm_strip_comments | grep -c 'G\[o\]=="und"')
 [ "$n_merge" = 1 ] && ok "the WO 3.4 merge exists exactly once in scripts/ ($n_merge)" \
   || no "the merge appears $n_merge time(s) in scripts/ — want exactly 1 (the shared writer)"
-grep -q 'G\[o\]=="und"' "$SC/lib-probe.sh" && ok "…and that file is lib-probe.sh (the shared writer)" \
+rtm_strip_comments "$SC/lib-probe.sh" | grepq 'G\[o\]=="und"' && ok "…and that file is lib-probe.sh (the shared writer)" \
   || no "the merge is not in lib-probe.sh"
+# every read below is comment-stripped, and the call is pinned by its CALL
+# shape: both consumers name the writer in the comment above their call, so an
+# un-stripped presence read stayed PASS with the call removed, and the
+# un-stripped absence read cried wolf on a comment quoting the idiom (both
+# measured 2026-08-28; mutation-audit cases G30/P30 and P11).
 for consumer in probe.sh remux.sh; do
-  grep -q 'rtm_aud_manifest' "$SC/$consumer" \
-    && ok "$consumer consumes rtm_aud_manifest" || no "$consumer does not call the shared writer"
-  grep -q 'G\[o\]=="und"' "$SC/$consumer" \
+  csrc=$(rtm_strip_comments "$SC/$consumer")
+  printf '%s\n' "$csrc" | grepq 'rtm_aud_manifest "' \
+    && ok "$consumer calls rtm_aud_manifest" || no "$consumer does not call the shared writer"
+  printf '%s\n' "$csrc" | grepq 'G\[o\]=="und"' \
     && no "$consumer still carries its own copy of the merge" || ok "$consumer holds no private copy"
 done
 # the presentation fallbacks are deliberately NOT shared — each consumer keeps
 # its own, and the shared writer must not impose either.
-grep -q '"unknown"' "$SC/probe.sh" && ok "probe.sh keeps its own 'unknown' layout fallback" \
+rtm_strip_comments "$SC/probe.sh" | grepq '"unknown"' && ok "probe.sh keeps its own 'unknown' layout fallback" \
   || no "probe.sh lost its layout fallback"
-grep -q 'CH\[o\]"ch"' "$SC/remux.sh" && ok "remux.sh keeps its own 'Nch' fallback (different on purpose)" \
+rtm_strip_comments "$SC/remux.sh" | grepq 'CH\[o\]"ch"' && ok "remux.sh keeps its own 'Nch' fallback (different on purpose)" \
   || no "remux.sh lost its Nch fallback"
 
 echo
 echo "== 5. dupe_lang.ts (MP2-eng + AC-3-eng): both languages real =="
 K2=$(kv "$FIX/dupe_lang.ts")
-d0=$(kvget PR_AUD_0_LANG "$K2"); d1=$(kvget PR_AUD_1_LANG "$K2"); dc=$(kvget PR_AUD_COUNT "$K2")
+d0=$(kvval PR_AUD_0_LANG "$K2"); d1=$(kvval PR_AUD_1_LANG "$K2"); dc=$(kvval PR_AUD_COUNT "$K2")
 [ "$d0" = eng ] && [ "$d1" = eng ] && ok "both tracks read eng" || no "dupe_lang langs: a:0=$d0 a:1=$d1 (want eng/eng)"
 [ "$dc" = 2 ] && ok "PR_AUD_COUNT=2" || no "PR_AUD_COUNT=${dc:-<empty>} (want 2)"
 
@@ -178,9 +175,13 @@ ff -f lavfi -i "testsrc2=s=160x120:r=25" -f lavfi -i "sine=440" -f lavfi -i "sin
    -map 0:v -map 1:a -map 2:a -c:v libx264 -pix_fmt yuv420p -c:a aac \
    -metadata:s:a:0 language=deu "$M" 2>/dev/null || { echo "   (single-view fixture mint failed)"; }
 if [ -f "$M" ]; then
-  K3=$(kv "$M"); s0=$(kvget PR_AUD_0_LANG "$K3"); s1=$(kvget PR_AUD_1_LANG "$K3")
+  K3=$(kv "$M"); s0=$(kvval PR_AUD_0_LANG "$K3"); s1=$(kvval PR_AUD_1_LANG "$K3"); sc=$(kvval PR_AUD_COUNT "$K3")
+  # the count is pinned here too: without it a merge that DROPPED the untagged
+  # track read an absent PR_AUD_1_LANG as the wanted und (EMPTY != ABSENT)
+  [ "$sc" = 2 ] && ok "PR_AUD_COUNT=2 on the single-view source (an untagged track is still a track)" \
+    || no "PR_AUD_COUNT=${sc:-<empty>} (want 2) — a track vanished"
   [ "$s0" = deu ] && ok "tagged track on a single-view container reads deu" || no "single-view tagged track read $s0 (want deu)"
-  case "$s1" in und|"") ok "untagged track still reads und — the merge never invents a language";; *) no "untagged track read $s1 (want und)";; esac
+  case "$s1" in und) ok "untagged track still reads und — the merge never invents a language";; *) no "untagged track read ${s1:-<absent>} (want und)";; esac
 else
   no "could not mint the single-view fixture"
 fi

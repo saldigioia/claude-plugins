@@ -239,13 +239,19 @@ older ones had never been mutation-tested.
   assertion must flip PASS → FAIL (`CAUGHT`, else `MISSED`).
 - **prose** — introduce a benign COMMENT quoting the same idiom; the guard must
   stay PASS (`CLEAN`, else `FALSE-POSITIVE`). A guard that cries wolf gets
-  disabled, and then its class is unguarded *and believed guarded*.
+  disabled, and then its class is unguarded *and believed guarded*. A prose
+  case whose marked guard stays PASS while the RUN goes red is `RED-ELSEWHERE`:
+  a sibling assertion in the same test cried wolf on the comment (1.15.18 —
+  the harness used to read that CLEAN). A test that is red before any mutation
+  judges nothing; its cases read `BASE-RED`.
 
 Every case runs in a throwaway copy of the plugin (fixtures symlinked, never
 copied), so the real tree is never written to — which retires the restore hazard
 CONSTITUTION.md V.2 records. `MA_JOBS=N` sets parallelism, `MA_KEEP=1` keeps the
-sandboxes and logs, and a mutation that changes nothing reports `MUTATE-NOOP`
-rather than masquerading as a vacuous guard.
+sandboxes and logs, `MA_OUTDIR=DIR` puts logs and verdicts in a directory of
+your own (never deleted — the harness rm -rf's only what it created), and a
+mutation that changes nothing reports `MUTATE-NOOP` rather than masquerading as
+a vacuous guard.
 
 It is deliberately NOT in `regression.d/` (the runner would enrol it) and NOT
 part of the bench: it costs many minutes and mutates a tree copy. Run it

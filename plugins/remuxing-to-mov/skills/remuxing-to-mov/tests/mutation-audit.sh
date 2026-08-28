@@ -23,6 +23,11 @@
 # an assertion two different wordings ("defined exactly once" vs "has 2
 # definitions"), so a marker that matches the PASS line will never match the FAIL
 # line. The rule is: is the marked PASS still there, and did the run go red.
+# A prose case whose marked PASS survives while the RUN went red is
+# RED-ELSEWHERE, never CLEAN: a sibling assertion in the same test cried wolf
+# on the comment (measured 2026-08-28 — P11 kept 92 §4's marker PASS while an
+# un-stripped per-consumer pin FAILed, and the harness read CLEAN). A test that
+# is red BEFORE any mutation judges nothing: its cases read BASE-RED.
 # A guard that cries wolf gets disabled, and then its class is unguarded AND
 # believed guarded — so lane 2 is not a nicety.
 #
@@ -39,6 +44,7 @@
 #   bash tests/mutation-audit.sh G04 P04         # named cases only
 #   MA_JOBS=4 bash tests/mutation-audit.sh       # parallel sandboxes (default 3)
 #   MA_KEEP=1 bash tests/mutation-audit.sh       # keep sandboxes + logs
+#   MA_OUTDIR=DIR bash tests/mutation-audit.sh   # logs/verdicts into DIR (never deleted)
 #
 # Exit 0 = every guard CAUGHT its defect and stayed CLEAN on prose;
 #        1 = at least one MISSED or FALSE-POSITIVE; 2 = env/harness failure.
@@ -48,8 +54,19 @@ SKILL="$(cd "$HERE/.." && pwd)"          # skills/remuxing-to-mov
 PLUGIN="$(cd "$SKILL/../.." && pwd)"     # plugins/remuxing-to-mov
 FIXTURES="$HERE/fixtures"
 JOBS="${MA_JOBS:-3}"
-OUTDIR="${MA_OUTDIR:-$(mktemp -d)}"; mkdir -p "$OUTDIR"
-[ "${MA_KEEP:-0}" = 1 ] || trap 'rm -rf "$OUTDIR"' EXIT
+# validated: without -e a non-integer here made the pool test error on every
+# turn and never wait, forking the whole roster at once
+case "$JOBS" in ''|*[!0-9]*|0) echo "MA_JOBS must be a positive integer (got '${MA_JOBS:-}')"; exit 2;; esac
+# Cleanup is scoped to what THIS run created. A directory the operator named
+# is never rm -rf'd — it may hold their other files, and deleting what you do
+# not own is the 1.15.12 class this very harness exists to police.
+if [ -n "${MA_OUTDIR:-}" ]; then
+  OUTDIR="$MA_OUTDIR"; mkdir -p "$OUTDIR"
+else
+  OUTDIR="$(mktemp -d)"
+  [ "${MA_KEEP:-0}" = 1 ] || trap 'rm -rf "$OUTDIR"' EXIT
+fi
+. "$HERE/lib-harness.sh"   # rtm_strip_comments: the SAME stripper the guards read through
 
 command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || { echo "need ffmpeg+ffprobe"; exit 2; }
 [ -d "$FIXTURES" ] || { echo "fixtures missing — run tests/make-fixtures.sh first"; exit 2; }
@@ -67,7 +84,17 @@ new_sandbox () {  # new_sandbox ID -> prints the sandbox's skill dir
   rm -rf "$sb"; mkdir -p "$sb"
   ( cd "$PLUGIN/.." && tar -cf - --exclude fixtures --exclude __pycache__ "$base" ) \
     | ( cd "$sb" && tar -xf - ) || return 1
-  ln -s "$FIXTURES" "$sb/$base/skills/remuxing-to-mov/tests/fixtures" || return 1
+  # a REAL directory of per-file links, not a link to the directory: a test
+  # that mints a missing fixture (41/92/93 call make-fixtures.sh, which writes
+  # into tests/fixtures/) then writes into the sandbox — never through a
+  # directory link into the real tree, and never racing a parallel case on
+  # one shared .part.
+  local fxd="$sb/$base/skills/remuxing-to-mov/tests/fixtures" fx
+  mkdir -p "$fxd" || return 1
+  for fx in "$FIXTURES"/*; do
+    [ -e "$fx" ] || continue
+    ln -s "$fx" "$fxd/$(basename "$fx")" || return 1
+  done
   printf '%s\n' "$sb/$base/skills/remuxing-to-mov"
 }
 
@@ -195,11 +222,32 @@ pro_early_exit_reader () {
   printf '\n# never: sed ... | grep -q PAT over source (SIGPIPEs the writer)\n' >> "$1/tests/regression.d/11-probe-defaults.sh"
 }
 
+mut_uncall_manifest () {  # a consumer stops CALLING the shared writer (its comment still names it)
+  # NO $ in the replacement (perl would read it as a perl variable — see below)
+  perl -pi -e 's/rtm_aud_manifest "\$IN"/legacy_inline_probe "(IN)"/' "$1/scripts/probe.sh"
+}
+pro_uncall_manifest () { printf '\n# the call rtm_aud_manifest "IN" is the one above\n' >> "$1/scripts/probe.sh"; }
+mut_widen_vocab () {      # one counter appends to the shared vocabulary (A4 drift, the 1.14 shape)
+  perl -pi -e 's/grep -ciE "\$RTM_CONFESSION_RE"/grep -ciE "\$RTM_CONFESSION_RE|dts discontinuity"/' "$1/scripts/lib-paff.sh"
+}
+pro_widen_vocab () {      # a comment INSIDE mux_confessions naming the variable
+  perl -pi -e 's/^(mux_confessions \(\) \{)$/$1\n  # note: pattern is "\$RTM_CONFESSION_RE" — never widen it here/' "$1/scripts/lib-paff.sh"
+}
+
 mut_ungate_route ()  {  # the clinic offers a route its authority refuses
   # NO $ in the replacement: perl reads $ZB_RC there as a PERL variable (empty),
   # which wrote `[ "" -ge 0 ]` and made clean.sh offer nothing at all (measured).
   perl -pi -e 's/if \[ "\$ZB_RC" -eq 0 \]; then/if true; then/' "$1/scripts/clean.sh"
 }
+mut_raw_census_exit () {  # a builder hands the raw census rc to the operator again (1.15.18)
+  perl -0pi -e 's/if rtm_census_review "\$census_rc"; then exit 10; fi\nexit 0\n/exit "\$census_rc"\n/' \
+    "$1/scripts/trim-to-idr.sh"
+}
+pro_raw_census_exit () { printf '\n# never: exit "$census_rc" — ask rtm_census_review, then exit 0 or 10\n' >> "$1/scripts/trim-to-idr.sh"; }
+mut_unask_trim () {   # the trim-to-idr CALL stops asking (clean.sh's prose still says --preflight-only)
+  perl -pi -e 's/--preflight-only/--dry-run-only/ if /trim-to-idr\.sh"/' "$1/scripts/clean.sh"
+}
+pro_unask_trim () { printf '\n# clean.sh asks trim-to-idr.sh --preflight-only too; it holds no window model\n' >> "$1/scripts/clean.sh"; }
 
 # PROSE lane. Each adds a BENIGN mention — a comment, or a quoted string in a
 # message — of exactly the idiom the guard hunts. The guard must stay PASS.
@@ -214,7 +262,9 @@ pro_qt_undecodable (){ printf '\n# 1.11 removed the MOV_REFUSED profile=qt-undec
 pro_422_refusal ()  { printf '\n# the old gate: yuv422p -> exit 11, falsified 2026-08-13\n' >> "$1/scripts/clock.sh"; }
 pro_program_head () { printf '\n# never: ffp -show_entries program=program_id | head -1\n' >> "$1/scripts/clock.sh"; }
 pro_nprog_model ()  { printf '\n# F12 note: NPROG is asked of zero-base now, not modelled here\n' >> "$1/scripts/clean.sh"; }
-pro_unask_zerobase () { printf '\n# clean.sh asks zero-base --preflight-only; it holds no model\n' >> "$1/scripts/probe.sh"; }
+# appended to clean.sh — the file 93 §5 READS. It went to probe.sh once, and
+# a prose case the guard never reads cannot FALSE-POSITIVE by construction.
+pro_unask_zerobase () { printf '\n# clean.sh asks zero-base --preflight-only; it holds no model\n' >> "$1/scripts/clean.sh"; }
 
 # --------------------------------------------------------------------- roster
 # ID|LANE|TEST|MARKER|MUTATION[|FAILMARK]        LANE: defect | prose | new
@@ -272,28 +322,59 @@ G28|defect|94-rot-sweep.sh|reads a name it declares in the same statement|mut_lo
 P28|prose|94-rot-sweep.sh|reads a name it declares in the same statement|pro_local_selfref
 G29|defect|94-rot-sweep.sh|ends in an early-exit grep -q|mut_early_exit_reader
 P29|prose|94-rot-sweep.sh|ends in an early-exit grep -q|pro_early_exit_reader
+G30|defect|92-probe-lang-merge.sh|calls rtm_aud_manifest|mut_uncall_manifest|does not call the shared writer
+P30|prose|92-probe-lang-merge.sh|calls rtm_aud_manifest|pro_uncall_manifest
+G31|defect|84-d1-d2-evidence-loss.sh|reads the shared vocabulary, and nothing else|mut_widen_vocab|carries a private copy or a widened pattern
+P31|prose|84-d1-d2-evidence-loss.sh|reads the shared vocabulary, and nothing else|pro_widen_vocab
+G32|defect|94-rot-sweep.sh|no builder exits with the raw census rc|mut_raw_census_exit
+P32|prose|94-rot-sweep.sh|no builder exits with the raw census rc|pro_raw_census_exit
+G33|defect|93-clean-paff-route.sh|asks trim-to-idr for its own verdict|mut_unask_trim
+P33|prose|93-clean-paff-route.sh|asks trim-to-idr for its own verdict|pro_unask_trim
 '
 
 # --------------------------------------------------------------------- runner
+code_digest () {  # cksum of every *.sh under $1, comments and blank lines removed
+  find "$1" -name "*.sh" -type f | sort | while IFS= read -r _f; do rtm_strip_comments "$_f"; done \
+    | sed '/^[[:space:]]*$/d' | cksum
+}
 run_one () {  # run_one ID LANE TEST MARKER MUTATION [FAILMARK]
   local id="$1" lane="$2" test="$3" marker="$4" mutfn="$5" failmark="${6:-}"
   local sk out rc verdict
   sk="$(new_sandbox "$id")" || { echo "SANDBOX-FAIL" > "$OUTDIR/$id.verdict"; return; }
-  local before after
+  local before after cbefore cafter
   before=$(find "$sk" -name "*.sh" -type f -exec cksum {} + | cksum)
+  cbefore=$(code_digest "$sk")
   if ! "$mutfn" "$sk"; then echo "MUTATE-FAIL" > "$OUTDIR/$id.verdict"; return; fi
   after=$(find "$sk" -name "*.sh" -type f -exec cksum {} + | cksum)
+  cafter=$(code_digest "$sk")
   # measured: the BEGIN{n=0} regex matched nothing, perl exited 0, and the guard
   # read MISSED — a harness bug dressed as a finding. Never again.
   [ "$before" != "$after" ] || { echo "MUTATE-NOOP" > "$OUTDIR/$id.verdict"; return; }
+  # WHERE it landed is checked, not hoped: a defect must change CODE (a defect
+  # written into a comment proves nothing and reads as MISSED against an
+  # innocent guard); a prose mutation must change NOTHING but comments (else
+  # its CLEAN was earned by luck).
+  case "$lane" in
+    prose) [ "$cbefore" = "$cafter" ] || { echo "MUTATE-IN-CODE" > "$OUTDIR/$id.verdict"; return; };;
+    *)     [ "$cbefore" != "$cafter" ] || { echo "MUTATE-IN-PROSE" > "$OUTDIR/$id.verdict"; return; };;
+  esac
   out="$OUTDIR/$id.log"
   ( cd "$sk" && bash "tests/regression.d/$test" ) > "$out" 2>&1; rc=$?
   if [ -n "$failmark" ] && [ "$lane" != prose ]; then
     # a per-item guard: judge the FAIL text the mutation must produce, because
     # the other items legitimately keep passing
-    if grep 'FAIL' "$out" | grep -qF "$failmark"; then verdict=CAUGHT; else verdict=MISSED; fi
-  elif grep -F "$marker" "$out" | grep -q 'PASS'; then
-    [ "$lane" = prose ] && verdict=CLEAN || verdict=MISSED
+    # count, never `| grep -q`: the early-exit reader SIGPIPEs its writer past
+    # ~16 KiB of matches (measured: CAUGHT flips to MISSED at 300 FAIL lines)
+    if [ "$(grep 'FAIL' "$out" | grep -cF -- "$failmark")" -gt 0 ]; then verdict=CAUGHT; else verdict=MISSED; fi
+  elif [ "$(grep -F -- "$marker" "$out" | grep -c 'PASS')" -gt 0 ]; then
+    # the marked guard stayed PASS. Prose: CLEAN only if the whole run stayed
+    # green — a red run means a SIBLING assertion in the same test cried wolf
+    # on this comment (measured 2026-08-28: P11 kept 92 §4's marker PASS while
+    # its un-stripped per-consumer pin FAILed, and this read CLEAN). Defect:
+    # MISSED regardless — something else going red is not this guard's catch.
+    if [ "$lane" = prose ]; then
+      [ "$rc" -eq 0 ] && verdict=CLEAN || verdict=RED-ELSEWHERE
+    else verdict=MISSED; fi
   elif [ "$rc" -ne 0 ]; then
     [ "$lane" = prose ] && verdict=FALSE-POSITIVE || verdict=CAUGHT
   else
@@ -309,9 +390,15 @@ run_one () {  # run_one ID LANE TEST MARKER MUTATION [FAILMARK]
 
 baseline_one () {  # the marker must be a PASS on an UNMUTATED sandbox, or a
   local test="$1" sk    # "CAUGHT" means nothing (the line may never appear)
-  [ -s "$OUTDIR/base-$test.log" ] && return 0
+  # always re-taken: the caller runs this once per distinct test, and a
+  # baseline left in a persisted MA_OUTDIR by an earlier tree state must never
+  # judge this one (a stale PASS line is a fake baseline)
   sk="$(new_sandbox "base-$test")" || return 1
-  ( cd "$sk" && bash "tests/regression.d/$test" ) > "$OUTDIR/base-$test.log" 2>&1
+  local brc=0
+  ( cd "$sk" && bash "tests/regression.d/$test" ) > "$OUTDIR/base-$test.log" 2>&1 || brc=$?
+  # kept: a test that is red BEFORE any mutation cannot judge one (its prose
+  # cases would all read RED-ELSEWHERE for a reason that is not theirs)
+  printf '%s\n' "$brc" > "$OUTDIR/base-$test.rc"
   [ "${MA_KEEP:-0}" = 1 ] || rm -rf "$OUTDIR/sb-base-$test"
   return 0
 }
@@ -352,16 +439,17 @@ while IFS='|' read -r id lane test marker mutfn failmark; do
   [ -n "${id:-}" ] || continue
   total=$((total+1))
   v=$(cat "$OUTDIR/$id.verdict" 2>/dev/null || echo NO-VERDICT)
+  [ "$(cat "$OUTDIR/base-$test.rc" 2>/dev/null)" = 0 ] || v="BASE-RED"
   if [ "$lane" = new ]; then
     grep -F "$marker" "$OUTDIR/base-$test.log" >/dev/null 2>&1 && v="MARKER-PREEXISTS"
   elif [ -n "$failmark" ]; then
     grep -F "$failmark" "$OUTDIR/base-$test.log" >/dev/null 2>&1 && v="FAILMARK-PREEXISTS"
   else
-    grep -F "$marker" "$OUTDIR/base-$test.log" 2>/dev/null | grep -q 'PASS' || v="NO-BASELINE"
+    [ "$(grep -F -- "$marker" "$OUTDIR/base-$test.log" 2>/dev/null | grep -c 'PASS')" -gt 0 ] || v="NO-BASELINE"
   fi
   case "$v" in CAUGHT|CLEAN) ;; *) bad=$((bad+1));; esac
   printf '%-5s %-7s %-30s %-15s %s\n' "$id" "$lane" "$test" "$v" "$marker"
-  case "$v" in CAUGHT|FALSE-POSITIVE)
+  case "$v" in CAUGHT|FALSE-POSITIVE|RED-ELSEWHERE)
     head -2 "$OUTDIR/$id.why" 2>/dev/null | sed 's/^/      -> /';;
   esac
 done <<< "$rows"

@@ -26,19 +26,7 @@ pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
 
-# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
-# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
-# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
-# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
-# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
-# source in this suite (94 §10 sweeps for it).
-# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
-# call site left the `--` in place, so the pattern became "--" and the guard
-# matched every long option in the file — PASS, guarding nothing. Measured
-# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
-# round). The `--` below is what protects a pattern that starts with a dash.
-grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
-grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
+. "$TESTS/lib-harness.sh"   # grepq/grepqe + rtm_strip_comments: one definition (tests/lib-harness.sh)
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
 hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 ff () { ffmpeg -nostdin -y -v error "$@"; }
@@ -174,7 +162,7 @@ for s in "$SC"/*.sh; do
   # G18b). Measured on this tree: every entry point either carries a real `.`
   # source line for lib-probe.sh or exports LC_ALL=C itself (auto/doctor/
   # playable-check/waiver take the second road), so no transitive hop is owed.
-  code=$(sed 's/#.*//' "$s")
+  code=$(rtm_strip_comments "$s")
   printf '%s\n' "$code" | grepqe '^[[:space:]]*\.[[:space:]].*lib-probe\.sh' \
     || printf '%s\n' "$code" | grepq 'export LC_ALL=C' || a3_bad="$a3_bad $b"
 done

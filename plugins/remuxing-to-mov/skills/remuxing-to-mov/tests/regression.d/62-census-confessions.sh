@@ -42,6 +42,7 @@ ff () { ffmpeg -nostdin -hide_banner -loglevel error "$@"; }
 pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
+. "$TESTS/lib-harness.sh"   # grepq/grepqe + rtm_strip_comments: one definition (tests/lib-harness.sh)
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
 hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 
@@ -171,7 +172,7 @@ echo "== 5. 2.4 pairfill's loop terminus names the derive rung =="
 g=$(grep -c "derive-dts.sh, Rung 3-DERIVE" "$SC/pairfill-paff.sh" || true)
 [ "${g:-0}" -ge 1 ] && ok "PP_MAXRUN refusal names scripts/derive-dts.sh (Rung 3-DERIVE)" \
   || no "PP_MAXRUN refusal does not name the derive rung"
-g=$(sed 's/#.*//' "$SC/pairfill-paff.sh" | grep -c "Diagnose by hand" || true)
+g=$(rtm_strip_comments "$SC/pairfill-paff.sh" | grep -c "Diagnose by hand" || true)
 [ "${g:-0}" -eq 0 ] && ok "the dead-end 'Diagnose by hand' terminus is gone from the code" \
   || no "'Diagnose by hand' still in pairfill-paff.sh"
 

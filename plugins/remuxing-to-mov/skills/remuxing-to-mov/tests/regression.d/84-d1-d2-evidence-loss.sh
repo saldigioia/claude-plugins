@@ -34,19 +34,7 @@ pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
 
-# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
-# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
-# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
-# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
-# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
-# source in this suite (94 §10 sweeps for it).
-# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
-# call site left the `--` in place, so the pattern became "--" and the guard
-# matched every long option in the file — PASS, guarding nothing. Measured
-# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
-# round). The `--` below is what protects a pattern that starts with a dash.
-grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
-grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
+. "$TESTS/lib-harness.sh"   # grepq/grepqe + rtm_strip_comments: one definition (tests/lib-harness.sh)
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
 hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 ff () { ffmpeg -nostdin -hide_banner -loglevel error "$@"; }
@@ -102,33 +90,50 @@ REAL_MKTEMP="$(command -v mktemp)"
 SCRATCH="$WORK/scratch"; mkdir -p "$SCRATCH"
 cat > "$WORK/shim/mktemp" <<EOF
 #!/bin/bash
-# intercept ONLY the bare \`mktemp -d\` form this leak is about; anything
-# carrying its own template passes through untouched.
-case "\$*" in
-  "-d") exec "$REAL_MKTEMP" -d "$SCRATCH/tmp.XXXXXXXXXX";;
-esac
+# every -d call that names no path (bare, or -t NAME — the template only NAMES
+# the dir) is forced into the test-owned scratch; a path template is the
+# caller's own jurisdiction and passes through. Each interception is LOGGED:
+# the watch below asserts the shim fired, so a scratch call that changes form
+# turns this test red instead of leaving the leak watch silently vacuous
+# (measured: \`mktemp -d -t x\` slipped past an exact "-d" match, the watch
+# found nothing in an empty dir, and "no mktemp leak" PASSed over a real leak).
+d=0; p=0
+for a in "\$@"; do case "\$a" in -d) d=1;; /*) p=1;; esac; done
+if [ "\$d" = 1 ] && [ "\$p" = 0 ]; then
+  printf '%s\n' "\$*" >> "$WORK/mktemp.calls"
+  exec "$REAL_MKTEMP" -d "$SCRATCH/tmp.XXXXXXXXXX"
+fi
 exec "$REAL_MKTEMP" "\$@"
 EOF
 chmod +x "$WORK/shim/mktemp"
 # a FOREIGN scratch dir, created in the shared temp dir during the window —
 # stands in for the concurrent build that tripped the old watch.
+# TD is read by nothing below any more — it stays ONLY as the negative control
+# CONSTITUTION V.2 names for 94 §3 (point the watch at $TD and §3 must go red).
 TD="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"; TD="${TD:-${TMPDIR:-/tmp}}"
 FOREIGN="$("$REAL_MKTEMP" -d)"; : > "$FOREIGN/s"
+trap 'rm -rf "$WORK" "$FOREIGN"' EXIT   # ours to remove on every exit path, not only the happy one
 o=$(PATH="$WORK/shim:$PATH" bash "$SC/verify.sh" "$S" "$CP" --full 2>&1); rc=$?
 has "$o" "FAILED mid-stream" "the mid-decode failure is DIAGNOSED (pre-fix: silent exit 1)"
 has "$o" "INCONCLUSIVE" "the check calls itself inconclusive — UNPROVEN, not FAILED"
 has "$o" ">> REVIEW" "a verdict line closes the run (pre-fix: none)"
 [ "$rc" -eq 0 ] && ok "REVIEW-side exit 0 (never a bare FAIL off a broken ruler)" || no "rc=$rc"
+# jurisdiction, proven not assumed: the watch is only as good as the shim's
+# reach, and an empty $SCRATCH is what BOTH "no leak" and "never intercepted"
+# look like
+nfired=$(grep -c . "$WORK/mktemp.calls" 2>/dev/null || true)
+[ "${nfired:-0}" -gt 0 ] && ok "the mktemp shim fired ($nfired scratch call(s)) — the leak watch has jurisdiction, not just an empty dir" \
+  || no "the mktemp shim never fired: verify.sh's scratch call changed form and the leak watch below is vacuous"
 leaked=$(find "$SCRATCH" -maxdepth 2 -type f -name s 2>/dev/null | head -1)
 [ -z "$leaked" ] && ok "no mktemp leak (pre-fix: ~40 MB of framemd5 lists per occurrence)" \
   || { no "leaked hlist scratch survives: $leaked"; rm -rf "$(dirname "$leaked")"; }
-# jurisdiction: the watch must ignore — and must NOT delete — scratch that is
-# not this run's. Both halves matter; the second is the one that could have
-# corrupted a live build.
-case "$leaked" in "$FOREIGN"*) no "the watch reached outside its own scratch";; *) ok "foreign scratch not mistaken for this run's leak";; esac
+# jurisdiction: the code under test must NOT delete scratch that is not this
+# run's — the half that could have corrupted a live build. (The other half,
+# "the watch does not look outside $SCRATCH", is true by construction of the
+# find above — a `case "$leaked" in "$FOREIGN"*` pin on it could never fail
+# and was removed.)
 [ -d "$FOREIGN" ] && ok "foreign scratch left intact (never rm -rf what you do not own)" \
-  || no "the leak watch DELETED a directory it did not own: $FOREIGN"
-rm -rf "$FOREIGN"
+  || no "the run DELETED a directory it did not own: $FOREIGN"
 # control: unshimmed --full on the same pair still settles green
 o=$(bash "$SC/verify.sh" "$S" "$CP" --full 2>&1); rc=$?
 { [ "$rc" -eq 0 ] && case "$o" in *">> OK"*) true;; *) false;; esac; } \
@@ -152,8 +157,16 @@ grep -q '^RTM_CONFESSION_RE=' "$SC/lib-paff.sh" \
   && ok "the confession vocabulary is defined once, in lib-paff.sh" \
   || no "RTM_CONFESSION_RE is not defined in lib-paff.sh"
 for _fn in mux_confessions mux_confessions_scoped; do
-  sed -n "/^$_fn *() *{/,/^}/p" "$SC/lib-paff.sh" | grepq 'RTM_CONFESSION_RE' \
-    && ok "$_fn reads the shared vocabulary" || no "$_fn carries a private copy again"
+  # the grep's PATTERN ARGUMENT must be exactly the shared token: a bare
+  # token-presence read passed an appended alternation
+  # ("$RTM_CONFESSION_RE|dts discontinuity") and a re-inlined literal with a
+  # comment naming the variable — the drift A4 exists to catch (measured
+  # 2026-08-28; mutation-audit cases G31/P31).
+  _pat=$(sed -n "/^$_fn *() *{/,/^}/p" "$SC/lib-paff.sh" | rtm_strip_comments \
+         | sed -n 's/.*grep -c\{0,1\}iE \("[^"]*"\).*/\1/p' | head -1)
+  [ "$_pat" = '"$RTM_CONFESSION_RE"' ] \
+    && ok "$_fn reads the shared vocabulary, and nothing else" \
+    || no "$_fn carries a private copy or a widened pattern (grep argument: ${_pat:-<none>})"
 done
 printf '[mov @ 0x1] Non-monotonous DTS in output stream 0:0; previous 5, current 3\n[mov @ 0x1] non monotonically increasing dts to muxer in stream 0\n' > "$WORK/44.log"
 [ "$(mux_confessions "$WORK/44.log")" -eq 2 ] \

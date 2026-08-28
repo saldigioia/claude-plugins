@@ -135,5 +135,7 @@ done
 echo ">> DONE: derivative written + provenance stamped. This file must never be"
 echo "   presented as a master; the lossless original remains the archival copy."
 # REVIEW propagation (1.14): an unexpected-surplus census still blesses the
-# complete derivative and exits 10 ("look"), never 1.
-exit "${census_rc:-0}"
+# complete derivative and exits 10 ("look"), never 1. ASKED of the one writer,
+# then mapped (1.15.18) — never the raw rc as the exit.
+if rtm_census_review "${census_rc:-0}"; then exit 10; fi
+exit 0

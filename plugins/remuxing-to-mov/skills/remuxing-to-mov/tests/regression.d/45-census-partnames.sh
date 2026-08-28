@@ -33,6 +33,7 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
+. "$TESTS/lib-harness.sh"   # grepq/grepqe + rtm_strip_comments: one definition (tests/lib-harness.sh)
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
 hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 
@@ -73,7 +74,7 @@ nomatch () {  # nomatch FILE PATTERN DESC — the old shape must be gone from th
               # replaced ("this was \$1.premeta"), and a doc line is not a defect.
               # grep -c prints 0 AND exits 1 on no match, so read the count, never
               # the exit status (the `|| echo 0` trap: it appends a second 0).
-  local n; n=$(sed 's/#.*//' "$SC/$1" 2>/dev/null | grep -c -- "$2"); n=${n:-0}
+  local n; n=$(rtm_strip_comments "$SC/$1" 2>/dev/null | grep -c -- "$2"); n=${n:-0}
   [ "$n" -eq 0 ] && ok "$3" || no "$3 [$n occurrence(s) of the old shape remain in $1]"
 }
 for f in remux.sh dual-track.sh resync.sh metadata.sh rebuild-paff.sh pairfill-paff.sh rung4.sh trim-to-idr.sh qt-groups.sh; do

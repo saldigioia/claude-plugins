@@ -31,19 +31,7 @@ pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
 
-# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
-# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
-# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
-# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
-# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
-# source in this suite (94 §10 sweeps for it).
-# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
-# call site left the `--` in place, so the pattern became "--" and the guard
-# matched every long option in the file — PASS, guarding nothing. Measured
-# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
-# round). The `--` below is what protects a pattern that starts with a dash.
-grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
-grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
+. "$TESTS/lib-harness.sh"   # grepq/grepqe + rtm_strip_comments: one definition (tests/lib-harness.sh)
 
 echo "== 1. quoting: every script parses (catches the apostrophe-in-awk trap) =="
 # A ' inside a single-quoted awk program silently ends the shell string and the
@@ -67,7 +55,7 @@ for f in "$SC"/*.sh; do
   # comments stripped FIRST: the pattern is also how the idiom is DESCRIBED in
   # prose, so an un-stripped grep is satisfied by a comment mentioning it —
   # measured vacuous, caught by mutation test.
-  code=$(sed 's/#.*//' "$f")
+  code=$(rtm_strip_comments "$f")
   printf '%s\n' "$code" | grepq '[A-Za-z_]\[n\]=' || continue
   printf '%s\n' "$code" | grepq 'n++' || continue
   printf '%s\n' "$code" | grepq 'BEGIN{ *n=0' || sub_bad="$sub_bad $(basename "$f")"
@@ -92,7 +80,7 @@ scan_bad=""
 for f in "$SC"/*.sh "$TESTS"/regression.d/*.sh; do
   [ -f "$f" ] || continue
   case "$(basename "$f")" in 94-rot-sweep.sh) continue;; esac
-  sed 's/#.*//' "$f" | grepqe 'find +"?\$(TD|TMPDIR)|find +"?\$\{?(TD|TMPDIR)|DARWIN_USER_TEMP_DIR[^)]*\)?"?[^=]*$|find +/tmp|find +"?\$HOME' \
+  rtm_strip_comments "$f" | grepqe 'find +"?\$(TD|TMPDIR)|find +"?\$\{?(TD|TMPDIR)|DARWIN_USER_TEMP_DIR[^)]*\)?"?[^=]*$|find +/tmp|find +"?\$HOME' \
     && scan_bad="$scan_bad $(basename "$f")"
 done
 [ -z "$scan_bad" ] && ok "nothing scans shared temp ground for files it did not write" \
@@ -112,7 +100,7 @@ for f in "$SC"/*.sh; do
   case "$(basename "$f")" in lib-mux.sh) continue;; esac   # the writer itself
   # comment-stripped: a builder may legitimately DESCRIBE the contract in prose,
   # and a detector satisfied (or tripped) by prose guards nothing.
-  code=$(sed 's/#.*//' "$f")
+  code=$(rtm_strip_comments "$f")
   printf '%s\n' "$code" | grepq 'census_rc' || continue
   n_cen=$((n_cen+1))
   printf '%s\n' "$code" | grepq 'rtm_census_failed' || cen_bad="$cen_bad $(basename "$f")"
@@ -120,25 +108,42 @@ for f in "$SC"/*.sh; do
 done
 [ -z "$cen_bad" ] && ok "all $n_cen census_rc consumers ask the one writer (rtm_census_failed)" \
   || no "census_rc consumers off the shared writer:$cen_bad"
-for fn in rtm_census_failed rtm_census_review; do
-  defs=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -c "^$fn *() *{")
-  [ "$defs" = 1 ] && ok "$fn is defined exactly once" \
-    || no "$fn has $defs definitions — the contract has been copied again"
+# …and the verdict is a PREDICATE, never the exit itself. A builder that ends in
+# `exit "$census_rc"` hands the raw census rc to the operator — and the day
+# rtm_census_failed widens (the one-site edit the writer exists for), that
+# builder exits an unmapped code AFTER it mv'd the blessed output, while the
+# builders that ask (exit 10 on review, else 0) stay in contract. Three did
+# (trim-to-idr, rung4, rebuild-paff — 1.15.18); the loop above could not see
+# it, because each still called rtm_census_failed on the way.
+raw_exit=""
+for f in "$SC"/*.sh; do
+  rtm_strip_comments "$f" | grepqe '^[[:space:]]*exit "?\$\{?census_rc' && raw_exit="$raw_exit $(basename "$f")"
 done
+[ -z "$raw_exit" ] && ok "no builder exits with the raw census rc (the verdict is asked, then mapped to 0/10)" \
+  || no "builders exiting the raw census rc (unmapped the day the writer widens):$raw_exit"
+# (the two predicates' single-definition pins live in §5's roster below — one
+# definition-count loop, not three)
 
 echo
 echo "== 5. no NEW duplicate of a shared-writer fact =="
 # Facts that have been given a single home must not sprout a second copy. Add
 # a line here whenever a fact is centralized; that is the cost of centralizing.
 for pair in "rtm_aud_manifest:lib-probe.sh:the audio manifest" \
+            "rtm_census_failed:lib-mux.sh:the census failed-verdict" \
+            "rtm_census_review:lib-mux.sh:the census review-verdict" \
             "rtm_disk_preflight:lib-mux.sh:the disk pre-flight" \
             "rtm_lock:lib-mux.sh:the writer lock"; do
   fn="${pair%%:*}"; rest="${pair#*:}"; home="${rest%%:*}"; what="${rest#*:}"
   # count DEFINITIONS, not files: grep -l would miss a second copy pasted into
   # the same file (measured vacuous, caught by mutation test).
-  defs=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -c "^$fn *() *{")
+  defs=$(cat "$SC"/*.sh 2>/dev/null | rtm_strip_comments | grep -c "^$fn *() *{")
   [ "$defs" = 1 ] && ok "$what is defined exactly once ($fn)" \
     || no "$what has $defs definitions — a shared writer has been copied"
+  # …and in its HOME: one definition relocated to another lib is still "one",
+  # while every builder that sources only the home dies on command-not-found
+  rtm_strip_comments "$SC/$home" | grepq "^$fn *() *{" \
+    && ok "…and it lives in $home" \
+    || no "$fn is not defined in $home — relocated; the builders that source only $home lose it"
 done
 
 echo
@@ -155,7 +160,7 @@ echo "== 6. errexit is never left disarmed (1.15.17) =="
 #     in prose, and an un-stripped reader opens a region on a comment.
 ee_bad=""
 for f in "$SC"/*.sh; do
-  hit=$(sed 's/#.*//' "$f" | awk '
+  hit=$(rtm_strip_comments "$f" | awk '
     { line=$0
       while (match(line, /set [+-]e/)) {
         tok=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH)
@@ -178,13 +183,13 @@ echo "== 7. one vocabulary for the muxer's confessions (1.15.17) =="
 # pinned only the first two. 1.14 had already broadened one copy and left the
 # other narrow (CHECKUP-2026-08-27 A4); the three unpinned ones could drift the
 # same way unseen. One definition now; this pins that there is still only one.
-vdefs=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -c '^RTM_CONFESSION_RE=')
+vdefs=$(cat "$SC"/*.sh 2>/dev/null | rtm_strip_comments | grep -c '^RTM_CONFESSION_RE=')
 [ "$vdefs" = 1 ] && ok "RTM_CONFESSION_RE is defined exactly once" \
   || no "RTM_CONFESSION_RE has $vdefs definitions"
-lits=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -c 'non monotonically increasing dts')
+lits=$(cat "$SC"/*.sh 2>/dev/null | rtm_strip_comments | grep -c 'non monotonically increasing dts')
 [ "$lits" = 1 ] && ok "no literal copy of the vocabulary survives outside the definition" \
   || no "$lits literal copies of the confession vocabulary in scripts/ (want 1: the definition)"
-users=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -c 'RTM_CONFESSION_RE')
+users=$(cat "$SC"/*.sh 2>/dev/null | rtm_strip_comments | grep -c 'RTM_CONFESSION_RE')
 [ "${users:-0}" -ge 6 ] && ok "…and $users sites reference it (the definition + the five former copies)" \
   || no "only $users references to RTM_CONFESSION_RE — a consumer stopped asking"
 
@@ -197,8 +202,12 @@ echo "== 8. one QuickTime-native audio table, held in lockstep (1.15.17) =="
 # held in step instead. E-AC-3's membership has drifted before — 1.15.9 F7 found
 # the dual-track REFERENCE PAGE still calling it a dual-track class rounds after
 # the code classified it native.
-arms=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -oE '[A-Za-z0-9_*|]*aac\|alac[A-Za-z0-9_*|]*' | sort -u)
-n_arms=$(cat "$SC"/*.sh 2>/dev/null | sed 's/#.*//' | grep -cE '[A-Za-z0-9_*|]*aac\|alac[A-Za-z0-9_*|]*')
+# one pass: `hits` is every arm as MATCHED (-o), so the site count and the
+# distinct-arm set come from the same list (a -c count read LINES, which
+# undercounts a line carrying two arms)
+hits=$(cat "$SC"/*.sh 2>/dev/null | rtm_strip_comments | grep -oE '[A-Za-z0-9_*|]*aac\|alac[A-Za-z0-9_*|]*')
+arms=$(printf '%s\n' "$hits" | sort -u)
+n_arms=$(printf '%s\n' "$hits" | grep -c .)
 { [ "$(printf '%s\n' "$arms" | grep -c .)" = 1 ] && [ "${n_arms:-0}" -ge 4 ]; } \
   && ok "all $n_arms QuickTime-native audio arms are identical [$arms]" \
   || no "the native-audio table has drifted across $n_arms site(s): $(printf '%s' "$arms" | tr '\n' ' ')"
@@ -219,7 +228,7 @@ echo "== 9. no local statement reads a name it declares in the SAME statement (1
 loc_bad=""
 for f in "$SC"/*.sh "$TESTS"/regression.d/*.sh "$TESTS"/*.sh; do
   [ -f "$f" ] || continue
-  hit=$(sed 's/#.*//' "$f" | awk '
+  hit=$(rtm_strip_comments "$f" | awk '
     function refs(val, name,   p, c) {
       p = index(val, "$" name)
       if (p > 0) { c = substr(val, p + length(name) + 1, 1); if (c !~ /[A-Za-z0-9_]/) return 1 }
@@ -277,7 +286,7 @@ sig_bad=""
 for f in "$TESTS"/regression.d/*.sh "$TESTS"/*.sh; do
   [ -f "$f" ] || continue
   case "$(basename "$f")" in 94-rot-sweep.sh|mutation-audit.sh) continue;; esac
-  n=$(sed 's/#.*//' "$f" | grep -cE '(sed|printf|cat)[^|]*\| *grep -q')
+  n=$(rtm_strip_comments "$f" | grep -cE '(sed|printf|cat)[^|]*\| *grep -q')
   [ "${n:-0}" -eq 0 ] || sig_bad="$sig_bad $(basename "$f"):$n"
 done
 [ -z "$sig_bad" ] && ok "no source-scanning pipeline in the suite ends in an early-exit grep -q" \

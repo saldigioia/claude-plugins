@@ -187,5 +187,7 @@ echo "wrote: $OUT"
 echo "verify with: scripts/verify.sh \"$IN\" \"$OUT\""
 echo "if verify passes, remove intermediates by hand: rm -rf \"$WORK\""
 # REVIEW propagation (1.14): an unexpected-surplus census blesses the complete
-# artifact and exits 10 ("look"), never 1 — nothing planned is missing.
-exit "$census_rc"
+# artifact and exits 10 ("look"), never 1 — nothing planned is missing. ASKED
+# of the one writer, then mapped (1.15.18) — never the raw rc as the exit.
+if rtm_census_review "$census_rc"; then exit 10; fi
+exit 0

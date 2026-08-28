@@ -35,19 +35,7 @@ pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
 
-# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
-# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
-# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
-# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
-# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
-# source in this suite (94 §10 sweeps for it).
-# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
-# call site left the `--` in place, so the pattern became "--" and the guard
-# matched every long option in the file — PASS, guarding nothing. Measured
-# 2026-08-28 (mutation-audit case G21, the third self-inflicted vacuity this
-# round). The `--` below is what protects a pattern that starts with a dash.
-grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
-grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }
+. "$TESTS/lib-harness.sh"   # grepq/grepqe + rtm_strip_comments: one definition (tests/lib-harness.sh)
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
 hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 ff () { ffmpeg -nostdin -hide_banner -loglevel error "$@"; }
@@ -85,13 +73,16 @@ echo "== 2. pair-timestamped PAFF: no ready-to-run command, refusal named =="
 c1=$(PF_PKT_FILE="$WORK/pair.csv" bash "$SC/clean.sh" "$S" 2>&1)
 hasnt "$c1" "$READY" "pair-timestamped PAFF gets NO ready-to-run zero-base command"
 case "$(routes_of "$c1")" in *zero-base*) no "routes= still advertises zero-base [$(routes_of "$c1")]";; *) ok "routes= does not advertise zero-base";; esac
-has "$c1" "paff" "the finding names the PAFF profile it measured"
+# pinned on zero-base's OWN refusal text, relayed: the bare substring `paff` is
+# printed by clean.sh's step-1 identity line on every run and pinned nothing
+has "$c1" "pair-timestamped PAFF source" "the finding relays the pair-timestamped refusal in zero-base's words"
 has "$c1" "pairfill-paff.sh" "…and names the route that actually accepts this file"
 
 echo
 echo "== 3. full-timestamp PAFF (the F1 policy arm) is gated too =="
 c2=$(PF_PKT_FILE="$WORK/full2x.csv" bash "$SC/clean.sh" "$S" 2>&1)
 hasnt "$c2" "$READY" "full-TS PAFF gets NO ready-to-run zero-base command"
+has "$c2" "COMPLETE timestamp column" "the finding relays the F1 policy refusal in zero-base's words"
 case "$(routes_of "$c2")" in *zero-base*) no "routes= still advertises zero-base [$(routes_of "$c2")]";; *) ok "routes= does not advertise zero-base";; esac
 
 echo
@@ -99,9 +90,10 @@ echo "== 4. THE INVARIANT: EVERY printed Tier-1 command must not refuse at pre-f
 # Generalizes B1 / F12 / the PAFF defect. 1.15.17 widens it from the ZERO-BASE
 # instance to the CLASS: the clinic's own verdict line promises "Tier-1 commands
 # are ready to run", and it prints THREE of them (zero-base, trim-to-idr, and
-# lead-check's surgical-cut at Tier 2). Only the zero-base route was asked of its
-# authority (1.15.13's --preflight-only); the invariant below is what closes the
-# others without the clinic learning about them one axis at a time. The routes
+# lead-check's surgical-cut at Tier 2). zero-base (1.15.13) and trim-to-idr
+# (1.15.18) are each ASKED with --preflight-only; Tier 2 stays outside the
+# invariant (consent-gated — never "ready to run"). The invariant below is what
+# catches a Tier-1 tool nobody has asked yet, the day it lands. The routes
 # are read out of the clinic's OWN output, so a Tier-1 route added later joins
 # this invariant the day it lands.
 # midgop rides late-sps.ts, the house mid-GOP fixture: without it the trim-to-idr
@@ -110,22 +102,32 @@ echo "== 4. THE INVARIANT: EVERY printed Tier-1 command must not refuse at pre-f
 i=0; offered=0
 for spec in "none:$S:" "pair:$S:$WORK/pair.csv" "full2x:$S:$WORK/full2x.csv" "midgop:$FIX/late-sps.ts:"; do
   prof="${spec%%:*}"; rest="${spec#*:}"; src="${rest%%:*}"; env_file="${rest#*:}"
-  [ -f "$src" ] || { ok "profile=$prof: source not available on this bench, skipped"; continue; }
+  [ -f "$src" ] || { echo "   (SKIP: profile=$prof — source not available on this bench)"; continue; }
   i=$((i+1))
-  if [ -n "$env_file" ]; then c=$(PF_PKT_FILE="$env_file" bash "$SC/clean.sh" "$src" 2>&1)
-  else c=$(bash "$SC/clean.sh" "$src" 2>&1); fi
+  # none/pair/full2x are the runs §1-§3 already took (same source, same
+  # injection): reuse them — only midgop is new here. PF_PKT_FILE="" is unset
+  # to lib-paff (`[ -n "${PF_PKT_FILE:-}" ]`), so one form covers both.
+  case "$prof" in
+    none)   c=$c0;;
+    pair)   c=$c1;;
+    full2x) c=$c2;;
+    *)      c=$(PF_PKT_FILE="$env_file" bash "$SC/clean.sh" "$src" 2>&1);;
+  esac
   tools=$(printf '%s\n' "$c" | sed -n 's|.*TIER 1 (structural): scripts/\([a-z0-9-]*\)\.sh.*|\1|p' | sort -u)
   if [ -z "$tools" ]; then ok "profile=$prof: clinic offered no Tier-1 route (nothing to contradict)"; continue; fi
   for tool in $tools; do
     offered=$((offered+1))
-    if [ -n "$env_file" ]; then
-      PF_PKT_FILE="$env_file" bash "$SC/$tool.sh" "$src" "$WORK/inv$i-$tool.ts" >/dev/null 2>&1; zrc=$?
-    else
-      bash "$SC/$tool.sh" "$src" "$WORK/inv$i-$tool.ts" >/dev/null 2>&1; zrc=$?
-    fi
-    [ "$zrc" -ne 2 ] \
-      && ok "profile=$prof: clinic offered $tool.sh and it did not refuse at pre-flight (rc=$zrc)" \
-      || no "profile=$prof: clinic offered $tool.sh, which refuses at pre-flight (rc=2) — the F12 class"
+    PF_PKT_FILE="$env_file" bash "$SC/$tool.sh" "$src" "$WORK/inv$i-$tool.ts" >/dev/null 2>&1; zrc=$?
+    # "ready to run" promises a BLESSED build (0, or 10 = REVIEW) — not merely
+    # "not refused". A route that clears pre-flight and then FAILS its own
+    # verification (rc=1) built to a foregone verdict: measured 2026-08-28 on
+    # midgop, where zero-base was offered, built, and died at verify-source
+    # (v_drop=102) while this section read `rc != 2` as PASS.
+    case "$zrc" in
+      0|10) ok "profile=$prof: clinic offered $tool.sh and it ran to a blessed build (rc=$zrc)";;
+      2)    no "profile=$prof: clinic offered $tool.sh, which refuses at pre-flight (rc=2) — the F12 class";;
+      *)    no "profile=$prof: clinic offered $tool.sh, which built to a foregone failure (rc=$zrc) — never build to a foregone refusal";;
+    esac
   done
 done
 [ "$offered" -ge 2 ] && ok "the invariant judged $offered offered route(s) across the profiles (not vacuous)" \
@@ -143,10 +145,20 @@ echo "== 5. structure: the clinic ASKS zero-base, it does not model it =="
 # CODE broken — measured MISSED 2026-08-28 (tests/mutation-audit.sh case G21,
 # which replaces the flag on the zero-base CALL only and leaves the prose) and
 # FALSE-POSITIVE (case P22, a comment naming NPROG).
-CL=$(sed 's/#.*//' "$SC/clean.sh")
-printf '%s\n' "$CL" | grepq '--preflight-only' \
+CL=$(rtm_strip_comments "$SC/clean.sh")
+# pinned by the CALL shape (`zero-base.sh" … --preflight-only`), not the bare
+# flag: clean.sh's own UNPROVEN finding names the flag inside a message string,
+# and a bare-flag read stayed PASS with the call mutated (mutation-audit G21,
+# measured MISSED 2026-08-28 against the first draft of that message).
+printf '%s\n' "$CL" | grepqe 'zero-base\.sh" .*--preflight-only' \
   && ok "clean.sh asks zero-base for its own verdict (--preflight-only)" \
   || no "clean.sh does not ask zero-base — it is modelling the conditions again"
+# the other Tier-1 authority, asked the same way (1.15.18): before this the
+# trim route was printed off the ts-health counter alone, and §4 measured it
+# FAIL (rc=1) on a head trim-to-idr refuses
+printf '%s\n' "$CL" | grepqe 'trim-to-idr\.sh" .*--preflight-only' \
+  && ok "clean.sh asks trim-to-idr for its own verdict (--preflight-only)" \
+  || no "clean.sh prints the trim-to-idr route off the ts-health counter alone — modelling the tool again"
 printf '%s\n' "$CL" | grepq '--src-tsh' \
   && ok "…and hands over the scan it already took (no duplicate whole-file pass)" \
   || no "clean.sh re-scans instead of passing --src-tsh"
@@ -176,6 +188,24 @@ if [ -f "$P2" ]; then
     || ok "clean.sh holds NO multi-program code — the axis closed without it"
 else
   no "could not mint the 2-program fixture"
+fi
+
+echo
+echo "== 7. the trim-to-idr ask has teeth: a head the tool refuses is never offered =="
+# RTM_IDR_WINDOW=1 makes trim-to-idr's own scan see ONE video packet — not a
+# keyframe on the mid-GOP fixture — so IT refuses (no lossless trim target in
+# reach). ts-health's counter still reads prekey>0: before the ask the clinic
+# printed the route ready-to-run off that counter, and the tool FAILed on it.
+if [ -f "$FIX/late-sps.ts" ]; then
+  c4=$(RTM_IDR_WINDOW=1 bash "$SC/clean.sh" "$FIX/late-sps.ts" 2>&1)
+  hasnt "$c4" "TIER 1 (structural): scripts/trim-to-idr.sh" "a head trim-to-idr refuses gets NO ready-to-run trim command"
+  has "$c4" "no keyframe in the first" "…and the finding relays trim-to-idr's refusal in its own words"
+  case "$(routes_of "$c4")" in *trim-to-idr*) no "routes= still advertises trim-to-idr [$(routes_of "$c4")]";; *) ok "routes= does not advertise trim-to-idr";; esac
+  # control: at the default window the same head IS offered (§4 ran it to a blessed build)
+  c5=$(bash "$SC/clean.sh" "$FIX/late-sps.ts" 2>&1)
+  has "$c5" "TIER 1 (structural): scripts/trim-to-idr.sh" "control: at the default window the same head is offered ready-to-run"
+else
+  echo "   (SKIP: late-sps.ts not available — §7 needs the mid-GOP fixture)"
 fi
 
 echo

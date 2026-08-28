@@ -109,29 +109,48 @@ fi
 # the field. Enumeration cannot close: the sources supply axes faster than a
 # guard can list them.
 # zero-base now answers for itself. --preflight-only runs ITS OWN refusal
-# logic, writes nothing, and exits 0 eligible / 2 refused; --src-tsh hands it
-# the whole-file scan already taken in step 2, so asking costs no re-scan.
-# Offering a route that refuses is now structurally impossible — on every
-# axis, including ones nobody has met yet.
-set +e
-ZB_PF=$(bash "$SELF_DIR/zero-base.sh" "$IN" --preflight-only --src-tsh "$TMP/tsh" 2>&1); ZB_RC=$?
-set -e
+# logic, writes nothing, and exits 0 eligible / 2 refused (anything else: it
+# could not RUN, which is UNPROVEN, not a refusal); --src-tsh hands it the
+# whole-file scan already taken in step 2, so asking costs no re-scan.
+# Offering a route that refuses on the SOURCE's shape is now structurally
+# impossible — on every axis, including ones nobody has met yet; 1.15.18 asks
+# the other Tier-1 authority (trim-to-idr) the same way. Build-time conditions
+# — the writer lock, disk headroom — belong to the run and are judged then;
+# the verdict line says so.
 if [ "$(tget TSH_VIDEO)" = none ]; then
   finding scope "no video stream — the clinic's video-domain routes do not apply (ts-health scoped its scan the same way)" \
     "audio-only capture: extract/remux the audio directly (ffmpeg -map 0:a -c copy); zero-base/verify-source require video by design"
 fi
 if awk "BEGIN{exit !(($ST) > 0.05)}"; then
+  # asked HERE, not unconditionally: this branch is the verdict's only reader,
+  # and the pre-flight re-runs pf_detect plus three header opens (~3 s on a
+  # field master) that a zero-based or non-TS source would pay for nothing.
+  set +e
+  # stderr only: zero-base speaks its refusals there; its stdout is progress
+  # (stage banners, the --src-tsh reuse line naming THIS clinic's private temp
+  # dir) and relaying that put a soon-deleted path in the operator's report.
+  ZB_PF=$(bash "$SELF_DIR/zero-base.sh" "$IN" --preflight-only --src-tsh "$TMP/tsh" 2>&1 >/dev/null); ZB_RC=$?
+  set -e
   if [ "$ZB_RC" -eq 0 ]; then
     finding timeline "timeline starts at ${ST}s, not zero (players rebase it; tools and clocks read it)" \
       "TIER 1 (structural): scripts/zero-base.sh \"$IN\" OUT.ts — lossless re-wrap to the floor, PID layout kept, prediction-gated"
     route zero-base
-  else
+  elif [ "$ZB_RC" -eq 2 ]; then
     # Relay, do not paraphrase: the refusal text is zero-base's, so this
     # driver holds no copy of the reasoning that can drift out of date. The
     # routes named below are the ones zero-base itself named.
     finding timeline "timeline starts at ${ST}s, not zero" \
       "NOT a zero-base job — zero-base.sh refuses this source at pre-flight, in its own words:"
-    printf '%s\n' "$ZB_PF" | grep -v '^== zero-base' | sed 's/^/             /'
+    # display only, so `|| true`: a display pipeline that fails under pipefail
+    # killed the clinic here with exit 1 (= DAMAGED) and no CLEAN_SUMMARY row.
+    printf '%s\n' "$ZB_PF" | sed 's/^/             /' || true
+  else
+    # rc 1 or a stray: the pre-flight could not RUN (a broken meter, a probe
+    # that died). That is UNPROVEN, never a refusal to put in zero-base's mouth
+    # — EMPTY != ABSENT. Say so, and relay whatever it managed to print.
+    finding timeline "timeline starts at ${ST}s, not zero" \
+      "UNPROVEN whether zero-base applies — its pre-flight could not run (rc=$ZB_RC); scripts/zero-base.sh \"$IN\" --preflight-only shows why:"
+    printf '%s\n' "$ZB_PF" | sed 's/^/             /' || true
   fi
 elif awk "BEGIN{exit !(($ST) < -0.05)}"; then
   # B4 (WO-1.15.7): the positive direction alone missed the unwrapped-wrap
@@ -140,9 +159,29 @@ elif awk "BEGIN{exit !(($ST) < -0.05)}"; then
     "remux normally — the muxer rebases and verify.sh gate (d) proves the OUTPUT; for a stay-in-TS deliverable, scripts/zero-base.sh floors the timeline (prediction-gated)"
 fi
 if [ "$(tget TSH_PREKEY)" != 0 ]; then
-  finding timeline "capture starts mid-GOP: $(tget TSH_PREKEY) pre-keyframe packet(s) — undecodable pre-roll" \
-    "TIER 1 (structural): scripts/trim-to-idr.sh \"$IN\" OUT.ts — removes only what no player could show"
-  route trim-to-idr
+  # the same ask, of the other Tier-1 authority. The scan window, the
+  # missing-timestamp class and gop-probe's open-GOP verdict are trim-to-idr's
+  # refusals, and this driver used to print the route off the ts-health
+  # counter alone — a ready-to-run command that FAILed on such a head (rc=1,
+  # nothing written). Asked here, not unconditionally: only a pre-key count
+  # reaches it, and the boundary proof (gop-probe) is the decode step.
+  set +e
+  TT_PF=$(bash "$SELF_DIR/trim-to-idr.sh" "$IN" --preflight-only 2>&1 >/dev/null); TT_RC=$?
+  set -e
+  MIDGOP="capture starts mid-GOP: $(tget TSH_PREKEY) pre-keyframe packet(s) — undecodable pre-roll"
+  if [ "$TT_RC" -eq 0 ]; then
+    finding timeline "$MIDGOP" \
+      "TIER 1 (structural): scripts/trim-to-idr.sh \"$IN\" OUT.ts — removes only what no player could show"
+    route trim-to-idr
+  elif [ "$TT_RC" -eq 2 ]; then
+    finding timeline "$MIDGOP" \
+      "NOT a trim-to-idr job — trim-to-idr.sh refuses this source at pre-flight, in its own words:"
+    printf '%s\n' "$TT_PF" | sed 's/^/             /' || true
+  else
+    finding timeline "$MIDGOP" \
+      "UNPROVEN whether trim-to-idr applies — its pre-flight could not run (rc=$TT_RC); scripts/trim-to-idr.sh \"$IN\" --preflight-only shows why:"
+    printf '%s\n' "$TT_PF" | sed 's/^/             /' || true
+  fi
 fi
 if [ "$lcrc" -eq 10 ]; then
   finding head "black lead-in: $(lget black_secs)s of black before program picture (audio_hot=$(lget audio_hot))" \
@@ -171,7 +210,7 @@ elif [ "$findings" -gt 0 ]; then V=findings; rc=10
 else V=clean; rc=0; echo "   none — the capture needs no clinic work (remux ladder territory when a .mov is wanted)"; fi
 case "$V" in
   clean)    echo ">> CLEAN: nothing to correct in the source container.";;
-  findings) echo ">> FINDINGS: $findings item(s) above. Tier-1 commands are ready to run; Tier-2 needs the operator's --discard-content. Nothing was written.";;
+  findings) echo ">> FINDINGS: $findings item(s) above. Tier-1 commands are ready to run (each tool judged the source itself; the writer lock and disk headroom are its run-time checks); Tier-2 needs the operator's --discard-content. Nothing was written.";;
   damaged)  echo ">> DAMAGED: transport-level loss (permanent). The other findings still route what survives.";;
 esac
 echo "CLEAN_SUMMARY verdict=$V findings=$findings routes=${routes:-none} deep=$([ "$DEEP" -eq 1 ] && echo yes || echo no)"

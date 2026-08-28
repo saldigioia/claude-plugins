@@ -63,3 +63,28 @@ run_subsuites () {
   fi
   return 0
 }
+
+# --- shared by the standalone regression.d guards (ONE definition) -------------
+# rtm_strip_comments [FILE...] — source with comments removed, for guards that
+# must read CODE and not prose. A `#` opens a comment only at the start of a
+# line or after whitespace: the bare `s/#.*//` form (pasted at 26 sites) cut
+# code at `${#arr[@]}`, `${x#pat}`, `$#` and ffprobe's `-read_intervals '%+#1'`
+# (20 live sites in scripts/), so 94 §6 cried wolf on a correct one-line
+# `set +e … set -e` region and 91 §5 was blind to a `| head -1` after a
+# first-packet query (both measured 2026-08-28). Not a tokenizer: a
+# whitespace-preceded `#` inside a quoted string is still stripped.
+rtm_strip_comments () { sed -E 's/(^|[[:space:]])#.*$//' "$@"; }
+
+# grepq / grepqe PATTERN — read stdin to EOF, THEN answer. `x | grep -q PAT`
+# closes the pipe on the first match and SIGPIPEs its writer: the same early-exit
+# shape as the 1.15.2 `ffp … | head -1` field defect. Measured 2026-08-28 on
+# verify.sh (95 KB): "printf: write error: Broken pipe", and under pipefail the
+# non-zero pipeline flipped a PASS into a FALSE FAIL. Never `| grep -q` over
+# source in this suite (94 §10 sweeps for it).
+# A leading `--` is SWALLOWED, not searched for: converting a `grep -q -- PAT`
+# call site left the `--` in place, so the pattern became "--" and the guard
+# matched every long option in the file — PASS, guarding nothing. Measured
+# 2026-08-28 (mutation-audit case G21). The `--` below is what protects a
+# pattern that starts with a dash.
+grepq  () { [ "${1:-}" = -- ] && shift; [ "$(grep -c  -- "$1")" -gt 0 ]; }
+grepqe () { [ "${1:-}" = -- ] && shift; [ "$(grep -cE -- "$1")" -gt 0 ]; }

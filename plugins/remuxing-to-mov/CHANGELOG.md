@@ -4,6 +4,113 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.18 — the review round (2026-08-28)
+
+A `/code-review` pass over the 1.15.17 diff returned 15 verified findings
+(26 candidates, 2 refuted). All 15 are fixed here; the two that generalize
+are recorded first, because each is a rule the last round *thought* it had
+already applied.
+
+**"Ask, don't model" was applied to one route.** `clean.sh` asked zero-base
+with `--preflight-only` (1.15.13) and still printed the `trim-to-idr.sh`
+command ready-to-run off the ts-health counter alone — its own model of the
+other Tier-1 tool. Measured: a head trim-to-idr refuses (no keyframe in the
+scan window, an open-GOP boundary, the missing-timestamp class) got a
+"ready to run" command that FAILed rc=1 with nothing written — the F12 class
+the 1.15.13 comment had called "structurally impossible on every axis".
+`trim-to-idr.sh --preflight-only` now exists (steps 1-2 only, writes nothing:
+exit 0 eligible with a `TTI_PREFLIGHT` row, 2 would-refuse with its reasons on
+stderr, anything else = could not run — the zero-base convention), the clinic
+asks it inside the pre-key branch and relays the answer in the tool's words,
+93 §5 pins the ask by call shape, and 93 §7 is the negative control
+(`RTM_IDR_WINDOW=1` on the mid-GOP fixture: no ready-to-run command, refusal
+relayed, `routes=` clean; the default window still offers it and §4 runs it to
+a blessed build). zero-base's own pre-flight now refuses a mid-GOP head too
+(it built the whole re-wrap and died at verify-source, v_drop=102, on a file
+the clinic had offered it for), and 93 §4 requires a BLESSED build (0/10) of
+every offered route, not merely "not rc=2". The clinic's verdict line and
+comment now claim only what is true: eligibility is about the source; the
+writer lock and disk headroom are each tool's run-time checks.
+
+**A one-writer refactor is done only when every consumer asks AND maps.**
+1.15.17 gave the census verdict one writer and 94 §4 checked that every
+`census_rc` consumer calls `rtm_census_failed`. Three builders did — and
+still ended `exit "$census_rc"`, the raw census rc as the process exit
+(trim-to-idr, rung4, rebuild-paff). Today that is 0 or 10; the first widening
+of `rtm_census_failed` — the one-site edit the writer exists for — makes them
+exit 11 (REFUSED, a false verdict batch/mov switch on) or 12 (outside the
+contract) *after* the `mv -f` of the blessed output, while the builders that
+ask stay in contract. All three now `if rtm_census_review; then exit 10; fi;
+exit 0`, and 94 §4 pins "no builder exits with the raw census rc"
+(mutation-audit G32/P32).
+
+**The harness that certifies the guards had blind spots of its own.**
+`tests/mutation-audit.sh`: (a) its EXIT trap `rm -rf`'d an operator-named
+`MA_OUTDIR` — including on an early `exit 2` — the 1.15.12 class this very
+file exists to police; now it removes only what it created. (b) The sandbox
+symlinked the REAL `tests/fixtures/` directory, so a test that regenerates a
+missing fixture wrote into the real tree, and `MA_JOBS>1` raced `ffmpeg -y`
+on one shared `.part`; now a real directory of per-file links. (c) A prose
+case whose marked PASS survived while the RUN went red was reported CLEAN —
+P11's comment tripped 92 §4's un-stripped per-consumer pin and the shipped
+"49/49, none crying wolf" was false; that verdict is now `RED-ELSEWHERE`, and
+a test red before any mutation reads `BASE-RED`. (d) The comment stripper
+`sed 's/#.*//'` — pasted at 26 sites across seven tests — truncated code at
+`${v#pat}`, `${v##*/}`, `$#`, `${#a}` and ffprobe's `'%+#1'` (73 such lines
+in 33 scripts, 15 losing an `exit`), so 94 §6's errexit detector cried wolf
+on a correct one-line region and was blind to an exit past one; one
+`rtm_strip_comments` (whitespace-anchored `#`) in `tests/lib-harness.sh`,
+with `grepq`/`grepqe` moved there from their seven pasted copies.
+
+**Tests that had gone vacuous, each demonstrated with a mutation that stayed
+green:** 84's A4 lockstep pin had been weakened to "each body mentions
+`RTM_CONFESSION_RE`" (a `|dts discontinuity` widening passed) — it compares
+the exact grep argument again; 84's mktemp shim intercepted only the exact
+argv `-d`, so `mktemp -d -t x` passed through to the darwin temp dir and "no
+mktemp leak" PASSed over ~40 MB leaked — the shim now takes every path-less
+`-d` form, logs each interception, and the test asserts it FIRED (a
+path-template form turns the test red, "the leak watch is vacuous", instead
+of green); 92 §4's per-consumer pins grepped RAW source while the loop above
+stripped comments (red on a benign comment, green with the call deleted) —
+stripped and pinned by call shape. Also: `clean.sh`'s zero-base relay
+labelled every nonzero rc "refuses at pre-flight" (rc=1 = could not run, an
+UNPROVEN presented as REFUSED), relayed stdout progress naming the clinic's
+soon-deleted temp dir, and its display pipeline had no `|| true` under
+pipefail (a header-only relay killed the clinic with exit 1 = DAMAGED and no
+`CLEAN_SUMMARY`); it now captures stderr only, distinguishes 2 from the rest,
+and cannot die displaying.
+
+`hunt/tools/cdn/app.sh` (reviewed in the same diff): the Vimeo data-attribute
+matcher had both narrowed (`{6,}` dropped pre-2008 5-digit `data-vimeo-id`)
+and widened (any `data-*vimeo*` name — `data-vimeo-start="123456"` came back
+as an id and sent `handle_vimeo` after a stranger's upload); now
+`data-vimeo-id` at any length, and a generic carrier only when the name ENDS
+at `vimeo`/`-video`/`-id`. The JWT scope heuristic had made the API path
+fail-closed with its warning silenced at two of three call sites — unknown now
+still tries the API. The Squarespace manifest branch reported every yt-dlp
+failure as "yt-dlp required" with stderr discarded — its output is visible,
+with the site UA, the page as Referer and retries like the Vimeo path. A
+direct `video.squarespace-cdn.com` URL on argv (the lever the registry
+documents) finally has an intercept. `normalize_url` handles IPv4, localhost,
+userinfo@ and underscore hosts and no longer reads a scheme inside the query
+as the URL's own; a mistyped list-file name (`urls.txt`) says "no such file"
+instead of probing `https://urls.txt` as a phantom failure. Offline suite
+172/172 (+18).
+
+Suite 292/292 (the banner counts one row per sub-suite; the changed files grew
+inside it — 93: 22 -> 27 assertions, 94: 16 -> 22, 84: 19 -> 20, 92: 25 -> 27),
+`tests/mutation-audit.sh` **57/57 in contract** on the shipped tree (36 defect
+cases CAUGHT, 21 prose CLEAN; four new cases G32/P32/G33/P33), and the
+review's own measured scenarios re-run green on scratch copies (the `-t`
+mktemp form's leak is caught; the window-1 head is withheld).
+
+Residuals, recorded not fixed: `trim-to-idr`'s pre-flight runs `gop-probe`
+(the one decode-heavy step) on every pre-key source the clinic meets — asked
+only inside the pre-key branch, never unconditionally; Tier-2 routes stay
+outside 93's invariant because they are consent-gated by design; `app.sh`'s
+five-copy tier scaffold and fetch-once refactors are deferred for want of
+offline coverage of their blast radius.
+
 ## 1.15.17 — the guards' own audit (2026-08-28)
 
 1.15.15 built the standing sweep and recorded that **two of its five guards

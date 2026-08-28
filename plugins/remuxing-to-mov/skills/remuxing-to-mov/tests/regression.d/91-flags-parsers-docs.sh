@@ -27,6 +27,7 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
+. "$TESTS/lib-harness.sh"   # grepq/grepqe + rtm_strip_comments: one definition (tests/lib-harness.sh)
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
 hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 ff () { ffmpeg -nostdin -y -v error "$@"; }
@@ -61,7 +62,7 @@ o=$( cd "$WORK" && bash "$SC/mov.sh" "$S" -full 2>&1 ); rc=$?
 
 echo
 echo "== 2. F5: --mp4-swap and metadata are honoured on the PAFF path =="
-msrc=$(sed 's/#.*//' "$SC/mov.sh")
+msrc=$(rtm_strip_comments "$SC/mov.sh")
 has "$msrc" 'auto.sh" "$IN" "$OUT" $FULL $MSFLAG' "the PAFF branch passes --mp4-swap through to auto.sh (which owns the swap)"
 usage=$(grep -m1 'usage: mov.sh' "$SC/mov.sh")
 has "$usage" "mp4-swap" "the usage string names --mp4-swap"
@@ -94,13 +95,13 @@ echo
 echo "== 5. D3 hygiene: no single-pipe 'ffp … | head -1' sites remain =="
 d3_bad=""
 for s in "$SC"/*.sh; do
-  n=$(sed 's/#.*//' "$s" | grep -cE 'ffp [^|]*\| *head -1' || true)
+  n=$(rtm_strip_comments "$s" | grep -cE 'ffp [^|]*\| *head -1' || true)
   [ "${n:-0}" -eq 0 ] || d3_bad="$d3_bad $(basename "$s"):$n"
 done
 [ -z "$d3_bad" ] && ok "every single-pipe ffp|head-1 site converted to ffp1 (the 1.15.2 SIGPIPE class)" \
   || no "ffp|head-1 sites remain:$d3_bad"
 # the D1 sibling: dim-scan's FIRST_CH assignment no longer grep|head|awk's
-dsrc=$(sed 's/#.*//' "$SC/dim-scan.sh")
+dsrc=$(rtm_strip_comments "$SC/dim-scan.sh")
 hasnt "$dsrc" "grep '^CHANGE ' \"\$TMP/scan\" | head -1" "dim-scan's assignment-position pipeline (D1 sibling) is gone"
 
 echo

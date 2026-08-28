@@ -46,15 +46,25 @@
 # The trim removes ONLY the undecodable pre-roll — it loses nothing any player
 # could ever have shown.
 #
-# Usage: scripts/trim-to-idr.sh INPUT OUTPUT
+# Usage: scripts/trim-to-idr.sh INPUT OUTPUT [--preflight-only]
 #   OUTPUT stays in the source's container family: give it the source's own
 #   extension (capture.ts -> trimmed.ts) so ffmpeg infers the same muxer.
 #   Standalone tool AND mov.sh's auto step (mov.sh runs it, announced, when its
 #   pre-flight sees pre-roll; mov.sh --no-idr-trim skips it).
+#   --preflight-only runs steps 1-2 (find the IDR, prove the boundary) and
+#   WRITES NOTHING; OUTPUT is optional then. It exists so a driver can ASK this
+#   tool whether it would trim instead of modelling its conditions off the
+#   ts-health counter (clean.sh did, and printed a ready-to-run command that
+#   FAILed on a windowless head — the zero-base.sh convention, 1.15.13/1.15.18):
+#   exit 0 = eligible (TTI_PREFLIGHT row), 2 = would refuse (its reasons on
+#   stderr), anything else = the pre-flight could not RUN (unproven, not refused).
 # Exit: 0 = trimmed + gated OK, or nothing to trim (says so, writes nothing);
-#       1 = FAIL (unsafe boundary / cut missed / gate failed); 2 = usage.
+#       1 = FAIL (unsafe boundary / cut missed / gate failed); 2 = usage;
+#       10 = trimmed + gated OK, census REVIEW (unexpected surplus — "look").
 # Machine-readable: TTI_SUMMARY prekey=<n> idr_pts=<s> ss_rel=<s> out=<path>
 #   (out=none when nothing was trimmed; fields are stable API — extend only).
+#   TTI_PREFLIGHT verdict=eligible prekey=<n> idr_pts=<s>  (--preflight-only,
+#   eligible arm only; a refusal is exit 2 with no row).
 set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap (WO 1.4): no stray code escapes
@@ -62,9 +72,25 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # NOTE no apostrophes in the :? messages: inside ${1:?...} bash 3.2 treats a
 # quote as a quote OPENER and swallows the following lines into the message
 # (measured here: the OUT assignment below silently vanished).
-IN="${1:?usage: trim-to-idr.sh INPUT OUTPUT (give OUTPUT the same extension as the input, e.g. trimmed.ts)}"
-OUT="${2:?need OUTPUT (same container family as the input, e.g. trimmed.ts)}"
-[ $# -le 2 ] || { echo "unknown opt: $3" >&2; exit 2; }
+IN="${1:?usage: trim-to-idr.sh INPUT OUTPUT [--preflight-only] (give OUTPUT the same extension as the input, e.g. trimmed.ts)}"
+shift
+OUT=""; PREFLIGHT_ONLY=0
+while [ $# -gt 0 ]; do case "$1" in
+  --preflight-only) PREFLIGHT_ONLY=1;;
+  -*) echo "unknown opt: $1" >&2; exit 2;;
+  *) [ -z "$OUT" ] || { echo "unexpected extra argument: $1" >&2; exit 2; }; OUT="$1";;
+esac; shift; done
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  # never created — only its NAME meets the same-path check below
+  OUT="${OUT:-$IN.preflight-probe.ts}"
+else
+  [ -n "$OUT" ] || { echo "need OUTPUT (same container family as the input, e.g. trimmed.ts)" >&2; exit 2; }
+fi
+# a content refusal is this tool's FAIL (1) when asked to trim, and a pre-flight
+# REFUSAL (2) when only asked whether it would — so a caller can tell "would
+# refuse" (2) from "could not run" (1) without parsing prose
+refuse () { [ "$PREFLIGHT_ONLY" -eq 1 ] && exit 2; exit 1; }
+TAG='>> FAIL:'; [ "$PREFLIGHT_ONLY" -eq 1 ] && TAG='>> would REFUSE (pre-flight):'
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
@@ -95,12 +121,18 @@ if [ "${tti_tot:-0}" -eq 0 ]; then
   echo "no video packets found in $IN (not a coded video source?)" >&2; exit 2
 fi
 if [ "${tti_found:-0}" -eq 0 ]; then
-  echo ">> FAIL: no keyframe in the first $tti_tot video packets (window $WINDOW)." >&2
+  echo "$TAG no keyframe in the first $tti_tot video packets (window $WINDOW)." >&2
   echo "   Either raise RTM_IDR_WINDOW, or this is the single-GOP/unseekable class —" >&2
   echo "   ts-health.sh names it; no lossless trim target exists in reach." >&2
-  exit 1
+  refuse
 fi
 if [ "${tti_pre:-0}" -eq 0 ]; then
+  if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+    # asked "would you trim?": no — and a whole-file pre-key count that says
+    # otherwise is ts-health's to explain, never a route to print
+    echo "$TAG nothing to trim — the first video packet is already keyframe-flagged." >&2
+    exit 2
+  fi
   echo "   first video packet is already keyframe-flagged — nothing to trim."
   echo "TTI_SUMMARY prekey=0 idr_pts=${tti_kpts:-na} ss_rel=none out=none"   # machine-readable
   exit 0
@@ -108,12 +140,12 @@ fi
 IDR_PTS="${tti_kpts:-na}"
 if [ "$IDR_PTS" = "N/A" ] || [ -z "$IDR_PTS" ]; then IDR_PTS="${tti_kdts:-na}"; fi
 if [ "$IDR_PTS" = "N/A" ] || [ -z "$IDR_PTS" ] || [ "$IDR_PTS" = na ]; then
-  echo ">> FAIL: the first keyframe packet carries no timestamp at all — the" >&2
+  echo "$TAG the first keyframe packet carries no timestamp at all — the" >&2
   echo "   missing-timestamp class. Repair the timestamps FIRST (diagnose.sh routes by" >&2
   echo "   measured profile: pairfill-paff.sh for half-timestamped H.264 PAFF /" >&2
   echo "   derive-dts.sh for PTS-complete reordered, any codec / remux.sh --genpts" >&2
   echo "   otherwise), then re-run the trim." >&2
-  exit 1
+  refuse
 fi
 echo "   mid-GOP head: $tti_pre pre-keyframe packet(s); first keyframe @ ${IDR_PTS}s (packet size ${tti_ksize:-0} B)"
 
@@ -122,15 +154,25 @@ set +e; gpo=$(bash "$SELF_DIR/gop-probe.sh" "$IN" "$IDR_PTS" 2>&1); gprc=$?; set
 printf '%s\n' "$gpo" | sed 's/^/   /'
 if [ "$gprc" -ne 0 ]; then
   if [ "$gprc" -eq 10 ]; then
-    echo ">> FAIL: the first keyframe is an OPEN-GOP boundary (partial sync), not an" >&2
+    echo "$TAG the first keyframe is an OPEN-GOP boundary (partial sync), not an" >&2
     echo "   IDR — a trim here relocates the garbage instead of removing it, and" >&2
     echo "   advancing to the next closed keyframe would drop DECODABLE frames." >&2
     echo "   That trade is the operator's call, not this tool's:" >&2
     echo "   references/cutting-concat.md (smart-cut / manual closed-GOP cut)." >&2
-  else
-    echo ">> FAIL: gop-probe.sh could not prove the boundary (rc=$gprc, output above)." >&2
+    refuse
   fi
+  # not a verdict on the source — the meter broke. A pre-flight caller reads
+  # this as "could not run" (1), never as a refusal (EMPTY != ABSENT).
+  echo ">> FAIL: gop-probe.sh could not prove the boundary (rc=$gprc, output above)." >&2
   exit 1
+fi
+# --- pre-flight answer: every refusal has been evaluated; only the build costs past here
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  echo ">> ELIGIBLE: $tti_pre pre-keyframe packet(s); closed-GOP IDR @ ${IDR_PTS}s — a trim would run."
+  echo "TTI_PREFLIGHT verdict=eligible prekey=$tti_pre idr_pts=$IDR_PTS"
+  echo "   (eligibility is about the SOURCE. The writer lock, disk headroom and the"
+  echo "    post-cut gates are build-time conditions and are judged then.)"
+  exit 0
 fi
 
 # --- 3. copy-cut both tracks at the IDR -----------------------------------------
@@ -235,5 +277,8 @@ echo "   removed: ONLY the undecodable pre-roll, from BOTH tracks (A/V parity ke
 echo "   Verify any downstream .mov against THIS file, not the untrimmed capture."
 echo "TTI_SUMMARY prekey=${tti_pre:-0} idr_pts=$IDR_PTS ss_rel=$REL out=$OUT"   # machine-readable
 # REVIEW propagation (1.14): an unexpected-surplus census blesses the complete
-# cut and exits 10 ("look"), never 1 — nothing planned is missing.
-exit "$census_rc"
+# cut and exits 10 ("look"), never 1 — nothing planned is missing. ASKED of the
+# one writer, then mapped (1.15.18): the raw rc as the exit meant that the day
+# rtm_census_failed widens, this builder exits an unmapped code AFTER the mv.
+if rtm_census_review "$census_rc"; then exit 10; fi
+exit 0

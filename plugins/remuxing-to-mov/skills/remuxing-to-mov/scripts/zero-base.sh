@@ -35,12 +35,20 @@
 #   * timeline rot (whole-file backward/duplicate DTS > 0): zero-base is NOT
 #     a timeline repair — diagnose.sh routes those (derive-dts.sh et al.).
 #
-# Usage: scripts/zero-base.sh INPUT OUTPUT.ts
+# Usage: scripts/zero-base.sh INPUT OUTPUT.ts [--src-tsh FILE]
+#        scripts/zero-base.sh INPUT --preflight-only [--src-tsh FILE]
 #   OUTPUT stays in the mpegts family (give it the source's own extension).
+#   --preflight-only runs this script's own refusal logic and WRITES NOTHING:
+#     exit 0 eligible / 2 refused (anything else: the pre-flight could not
+#     run). It exists so other drivers (clean.sh) ASK instead of re-deriving
+#     the conditions (1.15.13). --src-tsh reuses a caller's saved
+#     `ts-health.sh SRC --kv` so asking costs no whole-file re-scan.
 # Exit (house contract): 0 DONE | 10 REVIEW | 1 FAIL | 2 usage/pre-flight.
-# Machine line (stable API — extend only):
+# Machine lines (stable API — extend only):
 #   ZB_SUMMARY out= start_src= start_out= floor= predicted_nudges=
 #     observed_nudges= verdict=
+#   ZB_PREFLIGHT verdict=eligible container= programs= paff= half_ts= back=
+#     dup= prekey=            (--preflight-only, on the eligible arm only)
 set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap: no stray code escapes
@@ -164,13 +172,29 @@ if [ "${S_BACK:-0}" -gt 0 ] || [ "${S_DUP:-0}" -gt 0 ]; then
   echo "(it picks pairfill/derive-dts/rebuild by the measured profile)." >&2
   exit 2
 fi
+S_PREKEY=$(sed -n 's/^TSH_PREKEY=//p' "$TMP/src.tsh" | head -1)
+# mid-GOP start: a stream-copy re-wrap never emits the video packets that
+# precede the first keyframe, so verify-source's packet census reads
+# v_drop=<prekey> and FAILS — measured on the house late-sps fixture
+# (prekey=102 -> v_src=477 v_out=375, rc=1) AFTER the whole build, on a file
+# the clinic had offered this route for. Never build to a foregone refusal
+# (I.3): that head belongs to trim-to-idr, which cuts it on purpose.
+if [ "${S_PREKEY:-0}" -gt 0 ] 2>/dev/null; then
+  echo "mid-GOP start: $S_PREKEY video packet(s) precede the first keyframe (whole-file scan)." >&2
+  echo "A stream-copy re-wrap drops them, so verify-source's packet census FAILS the" >&2
+  echo "build (measured: v_drop equals the pre-key count). Refusing at pre-flight rather" >&2
+  echo "than build to that verdict. Route: scripts/trim-to-idr.sh \"$IN\" OUT.ts — it cuts" >&2
+  echo "to the first IDR on purpose and blesses the result; zero-base its OUTPUT if a" >&2
+  echo "floored timeline is still wanted after that." >&2
+  exit 2
+fi
 
 # Every shape-based refusal has now been evaluated. A caller that only wanted
 # the verdict stops here — before the floor probe, the layout pass and the
 # prediction dry run, none of which are refusals and all of which cost.
 if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
   echo ">> ELIGIBLE: no pre-flight refusal applies to this source."
-  echo "ZB_PREFLIGHT verdict=eligible container=$CONT programs=${NPROG:-1} paff=${PF_PAFF:-no} half_ts=${PF_HALF_TS:-no} back=${S_BACK:-0} dup=${S_DUP:-0}"
+  echo "ZB_PREFLIGHT verdict=eligible container=$CONT programs=${NPROG:-1} paff=${PF_PAFF:-no} half_ts=${PF_HALF_TS:-no} back=${S_BACK:-0} dup=${S_DUP:-0} prekey=${S_PREKEY:-0}"
   echo "   (eligibility is about the SOURCE SHAPE. The writer lock and disk"
   echo "    headroom are build-time conditions and are checked then.)"
   exit 0
