@@ -87,6 +87,7 @@ engine.
 | Second Name `secondname.agency` `/media/c/i/<base>.<hash>.jpg` | strip `/c/` + hash → `/media/i/<base>.jpg` | SPA feed at `/newsquickview/<id>/`; `sld` large is often an upscale | project_secondname_resolver |
 | yesstud `assets.yesstud.io` *(manual)* | fetch BOTH `/image/<id>.jpg` and `/cache/<id>-h1440-…jpg`, keep larger-pixel | raw S3 cache (not transform); arbitrary resizer params 403; manifest `/api/folios/<slug>` | project_yesstud_resolver |
 | Hearst hdnux `s.hdnux.com/photos/<aa>/<bb>/<cc>/<dd>/<id>/<ver>/<rendition>` (SFGate, Chronicle, statesman.com) | swap rendition → fixed name `rawImage.jpg` (5.2× page webp, CMS-native dims) | params ignored; unknown renditions 302→v3 (no ladder above raw); EXIF-stripped + ~2048px ingest cap = ceiling; enumerate via `__NEXT_DATA__` zoneSets body images | project_hdnux_resolver |
+| Future PLC `cdn.mos.cms.futurecdn.net/<id>-<w>-<q>.<ext>[.webp]` and `/v2/t:,l:,cw:,ch:,q:,w:/<id>.<ext>` (TechRadar, Tom's Guide, PC Gamer, Who What Wear, Marie Claire, Space.com…) | strip to bare `<id>.<ext>` — drop `/v2/<xf>/`, `.webp`, `-<w>-<q>`, params (unsigned; 22×–261× bytes, `/v2` also un-crops) | `-99999-100` = 2.8× bloat re-encode at PSNR 55.6 dB (NOT an upgrade); `/v2` CROPS not just resizes; ext locked to stored format (`.tif`/`.jpg` swaps 404) so no format ladder; params ignored byte-for-byte | project_futurecdn_resolver |
 
 ## 9. Path-suffix strip to unscaled original
 

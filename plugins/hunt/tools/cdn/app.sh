@@ -2079,6 +2079,68 @@ cdn_resolve_hdnux() {
   echo "${prefix}rawImage.jpg"
 }
 
+# Future PLC's CMS media CDN. `cdn.mos.cms.futurecdn.net` serves imagery for
+# every Future title — TechRadar, Tom's Guide, PC Gamer, GamesRadar, Marie
+# Claire, Who What Wear, Livingetc, Space.com, LiveScience … — as CloudFront →
+# Varnish → an image service Future calls "kodiak" (`x-ftr-backend-server:
+# sse-prod:kodiak`) in front of an S3 origin (a bad key returns S3's own
+# `NoSuchKey` XML for `/proof/<key>`).
+#
+# TWO unsigned rendition grammars sit on top of one stored object:
+#   1. `<id>-<width>-<quality>.<ext>`                    — downscale + re-encode
+#   2. `/v2/t:<top>,l:<left>,cw:<w>,ch:<h>,q:<q>,w:<w>/<id>.<ext>` — CROP + resize
+# and either may carry a trailing `.webp`, which is an explicit path suffix
+# rather than Accept negotiation (no `vary` header). Both are strippable.
+#
+# The master is the bare `<id>.<ext>` — the stored upload itself:
+#   • `-99999-100` clamps to the stored dims on every asset tested, so there is
+#     no upscale trap and bare dims == source dims.
+#   • On PNG sources bare is raw-pixel-identical to the rendition (same rgba
+#     md5) yet a distinct object (differing deflate bytes) — kodiak re-encodes.
+#   • On JPEG sources bare matches NO point on kodiak's quality ladder (bare
+#     388,791 B vs q85 351,411 / q86 364,305 / q90 461,914 at identical dims),
+#     i.e. it is the stored file, not a derived rendition. `-99999-100` is a
+#     2.8×-larger re-encode OF it at PSNR 55.6 dB — a pure bloat trap.
+#   • The `/v2/` form CROPS (`l:437,cw:1125` carves a 1125×1125 square out of a
+#     2000×1125 master), so stripping it also recovers the uncropped frame.
+# The win is largest when the page asked for a thumbnail: a `-140-80.jpg` rung
+# (140×182, 7.5 KB) resolves to the 2310×3000 / 1.97 MB master.
+#
+# The extension is locked to the stored object's format — `.jpg`, `.tif` and
+# `.webp` on a PNG asset all 404 — so no transcode surface and no wrapper trap
+# exists, and query params are ignored outright (byte-identical response). The
+# whole Accept/param/path ladder is therefore suppressed via
+# is_futurecdn_image_url in stage_probe_formats: it could only ever yield dead
+# or duplicate candidates.
+is_futurecdn_image_url() {
+  [[ "$1" == *"//cdn.mos.cms.futurecdn.net/"* ]]
+}
+
+cdn_resolve_futurecdn() {
+  local url="$1"
+  is_futurecdn_image_url "$url" || return 1
+  local stripped="${url%%\?*}"
+  local prefix="${stripped%%//cdn.mos.cms.futurecdn.net/*}//cdn.mos.cms.futurecdn.net"
+  local path="${stripped#*//cdn.mos.cms.futurecdn.net}"
+  # drop a /v2/<transform-list>/ prefix (crop + resize + quality); the trailing
+  # capture keeps any remaining sub-path, e.g. /v2/<t>/flexiimages/<name>.png
+  if [[ "$path" =~ ^/v2/[^/]*:[^/]*/(.+)$ ]]; then
+    path="/${BASH_REMATCH[1]}"
+  fi
+  # drop the explicit .webp delivery suffix, but only where it wraps a real
+  # source extension — a genuinely webp-sourced asset is bare `<id>.webp`
+  if [[ "$path" =~ ^(.+\.(png|jpe?g|gif))\.webp$ ]]; then
+    path="${BASH_REMATCH[1]}"
+  fi
+  # drop the -<width>-<quality> rendition suffix
+  if [[ "$path" =~ ^(.+)-[0-9]+-[0-9]+(\.[A-Za-z0-9]+)$ ]]; then
+    path="${BASH_REMATCH[1]}${BASH_REMATCH[2]}"
+  fi
+  local result="${prefix}${path}"
+  [[ "$result" == "$url" ]] && return 1
+  echo "$result"
+}
+
 # Extract the base36 post id from any Reddit post URL form:
 #   /r/<sub>/comments/<id>[/slug…], /user/<u>/comments/<id>, /comments/<id>,
 #   /gallery/<id>, and the redd.it/<id> shortlink. Share links
@@ -3013,7 +3075,7 @@ cdn_resolve() {
     cdn_resolve_format
     # Category D: proprietary path CDNs
     cdn_resolve_wsj cdn_resolve_condenast cdn_resolve_google cdn_resolve_twitter
-    cdn_resolve_pinterest cdn_resolve_reddit_preview cdn_resolve_discogs cdn_resolve_hdnux cdn_resolve_ynap cdn_resolve_arc_resizer cdn_resolve_goat
+    cdn_resolve_pinterest cdn_resolve_reddit_preview cdn_resolve_discogs cdn_resolve_hdnux cdn_resolve_futurecdn cdn_resolve_ynap cdn_resolve_arc_resizer cdn_resolve_goat
     cdn_resolve_nbc cdn_resolve_fwrd cdn_resolve_revolve cdn_resolve_rebelmouse
     cdn_resolve_mzstatic
     # Category B: path-segment CDNs
@@ -4616,6 +4678,12 @@ stage_probe_formats() {
     # candidates). cdn_resolve_discogs already returned the API full-size uri,
     # which is the platform ceiling (600px stored cap).
     is_discogs_image_url "$probe_url" && skip_probes=true
+    # Future PLC (cdn.mos.cms.futurecdn.net): cdn_resolve_futurecdn already
+    # returned the bare stored upload. The extension is locked to the stored
+    # object's format (.jpg/.tif/.webp swaps all 404) and query params are
+    # ignored byte-for-byte, so the ladder can only produce dead or duplicate
+    # candidates.
+    is_futurecdn_image_url "$probe_url" && skip_probes=true
 
     if ! $skip_probes; then
       echo "   probing Accept headers..."

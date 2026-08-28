@@ -227,6 +227,46 @@ check "hdnux non-photos path skipped" "" \
   "$(cdn_resolve_hdnux 'https://s.hdnux.com/other/01/66/60/54/31132466/5/ratio3x4_960.webp' 2>/dev/null || true)"
 check "hdnux non-hdnux host skipped" "" \
   "$(cdn_resolve_hdnux 'https://example.com/photos/01/66/60/54/31132466/5/ratio3x4_960.webp' 2>/dev/null || true)"
+
+# ── futurecdn (Future PLC "kodiak" rendition/crop grammars → bare stored master)
+check "futurecdn -W-Q.png.webp → bare master" \
+  "https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc.png" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc-2000-80.png.webp')"
+check "futurecdn -W-Q.png → bare master" \
+  "https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc.png" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc-2000-80.png')"
+check "futurecdn -W-Q.jpg.webp → bare master" \
+  "https://cdn.mos.cms.futurecdn.net/z6S9qXJFDMqqj3XEknsQiP.jpg" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/z6S9qXJFDMqqj3XEknsQiP-1280-80.jpg.webp')"
+check "futurecdn thumbnail rung → bare master" \
+  "https://cdn.mos.cms.futurecdn.net/vLnVW9vUexvqmpNpj2DiHb.jpg" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/vLnVW9vUexvqmpNpj2DiHb-140-80.jpg')"
+check "futurecdn /v2 crop transform → uncropped master" \
+  "https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc.png" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/v2/t:0,l:437,cw:1125,ch:1125,q:80,w:1125/gWvRYCQwqDrbLJmL6kLwRc.png')"
+check "futurecdn /v2 crop + .webp → uncropped master" \
+  "https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc.png" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/v2/t:0,l:250,cw:1500,ch:1125,q:80,w:1500/gWvRYCQwqDrbLJmL6kLwRc.png.webp')"
+check "futurecdn /flexiimages chrome → bare master" \
+  "https://cdn.mos.cms.futurecdn.net/flexiimages/mednnv697g1760357120.png" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/flexiimages/mednnv697g1760357120-280-100.png.webp')"
+check "futurecdn ignored query params stripped" \
+  "https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc.png" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc.png?width=4000&quality=100')"
+check "futurecdn http scheme preserved" \
+  "http://cdn.mos.cms.futurecdn.net/25heGV68LEDh6tt2iUy3y8.jpg" \
+  "$(cdn_resolve_futurecdn 'http://cdn.mos.cms.futurecdn.net/25heGV68LEDh6tt2iUy3y8-800-450.jpg')"
+check "futurecdn gif rendition → bare master" \
+  "https://cdn.mos.cms.futurecdn.net/aBcDeF123.gif" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/aBcDeF123-600-80.gif')"
+check "futurecdn already-bare master skipped" "" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc.png' 2>/dev/null || true)"
+check "futurecdn bare svg chrome skipped" "" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net/flexiimages/p5lektiuwq1683127037.svg' 2>/dev/null || true)"
+check "futurecdn look-alike host skipped" "" \
+  "$(cdn_resolve_futurecdn 'https://cdn.mos.cms.futurecdn.net.evil.com/x-100-80.png' 2>/dev/null || true)"
+check "futurecdn non-futurecdn host skipped" "" \
+  "$(cdn_resolve_futurecdn 'https://example.com/gWvRYCQwqDrbLJmL6kLwRc-2000-80.png' 2>/dev/null || true)"
 check "basename hdnux → photo-id stem" "hdnux_31132466" \
   "$(basename_from_url 'https://s.hdnux.com/photos/01/66/60/54/31132466/5/rawImage.jpg')"
 
