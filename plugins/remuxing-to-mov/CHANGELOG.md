@@ -4,6 +4,86 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.19 — "the gates you had to ask for" round (2026-08-28)
+
+WO-1.15.4's own leftover ledger, closed. 1.15.4 wrote the EMPTY ≠ ABSENT rule
+— *no probe output may feed a verdict, a plan, or an accusation without its
+exit status* — and applied it to the gates that run by DEFAULT, recording the
+rest as "next verify-side round". That left the rule un-applied at the gates
+the operator has to ASK for, which is the worse place to leave it: a caller
+who types `--silence` or `--audio` is the one caller who has declared they
+want that evidence, and a failed probe handed them a clean skip. Measured
+pre-round on this bench, in ONE report: gates (f) and (g) print "audio census
+probe FAILED … UNPROVEN" and two lines later `--silence` reads the SAME failed
+probe as "no audio in output — silence parity N/A."
+
+- **`--silence` and `--audio` (verify.sh)** — both censused the output with
+  `… | grep -c . || true`, so a failed ffprobe was byte-identical to "no
+  audio": `--silence` printed "no audio in output — N/A" and `--audio`
+  reported "output has 0 audio track(s) … Skipping", a track count nobody
+  measured. Both now capture the rc, announce the failure, and land REVIEW.
+  Counting rides `awk NF`, not `grep -c`, whose rc-1-on-zero-matches is what
+  bred the `|| true` in the first place. A genuine 1-track layout is still an
+  ordinary skip (pinned).
+- **gate (f) `vdur` (verify.sh)** — the ledger recorded this as "reads an
+  empty probe as N/A". MEASURED, it was worse: `vdur=$(sdur v:0)` sits in
+  ASSIGNMENT position under `pipefail`, so a failed video-duration probe was a
+  SILENT ERR-trap abort — the report stopped dead at gate (f)'s header, no
+  verdict line, exit 1, which is verify's FAIL. "I could not measure the video
+  duration" shipped as "this file FAILED verification". The ledger entry is
+  corrected in place. The per-track `ad=$(sdur "a:$ai")` two lines below is
+  the identical trap and is fixed with it; a track whose ruler failed is
+  announced and EXCLUDED from `worst`, never folded in as a zero delta (which
+  would read as perfect sync).
+- **gate (g)'s three SOURCE-side censuses (verify.sh)** — found by this
+  round's own class guard, not by the ledger, which listed none of them. A1
+  captured this gate's OUTPUT census and left three siblings on `|| true`, and
+  they fail in OPPOSITE directions: `g_srcaud=0` made `g_baseline` report "the
+  source has NO audio track to compare against" for every output track,
+  discarding the inherited-vs-introduced attribution the gate exists to make;
+  `g_src_mp2=0` DISARMS the naked-MP2 finding; `g_has_pcm=0` ARMS it, accusing
+  a legitimate dual-track deliverable of shipping "MP2 with NO PCM access
+  track" from a probe that never ran. The accusation now requires BOTH
+  censuses to have succeeded; either failure is an announced UNPROVEN.
+- **derive-dts.sh output gate 3/4** — `phash() { … || true; }` then
+  `[ -n "$sp" ] && [ "$sp" = "$op" ]` sent two EMPTY hashes to the else arm:
+  ">> PACKET-HASH GATE FAILED — the copied bitstream is not identical" with
+  `src=` and `out=` blank, exit 1. That is C3's accusation-from-zero-evidence
+  on a builder's blessing path. The rc now travels; an unprovable gate is
+  UNPROVEN, and — C7's lesson — that is not a licence to skip the battery:
+  gate 4 still runs (it may find a REAL breach worth exit 1), and only then
+  does the run refuse to bless, exit 10, keeping the `.part` with the
+  two-command re-judge recipe and a `verdict=unproven why=packet_hash`
+  machine row. The accusation arm survives for real evidence (pinned).
+
+Test 95, red-verified against `cbcb0f8`: **20 red of 44**. Every section
+carries its discrimination control — a successful census that finds one track
+still skips plainly, a working probe never claims UNPROVEN, and the same
+fixture un-shimmed still FAILs derive-dts gate 3 with two NON-EMPTY differing
+hashes at exit 1. Two pins are honest `hasnt` controls that were already green
+pre-fix (gate (g)'s baseline arm is lazy and the fixture is AAC, not MP2);
+both are recorded as regression guards, not as reached-path proofs.
+
+`verify.sh`'s exit contract is untouched: `>> OK` and `>> REVIEW` BOTH exit 0
+(ACCEPTED LEGACY since 1.10.0 — the printed verdict is the API and callers map
+it), so every new REVIEW here is a verdict-LINE change, and test 95 pins the
+line, not the rc. Coding a caller to the rc alone is the qt-groups defect 1.11
+fixed.
+
+The suite's own §10 SIGPIPE guard (94 §10) caught test 95's first draft using
+`printf … | grep -q` — the 1.15.2 class — and it now uses `grepq`. The round's
+new class guard is registered in `tests/mutation-audit.sh` as G34/P34 and
+G35/P35: both defect mutations CAUGHT, both prose mutations CLEAN (4/4 in
+contract), so the guard is not vacuous.
+
+Suite 293/293 (292 carried + 1 new); `claude plugin validate --strict` green
+on plugin and marketplace. Residuals recorded in
+`WO-1.15.4-EMPTY-NE-ABSENT.md`: the D1 display siblings (ts-health, probe's
+`ms_tb_scan`, diagnose) stay in the sibling ledger — none sits on a failure
+path that loses a mktemp pointer — and `clean.sh`'s cosmetic empty
+`audio_tracks=` and batch.sh's ledger column for the exit-2 refusals remain
+their own rounds' questions.
+
 ## 1.15.18 — the review round (2026-08-28)
 
 A `/code-review` pass over the 1.15.17 diff returned 15 verified findings

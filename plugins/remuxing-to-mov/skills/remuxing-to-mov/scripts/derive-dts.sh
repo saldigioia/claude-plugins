@@ -281,9 +281,27 @@ else
 fi
 
 echo "-- output gate 3/4: video packet-hash identity (verify gate (a) method) --"
-phash () { ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null || true; }
-sp=$(phash "$IN"); op=$(phash "$PART")
-if [ -n "$sp" ] && [ "$sp" = "$op" ]; then
+# EMPTY ≠ ABSENT (WO-1.15.4 C3's shape, closed here 1.15.19): `|| true` inside
+# phash swallowed the hash pass's exit status, and `[ -n "$sp" ] && [ "$sp" =
+# "$op" ]` then sent TWO EMPTY hashes to the else arm — measured pre-fix, this
+# gate printed ">> PACKET-HASH GATE FAILED — the copied bitstream is not
+# identical." with `src=` and `out=` blank and exited 1. That is a positive
+# claim of bitstream corruption from evidence that was never collected, on a
+# builder's blessing path. The rc now travels; an unprovable gate is UNPROVEN
+# (REVIEW), which is NOT a licence to bless: the remaining gate still runs
+# (C7's lesson — a REVIEW must never skip the battery, and gate 4 may still
+# find a REAL breach worth exit 1), and the .part is kept for re-judging.
+phash () { ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null; }
+sp_rc=0; sp=$(phash "$IN")   || sp_rc=$?
+op_rc=0; op=$(phash "$PART") || op_rc=$?
+G3_UNPROVEN=0
+if [ "$sp_rc" -ne 0 ] || [ "$op_rc" -ne 0 ] || [ -z "$sp" ] || [ -z "$op" ]; then
+  G3_UNPROVEN=1
+  echo ">> PACKET-HASH GATE UNPROVEN — the hash pass did not produce evidence"
+  echo "   (src rc=$sp_rc$([ -z "$sp" ] && echo ', empty'), out rc=$op_rc$([ -z "$op" ] && echo ', empty'))."
+  echo "   This is NOT a claim that the bitstream differs — an accusation needs two"
+  echo "   non-empty hashes. Fix the read/decode problem and re-run; gate 4 still runs."
+elif [ "$sp" = "$op" ]; then
   echo "   PASS: video packets bit-identical (demux-only streamhash match)"
 else
   echo ">> PACKET-HASH GATE FAILED — the copied bitstream is not identical."
@@ -298,6 +316,20 @@ if ! mux_census "$PART" "$CEN_N" "$CEN_C" derive-dts; then
   exit 1
 fi
 
+if [ "${G3_UNPROVEN:-0}" -eq 1 ]; then
+  # every OTHER gate passed, so this is not a FAIL — but blessing needs proof,
+  # not the absence of a disproof (UNPROVEN != FAILED, 1.15.2). REVIEW (10),
+  # artifact kept where the operator can re-judge it.
+  echo ">> NOT blessing on an unproven gate: the derived timeline and the PTS multiset"
+  echo "   both check out and the post-mux census passed, but packet identity could not"
+  echo "   be measured, so losslessness is UNPROVEN — not disproven."
+  echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes)"
+  echo "   Re-judge: ffmpeg -i \"$IN\" -map 0:v:0 -c copy -f streamhash -hash md5 -"
+  echo "             ffmpeg -i \"$PART\" -map 0:v:0 -c copy -f streamhash -hash md5 -"
+  echo "   Then bless by hand (mv) if they match, or delete: rm -f \"$PART\""
+  echo "DERIVE_DTS depth=$DP_DEPTH shift_ms=$DP_SHIFT_MS packets=$DP_PACKETS census=ok verdict=unproven why=packet_hash$DD_ATTESTED"
+  exit 10
+fi
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
 echo "DERIVE_DTS depth=$DP_DEPTH shift_ms=$DP_SHIFT_MS packets=$DP_PACKETS census=ok verdict=ok$DD_ATTESTED"

@@ -269,17 +269,33 @@ patterns in lockstep" comment and no guard — the exact comment-rot class the
 
 ## Leftovers — adjacent findings seen and deliberately NOT taken
 
-- **verify.sh `--silence` (`:961` nao) and `--audio` (`:1127` na)** carry the
+- ~~**verify.sh `--silence` (`:961` nao) and `--audio` (`:1127` na)** carry the
   same failed-census-reads-as-no-audio shape as gate (f)/(g); opt-in gates,
-  same one-line idiom — next verify-side round.
-- **verify.sh gate (f) `vdur`/`sdur`** (`:406`) reads an empty video-duration
-  probe as "no stream durations — N/A"; same family, untouched here.
-- **derive-dts.sh gate 3 phash** (`:282–291`) has the C3 empty-vs-empty shape
+  same one-line idiom — next verify-side round.~~ **CLOSED in 1.15.19** (test
+  95 §L1/§L2). Measured before the fix, in one report: (f) and (g) announce
+  "audio census probe FAILED … UNPROVEN" and two lines later `--silence` reads
+  the same failed probe as "no audio in output".
+- ~~**verify.sh gate (f) `vdur`/`sdur`** (`:406`) reads an empty video-duration
+  probe as "no stream durations — N/A"; same family, untouched here.~~
+  **CLOSED in 1.15.19** (test 95 §L3), and **THIS ENTRY WAS WRONG**: it is not
+  an N/A read at all. `vdur=$(sdur v:0)` sits in ASSIGNMENT position under
+  `pipefail`, so a failed probe is a SILENT ERR-trap abort — measured, the
+  report stops dead at gate (f)'s header with NO verdict line and exits 1,
+  which is verify's FAIL. The per-track `ad=$(sdur "a:$ai")` below it is the
+  same trap and was fixed with it. Recorded here rather than quietly
+  corrected: a leftover ledger that understates a defect is how it stays a
+  leftover.
+- ~~**derive-dts.sh gate 3 phash** (`:282–291`) has the C3 empty-vs-empty shape
   ("PACKET-HASH GATE FAILED" on two empty hashes) — with the C3 rule now
-  written, that site should take the same inconclusive arm in a later round.
-- **`dim-scan.sh:62`** — D1's assignment-position sibling (checkup:
-  SUSPECTED, needs a ~1900-CHANGE-line scan) — untouched.
-- **D3's 55-site `ffp1` sweep** — its own round with a grep-guard test.
+  written, that site should take the same inconclusive arm in a later round.~~
+  **CLOSED in 1.15.19** (test 95 §L4). It takes the inconclusive arm, and —
+  C7's lesson — does NOT skip the rest of the battery to get there: gate 4
+  still runs, and only then does the run refuse to bless at exit 10 with the
+  `.part` kept and a re-judge recipe printed.
+- ~~**`dim-scan.sh:62`** — D1's assignment-position sibling (checkup:
+  SUSPECTED, needs a ~1900-CHANGE-line scan) — untouched.~~ **CLOSED in
+  1.15.9** (single early-exit awk over the file).
+- ~~**D3's 55-site `ffp1` sweep** — its own round with a grep-guard test.~~ **CLOSED in 1.15.9** (94 sites; the no-sites-remain sweep is pinned in test 91 §5).
 - **clean.sh displays an empty `audio_tracks=` when probe.sh omits the count**
   — cosmetic; the guard above it already refuses rc != 0.
 - **batch.sh ledger classification of the new exit-2 refusals** — batch
@@ -293,6 +309,29 @@ patterns in lockstep" comment and no guard — the exact comment-rot class the
   early-exit reader; none sits on a failure path that loses a mktemp
   pointer, so they stay with `dim-scan.sh:62` in the sibling ledger. The
   test-84 class guard is deliberately scoped to the two confession sites.
+
+### Ledger addendum (2026-08-28, closed as 1.15.19)
+
+Five of the entries above are struck through. Two facts this ledger did NOT
+have, both worth keeping:
+
+1. **The ledger understated one defect and missed three others.** Gate (f)'s
+   `vdur` was recorded as an N/A read and is a silent FAIL-coded abort. And
+   gate (g) had THREE more `|| true` censuses — `g_srcaud` (:642),
+   `g_src_mp2` (:793), `g_has_pcm` (:794) — that no ledger entry named; they
+   were found by the class guard written for the round (test 95 §L5), which is
+   the argument for writing the guard before trusting the list. They fail in
+   opposite directions: two disarm a finding, one manufactures it.
+2. **Two of test 95's pins were already green pre-fix** and are recorded as
+   regression guards, not reached-path proofs: gate (g)'s baseline arm is lazy
+   (never reached on a clean fixture) and the AAC fixture cannot arm the
+   naked-MP2 finding. Proving those two paths needs a damaged-audio fixture
+   and an MP2 dual-track fixture — the honest carry-forward from this round.
+
+Still open, unchanged: the D1 display siblings (`ts-health.sh`, `probe.sh`'s
+`ms_tb_scan`, `diagnose.sh`) stay in the sibling ledger below — none sits on a
+failure path that loses a mktemp pointer; `clean.sh`'s cosmetic empty
+`audio_tracks=`; and batch.sh's ledger column for the exit-2 refusals.
 
 ## Execution record (2026-08-27, this bench)
 

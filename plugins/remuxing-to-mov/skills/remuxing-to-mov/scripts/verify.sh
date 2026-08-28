@@ -428,7 +428,15 @@ sdur () { ffp1 -v error -select_streams "$1" -show_entries stream=duration -of d
 # UNPROVEN: announced, REVIEW, never a quiet N/A and never a FAIL (the
 # artifact is not indicted by a broken ruler). Counting rides awk (NF), not
 # grep -c, whose rc-1-on-zero-matches is what bred the || true.
-vdur=$(sdur v:0)
+# EMPTY ≠ ABSENT (WO-1.15.4 leftover ledger, closed 1.15.19): vdur in
+# ASSIGNMENT position under pipefail was the C4 shape inside verify itself.
+# The ledger recorded this as "reads an empty probe as N/A"; MEASURED, it is
+# worse — a failed video-duration probe is a SILENT ERR-trap abort right here,
+# the report stops dead at this gate's header with NO verdict line, and the
+# script exits 1, which is verify's FAIL. "I could not measure the video
+# duration" shipped as "this file FAILED verification". A ruler that will not
+# read is UNPROVEN; the artifact is never indicted by a broken ruler.
+set +e; vdur=$(sdur v:0); vdur_rc=$?; set -e
 set +e
 f_cen=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null); f_cen_rc=$?
 set -e
@@ -441,13 +449,24 @@ if [ "$f_cen_rc" -ne 0 ]; then
   echo "   audio census probe FAILED (ffprobe rc=$f_cen_rc) — sync parity UNPROVEN, not N/A."
   [ "$verdict" = FAIL ] || verdict=REVIEW
   note="${note:+$note }Gate (f) could not census the output audio (ffprobe rc=$f_cen_rc) — A/V duration parity is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+elif [ "${vdur_rc:-0}" -ne 0 ]; then
+  echo "   video duration probe FAILED (ffprobe rc=$vdur_rc) — sync parity UNPROVEN, not N/A."
+  [ "$verdict" = FAIL ] || verdict=REVIEW
+  note="${note:+$note }Gate (f) could not read the output video duration (ffprobe rc=$vdur_rc) — A/V duration parity is UNPROVEN (not disproven); re-run verify when the probe succeeds."
 elif [ "${naud:-0}" -eq 0 ] || [ -z "$vdur" ] || [ "$vdur" = N/A ]; then
   echo "   no audio or no stream durations — sync parity N/A."
 else
-  worst=0; worst_dir=short; ai=0
+  worst=0; worst_dir=short; ai=0; trk_unproven=0
   while [ "$ai" -lt "$naud" ]; do
-    ad=$(sdur "a:$ai")
-    if [ -n "$ad" ] && [ "$ad" != N/A ]; then
+    # same assignment-position trap as vdur above, per track (1.15.19): a
+    # failed per-track duration probe used to abort the whole report silently.
+    # A track whose ruler failed is announced and excluded from `worst` —
+    # never folded in as a zero delta, which would read as perfect sync.
+    set +e; ad=$(sdur "a:$ai"); ad_rc=$?; set -e
+    if [ "$ad_rc" -ne 0 ]; then
+      echo "   a:$ai duration probe FAILED (ffprobe rc=$ad_rc) — this track's parity UNPROVEN."
+      trk_unproven=$((trk_unproven+1))
+    elif [ -n "$ad" ] && [ "$ad" != N/A ]; then
       delta=$(awk "BEGIN{d=($vdur)-($ad); if(d<0)d=-d; printf \"%.3f\", d}")
       echo "   a:$ai=${ad}s vs video ${vdur}s (Δ ${delta}s)"
       if awk "BEGIN{exit !(($delta) > ($worst))}"; then
@@ -457,6 +476,10 @@ else
     fi
     ai=$((ai+1))
   done
+  if [ "$trk_unproven" -gt 0 ]; then
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }Gate (f) could not read the duration of $trk_unproven output audio track(s) — their A/V parity is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+  fi
   if awk "BEGIN{exit !(($worst) > ($SYNC_TOL))}"; then
     # over the base tolerance — resolve the measured budget LAZILY (the
     # whole-file source scan only runs when the fixed gate would flag; a clean
@@ -639,7 +662,24 @@ else
   # doubled count invents phantom tracks to compare against. (The identical
   # probe against $OUT elsewhere in this file is safe — a .mov has no programs
   # — which is why the defect only appeared once a SOURCE was probed this way.)
-  g_srcaud=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$SRC" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)
+  # EMPTY ≠ ABSENT (1.15.19): A1 captured this gate's OUTPUT census and left
+  # its SOURCE census on `grep -c . || true` — a failed probe read as 0 source
+  # tracks, and g_baseline then reported "the source has NO audio track to
+  # compare against" for EVERY output track, silently discarding the
+  # inherited-vs-introduced attribution this gate exists to make. Counting
+  # rides awk (NF), not grep -c, whose rc-1-on-zero-matches is what bred the
+  # `|| true` in the first place.
+  set +e
+  g_srccen=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$SRC" 2>/dev/null); g_srccen_rc=$?
+  set -e
+  g_srcaud=0
+  if [ "$g_srccen_rc" -eq 0 ]; then
+    g_srcaud=$(printf '%s\n' "$g_srccen" | LC_ALL=C sort -u | awk 'NF{n++} END{print n+0}')
+  else
+    echo "   source audio census probe FAILED (ffprobe rc=$g_srccen_rc) — per-track baselines UNPROVEN, not absent."
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }Gate (g) could not census the SOURCE audio (ffprobe rc=$g_srccen_rc) — inherited-vs-introduced attribution is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+  fi
   g_dec1 () {  # $1 file, $2 track index -> one bounded head decode's error-line count
     ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map "0:a:$2" -vn -t "$WIN" -f null - 2>&1 | grep -c . || true
   }
@@ -743,6 +783,12 @@ else
     # candidate list in half — caught before this shipped, but it is exactly
     # the class of bug that made an in-band delimiter a bad idea here.)
     local i="$1" osig cand keep n kn j s spec fields label m k
+    if [ "${g_srccen_rc:-0}" -ne 0 ]; then
+      # EMPTY ≠ ABSENT (1.15.19): "the census FAILED" is not "there is nothing
+      # to compare against" — the gate above already announced it and landed
+      # REVIEW; this arm must not restate a failed probe as a measured absence.
+      printf 'none\nthe SOURCE audio census FAILED (ffprobe rc=%s) — no baseline could be enumerated (UNPROVEN, not absent)\n\n' "$g_srccen_rc"; return 0
+    fi
     if [ "${g_srcaud:-0}" -le 0 ]; then
       printf 'none\nthe source has NO audio track to compare against\n\n'; return 0
     fi
@@ -790,8 +836,30 @@ else
   # with the codec dedupes the listing artifact and keeps genuine repeats.
   # ,mp2,?$ not ,mp2$: a stream row carrying side data gains a trailing comma
   # ("0,mp2,") and a $-anchored grep goes blind on it (CHECKUP-2026-08-27 F8)
-  g_src_mp2=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$SRC" 2>/dev/null | LC_ALL=C sort -u | grep -cE ',mp2,?$' || true)
-  g_has_pcm=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c ',pcm_' || true)
+  # EMPTY ≠ ABSENT (1.15.19): both censuses feed the naked-MP2 verdict and
+  # both used to fail open on `|| true` — and they fail in OPPOSITE
+  # directions, which is why they are captured together. A failed SOURCE
+  # census reads 0 MP2 tracks and DISARMS the finding (the mp4a/mp3 arm never
+  # fires); a failed OUTPUT census reads 0 PCM tracks and ARMS it, accusing a
+  # legitimate dual-track deliverable of shipping "MP2 with NO PCM access
+  # track" from a probe that never ran. Neither direction is allowed: the
+  # accusation requires BOTH censuses to have succeeded. Counting rides awk.
+  set +e
+  g_mp2cen=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$SRC" 2>/dev/null); g_mp2cen_rc=$?
+  g_pcmcen=$(ffp -v error -select_streams a -show_entries stream=index,codec_name -of csv=p=0 "$OUT" 2>/dev/null); g_pcmcen_rc=$?
+  set -e
+  g_src_mp2=0; g_has_pcm=0; g_cls_rc=0
+  if [ "$g_mp2cen_rc" -eq 0 ] && [ "$g_pcmcen_rc" -eq 0 ]; then
+    # ,mp2,?$ not ,mp2$ — the F8 side-data trailing comma, preserved verbatim
+    g_src_mp2=$(printf '%s\n' "$g_mp2cen" | LC_ALL=C sort -u | awk '/,mp2,?$/{n++} END{print n+0}')
+    g_has_pcm=$(printf '%s\n' "$g_pcmcen" | LC_ALL=C sort -u | awk '/,pcm_/{n++} END{print n+0}')
+  else
+    g_cls_rc=1
+    echo "   MP2/PCM classification census FAILED (src rc=$g_mp2cen_rc, out rc=$g_pcmcen_rc) —"
+    echo "   the naked-MP2 finding is UNPROVEN: not withheld as 'clean', not asserted."
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }Gate (g) could not census the MP2/PCM layout (src rc=$g_mp2cen_rc, out rc=$g_pcmcen_rc) — the naked-MP2 finding is UNPROVEN (neither cleared nor asserted); re-run verify when the probe succeeds."
+  fi
   g_mp2_naked=0
   gi=0
   while [ "$gi" -lt "$g_naud" ]; do
@@ -988,7 +1056,7 @@ else
     fi
     gi=$((gi+1))
   done
-  if [ "$g_mp2_naked" -eq 1 ] && [ "${g_has_pcm:-0}" -eq 0 ]; then
+  if [ "$g_mp2_naked" -eq 1 ] && [ "${g_has_pcm:-0}" -eq 0 ] && [ "${g_cls_rc:-0}" -eq 0 ]; then
     [ "$verdict" = FAIL ] || verdict=REVIEW
     echo "   >> MP2 audio with NO PCM access track — the configuration this gate used to"
     echo "      PASS while failing the ones that work (D3, 1.13). AVFoundation has no"
@@ -1008,8 +1076,26 @@ if [ "$SILP" -eq 1 ]; then
   # on a filter-graph rebuild (mid-stream layout change) — hundreds of seconds of
   # silence with A/V durations still matching, so gate (f) passes it. Legitimate
   # resync gap-fill silence is bounded by the source's forward gaps (DISC_P_MISSING).
-  nao=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
-  if [ "${nao:-0}" -eq 0 ]; then
+  # EMPTY ≠ ABSENT (WO-1.15.4 leftover ledger, closed 1.15.19): the rule was
+  # applied to the gates that run by DEFAULT — (f) and (g), which announce
+  # this same probe's failure a few hundred lines above — and left here, at a
+  # gate the operator had to ASK for. Measured pre-fix: (f) and (g) print
+  # "audio census probe FAILED … UNPROVEN" and two lines later this gate read
+  # the SAME failed probe as "no audio in output". The caller who typed
+  # --silence is the one caller who has declared they want this evidence; a
+  # silent N/A is the worst possible answer to give them.
+  set +e
+  sil_cen=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null); sil_cen_rc=$?
+  set -e
+  nao=0
+  if [ "$sil_cen_rc" -eq 0 ]; then
+    nao=$(printf '%s\n' "$sil_cen" | LC_ALL=C sort -u | awk 'NF{n++} END{print n+0}')   # distinct indices: a program-bearing OUT lists each stream twice
+  fi
+  if [ "$sil_cen_rc" -ne 0 ]; then
+    echo "   audio census probe FAILED (ffprobe rc=$sil_cen_rc) — silence parity UNPROVEN, not N/A."
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }--silence could not census the output audio (ffprobe rc=$sil_cen_rc) — silence parity is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+  elif [ "${nao:-0}" -eq 0 ]; then
     echo "   no audio in output — silence parity N/A."
   else
     SIL_DB="${RTM_SIL_DB:--50dB}"; SIL_MIN="${RTM_SIL_MIN:-5}"; SIL_TOL="${RTM_SIL_TOL:-2.0}"
@@ -1201,9 +1287,25 @@ fi
 
 if [ "$AUD" -eq 1 ]; then
   echo "-- (--audio) dual-track audio fidelity (PCM access + preserved original) --"
-  na=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null | LC_ALL=C sort -u | grep -c . || true)   # distinct indices: a program-bearing OUT lists each stream twice
+  # EMPTY ≠ ABSENT (WO-1.15.4 leftover ledger, closed 1.15.19): same census,
+  # same `|| true`, same trap as --silence above — a failed probe printed
+  # "output has 0 audio track(s) … Skipping." and exited clean, reporting a
+  # track COUNT that was never measured to a caller who explicitly asked this
+  # gate to run. A failed census is UNPROVEN; a genuine 1-track layout is
+  # still an ordinary skip (the discrimination pin in test 95 §L2b).
+  set +e
+  aud_cen=$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "$OUT" 2>/dev/null); aud_cen_rc=$?
+  set -e
+  na=0
+  if [ "$aud_cen_rc" -eq 0 ]; then
+    na=$(printf '%s\n' "$aud_cen" | LC_ALL=C sort -u | awk 'NF{n++} END{print n+0}')   # distinct indices: a program-bearing OUT lists each stream twice
+  fi
   a0c=$(ffp1 -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
-  if [ "${na:-0}" -lt 2 ]; then
+  if [ "$aud_cen_rc" -ne 0 ]; then
+    echo "   audio census probe FAILED (ffprobe rc=$aud_cen_rc) — dual-track fidelity UNPROVEN, not skipped."
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }--audio could not census the output audio (ffprobe rc=$aud_cen_rc) — dual-track fidelity is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+  elif [ "${na:-0}" -lt 2 ]; then
     echo "   output has ${na:-0} audio track(s); dual-track checks need PCM access + original. Skipping."
   elif case "$a0c" in pcm_*) false;; *) true;; esac; then
     echo "   a:0 is '$a0c', not PCM — not a dual-track-access layout. Skipping."

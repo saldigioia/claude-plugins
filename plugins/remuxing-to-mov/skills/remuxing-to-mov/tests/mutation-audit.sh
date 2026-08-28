@@ -244,6 +244,21 @@ mut_raw_census_exit () {  # a builder hands the raw census rc to the operator ag
     "$1/scripts/trim-to-idr.sh"
 }
 pro_raw_census_exit () { printf '\n# never: exit "$census_rc" — ask rtm_census_review, then exit 0 or 10\n' >> "$1/scripts/trim-to-idr.sh"; }
+mut_optin_census () {  # an opt-in gate goes back to counting a census with grep -c (1.15.19)
+  # the exact WO-1.15.4-leftover shape: `| grep -c . || true` makes a FAILED
+  # ffprobe byte-identical to "no audio", and the gate the operator ASKED for
+  # then reports a track count nobody measured.
+  perl -pi -e 's/^(\s*)nao=\$\(printf .*$/${1}nao=\$(ffp -v error -select_streams a -show_entries stream=index -of csv=p=0 "\$OUT" 2>\/dev\/null | LC_ALL=C sort -u | grep -c . || true)/ if /nao=\$\(printf/' \
+    "$1/scripts/verify.sh"
+}
+pro_optin_census () {  # a comment that merely NAMES the banned shape must stay CLEAN
+  printf '\n# never: nao=$(ffp … -select_streams a … stream=index … | grep -c . || true)\n' >> "$1/scripts/verify.sh"
+}
+mut_phash_swallow () {  # derive-dts swallows its hash-pass rc again (1.15.19)
+  perl -pi -e 's/-f streamhash -hash md5 - 2>\/dev\/null; \}/-f streamhash -hash md5 - 2>\/dev\/null || true; }/' \
+    "$1/scripts/derive-dts.sh"
+}
+pro_phash_swallow () { printf '\n# never: phash() { ffmpeg … -f streamhash -hash md5 - 2>/dev/null || true; }\n' >> "$1/scripts/derive-dts.sh"; }
 mut_unask_trim () {   # the trim-to-idr CALL stops asking (clean.sh's prose still says --preflight-only)
   perl -pi -e 's/--preflight-only/--dry-run-only/ if /trim-to-idr\.sh"/' "$1/scripts/clean.sh"
 }
@@ -330,6 +345,10 @@ G32|defect|94-rot-sweep.sh|no builder exits with the raw census rc|mut_raw_censu
 P32|prose|94-rot-sweep.sh|no builder exits with the raw census rc|pro_raw_census_exit
 G33|defect|93-clean-paff-route.sh|asks trim-to-idr for its own verdict|mut_unask_trim
 P33|prose|93-clean-paff-route.sh|asks trim-to-idr for its own verdict|pro_unask_trim
+G34|defect|95-empty-ne-absent-optin-gates.sh|-counted audio census left in verify.sh|mut_optin_census
+P34|prose|95-empty-ne-absent-optin-gates.sh|-counted audio census left in verify.sh|pro_optin_census
+G35|defect|95-empty-ne-absent-optin-gates.sh|no longer swallows its rc|mut_phash_swallow
+P35|prose|95-empty-ne-absent-optin-gates.sh|no longer swallows its rc|pro_phash_swallow
 '
 
 # --------------------------------------------------------------------- runner
