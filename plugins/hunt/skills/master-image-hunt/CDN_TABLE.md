@@ -114,6 +114,7 @@ engine.
 |---|---|---|
 | Arc XP (tampabay, WaPo-CMS) | width≥source on `/resizer/v2` = byte-exact (signs PATH only); or CloudFront `cloudfront-…images.arcpublishing.com/<org>/<ID>.JPG` raw S3; galleries via `Fusion.globalContent` | project_arc_xp_resolver |
 | Vimeo (direct/embed) | `app.sh --vimeo`; embed-only → `?h=<hash>` from iframe | project_vimeo_embed_hash, project_vimeo_merge |
+| Squarespace native video (`video.squarespace-cdn.com`) | player block = escaped JSON `{variant}` template only (no iframe/src); rebuild `…/content/v1/<lib>/<asset>/playlist.m3u8` (public, unsigned) → yt-dlp; top HLS rung (`<W>:<H>` names, 1080p) = ceiling, no source/progressive variant (404) | project_squarespace_native_video |
 | ASA DAM (cosmictalents etc.) | public ceiling is 720p proxy `944_720_<id>.mp4`; real master = artist's own Vimeo (match duration+date+AR) | project_asa_asadts_resolver |
 | Pugpig (Vogue/GQ/VF PDF editions) | sibling per-page `.pdf` holds 300dpi print master; manifest `editionfeed/<id>/pugpig_atom_contents.json` | project_pugpig_pdfpages |
 | TheMaven / Arena image CDN | see memory | project_themaven_image_resolver |

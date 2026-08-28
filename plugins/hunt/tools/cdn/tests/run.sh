@@ -54,6 +54,12 @@ check "strip_url_params last"   "http://x.com/a.jpg"         "$(strip_url_params
 # ── basename derivation ─────────────────────────────────────────────────────
 check "basename plain"          "photo"  "$(basename_from_url 'http://x.com/path/photo.JPG?x=1')"
 check "basename mzstatic-spec"  "cc"     "$(basename_from_url 'https://is1-ssl.mzstatic.com/image/thumb/Music/aa/bb/cc/10000x10000.png')"
+# every progressive_redirect URL ends in the same literal `file.mp4` (usually
+# percent-encoded with a rendition suffix) — stem on id + rendition instead
+check "basename vimeo-progressive" "vimeo_1144962023_720p" \
+  "$(basename_from_url 'https://player.vimeo.com/progressive_redirect/playback/1144962023/rendition/720p/file.mp4%20%28720p%29.mp4?loc=external&signature=abc')"
+check "basename vimeo-progressive download-path" "vimeo_385365963_1080p" \
+  "$(basename_from_url 'https://player.vimeo.com/progressive_redirect/download/385365963/rendition/1080p/file.mp4?loc=external')"
 
 # ── Akamai impolicy resolvers (NBC / FWRD / Revolve) ────────────────────────
 check "nbc impolicy" \
@@ -357,6 +363,33 @@ check "direct media: poster image is not a media hit" "no" \
 check "direct media: page with no media returns nothing" "no" \
   "$(direct_media_from_html 'https://example.com/p' '<p>hello</p>' >/dev/null && echo yes || echo no)"
 
+# ── Squarespace native video discovery ──────────────────────────────────────
+# The player block carries only an HTML-escaped JSON config whose alexandriaUrl
+# is a {variant} template — no <video src>, no iframe, no media-extension URL —
+# so every URL-shaped extractor missed it (marzmiller.com). The parser rebuilds
+# <base>/playlist.m3u8 from the base, collapsing template/thumbnail/playlist
+# forms onto one URL.
+_sqsp_vid_html='<div class="sqs-native-video" data-config-video="{&quot;systemDataSourceType&quot;:&quot;mp4&quot;,&quot;alexandriaUrl&quot;:&quot;https://video.squarespace-cdn.com/content/v1/5334c422e4b097e4d9d69f2f/0060372e-eda5-429f-b06f-ee53ecfc6839/{variant}&quot;,&quot;systemDataVariants&quot;:&quot;1998:1080,666:360&quot;}"></div>'
+
+check "sqsp video: {variant} template → playlist.m3u8" \
+  "https://video.squarespace-cdn.com/content/v1/5334c422e4b097e4d9d69f2f/0060372e-eda5-429f-b06f-ee53ecfc6839/playlist.m3u8" \
+  "$(squarespace_video_urls_from_html "$_sqsp_vid_html")"
+
+check "sqsp video: template + thumbnail collapse to one playlist" \
+  "https://video.squarespace-cdn.com/content/v1/5334c422e4b097e4d9d69f2f/0060372e-eda5-429f-b06f-ee53ecfc6839/playlist.m3u8" \
+  "$(squarespace_video_urls_from_html "${_sqsp_vid_html}<img src=\"https://video.squarespace-cdn.com/content/v1/5334c422e4b097e4d9d69f2f/0060372e-eda5-429f-b06f-ee53ecfc6839/thumbnail\">")"
+
+check "sqsp video: two distinct assets kept, order preserved" \
+  "https://video.squarespace-cdn.com/content/v1/aaaa/1111-2222/playlist.m3u8
+https://video.squarespace-cdn.com/content/v1/aaaa/3333-4444/playlist.m3u8" \
+  "$(squarespace_video_urls_from_html '<a href="https://video.squarespace-cdn.com/content/v1/aaaa/1111-2222/{variant}"></a><a href="https://video.squarespace-cdn.com/content/v1/aaaa/3333-4444/thumbnail"></a>')"
+
+check "sqsp video: images.squarespace-cdn.com is not a video hit" "no" \
+  "$(squarespace_video_urls_from_html '<img src="https://images.squarespace-cdn.com/content/v1/5334c422e4b097e4d9d69f2f/00c81e13/favicon.ico">' >/dev/null && echo yes || echo no)"
+
+check "sqsp video: page with no native video returns nothing" "no" \
+  "$(squarespace_video_urls_from_html '<p>hello</p>' >/dev/null && echo yes || echo no)"
+
 # ── YouTube embed discovery ─────────────────────────────────────────────────
 # Squarespace stores the Embedly iframe HTML-escaped inside a data-block-json
 # attribute, so the video id only appears URL-encoded
@@ -425,6 +458,146 @@ check "vimeo island: multi-id, no slug match declines" "no" \
 
 check "vimeo island: no api uris declines" "no" \
   "$(vimeo_ids_from_json_island '<p>hello</p>' 'https://x.tv/work?play=first-vid' >/dev/null && echo yes || echo no)"
+
+# ── Vimeo bare-id discovery (vimeo_scrape_embed_ids Strategy 2) ──────────────
+# Webflow binds a "Vimeo ID" CMS field to a custom attribute holding the bare
+# numeric id (data-vimeo="<id>") and templates the same id into the schema.org
+# VideoObject as "contentUrl":"<id>" — neither is URL-shaped, so every
+# URL-matching strategy missed them and the page died in the image pipeline
+# (bodeyco.com).
+_webflow_html='<div data-vimeo="1144962023" class="video"><video><source data-src="" type="video/mp4"></video></div>'
+_jsonld_html='<script type="application/ld+json">{"@type":"VideoObject","name":"V1","contentUrl":"1144962023"},{"@type":"VideoObject","name":"V2","contentUrl":""}</script><a href="https://vimeo.com/bodeyco">vimeo</a>'
+
+check "vimeo bare-id: webflow data-vimeo attribute" "1144962023" \
+  "$(vimeo_ids_from_data_attrs "$_webflow_html")"
+
+check "vimeo bare-id: data-vimeo-id attribute" "385365963" \
+  "$(vimeo_ids_from_data_attrs '<div data-vimeo-id="385365963">')"
+
+check "vimeo bare-id: legacy data-video-id preserved" "12345" \
+  "$(vimeo_ids_from_data_attrs '<div data-video-id="12345">')"
+
+check "vimeo bare-id: json-ld contentUrl, empty siblings ignored" "1144962023" \
+  "$(vimeo_ids_from_data_attrs "$_jsonld_html")"
+
+check "vimeo bare-id: json-ld contentUrl declines when page never says vimeo" "no" \
+  "$(vimeo_ids_from_data_attrs '{"@type":"VideoObject","contentUrl":"1144962023"}' >/dev/null && echo yes || echo no)"
+
+check "vimeo bare-id: sub-6-digit contentUrl not an id" "no" \
+  "$(vimeo_ids_from_data_attrs 'vimeo {"contentUrl":"123"}' >/dev/null && echo yes || echo no)"
+
+check "vimeo bare-id: url-valued data-vimeo attr not mistaken for an id" "no" \
+  "$(vimeo_ids_from_data_attrs '<div data-vimeo="https://vimeo.com/385365963">' >/dev/null && echo yes || echo no)"
+
+check "vimeo bare-id: page with no signal declines" "no" \
+  "$(vimeo_ids_from_data_attrs '<p>hello</p>' >/dev/null && echo yes || echo no)"
+
+# ── input URL normalization ─────────────────────────────────────────────────
+# A URL copied out of devtools arrives scheme-less; curl tolerates it but aria2c
+# dies with "Unrecognized URI or unsupported protocol" only AFTER the probe
+# pipeline has picked a winner.
+check "normalize: scheme-less host gets https" \
+  "https://player.vimeo.com/progressive_redirect/playback/1/rendition/720p/file.mp4?a=b" \
+  "$(normalize_url 'player.vimeo.com/progressive_redirect/playback/1/rendition/720p/file.mp4?a=b')"
+
+check "normalize: existing scheme untouched" "https://x.com/a" \
+  "$(normalize_url 'https://x.com/a')"
+
+check "normalize: http scheme untouched" "http://x.com/a" \
+  "$(normalize_url 'http://x.com/a')"
+
+check "normalize: surrounding whitespace trimmed" "https://x.com/a" \
+  "$(normalize_url '   https://x.com/a   ')"
+
+check "normalize: trailing CR stripped" "https://x.com/a" \
+  "$(normalize_url "$(printf 'https://x.com/a\r')")"
+
+check "normalize: protocol-relative gets https" "https://cdn.example.com/a.jpg" \
+  "$(normalize_url '//cdn.example.com/a.jpg')"
+
+check "normalize: bare host with port" "https://example.com:8080/a" \
+  "$(normalize_url 'example.com:8080/a')"
+
+check "normalize: IPv4 host gets https" "https://192.168.1.10/cam/a.jpg" \
+  "$(normalize_url '192.168.1.10/cam/a.jpg')"
+
+check "normalize: localhost with port gets https" "https://localhost:8080/a.mp4" \
+  "$(normalize_url 'localhost:8080/a.mp4')"
+
+check "normalize: userinfo@host gets https" "https://user:pw@host.com/a" \
+  "$(normalize_url 'user:pw@host.com/a')"
+
+check "normalize: underscore label gets https" "https://cdn_1.example.com/a.jpg" \
+  "$(normalize_url 'cdn_1.example.com/a.jpg')"
+
+check "normalize: a scheme inside the QUERY is not the url's scheme" "https://x.com/a?next=https://y" \
+  "$(normalize_url 'x.com/a?next=https://y')"
+
+check "normalize: non-host-shaped input left alone" "notaurl" \
+  "$(normalize_url 'notaurl')"
+
+check "normalize: whitespace-only declines" "no" \
+  "$(normalize_url '   ' >/dev/null && echo yes || echo no)"
+
+# read_urls: an argv value pasted with a trailing newline used to yield a second,
+# empty URL that ran the whole pipeline and was tallied as a phantom failure.
+check "read_urls: trailing newline yields one url, not two" \
+  "https://player.vimeo.com/x.mp4" \
+  "$(printf 'player.vimeo.com/x.mp4\n\n' | read_urls)"
+
+check "read_urls: comments and blanks skipped, scheme supplied" \
+  "https://a.com/1
+https://b.com/2" \
+  "$(printf '# note\n\na.com/1\n\nhttps://b.com/2\n' | read_urls)"
+
+# a URL copied out of the registry (the lever itself) must not need a page
+check "sqsp video: a bare CDN url on argv rebuilds its playlist" \
+  "https://video.squarespace-cdn.com/content/v1/aaaa/1111-2222/playlist.m3u8" \
+  "$(squarespace_video_urls_from_html 'https://video.squarespace-cdn.com/content/v1/aaaa/1111-2222/{variant}')"
+
+check "basename sqsp-video (asset id, not playlist/thumbnail/{variant})" \
+  "sqsp_0060372e-eda5-429f-b06f-ee53ecfc6839" \
+  "$(basename_from_url 'https://video.squarespace-cdn.com/content/v1/5334c422e4b097e4d9d69f2f/0060372e-eda5-429f-b06f-ee53ecfc6839/playlist.m3u8')"
+
+# data-vimeo-id is the platform's own attribute: any id length (pre-2008 ids
+# are 5 digits) — the generic data-*vimeo* form still needs 6+ to self-attribute
+check "vimeo bare-id: short data-vimeo-id (early id) still found" "54321" \
+  "$(vimeo_ids_from_data_attrs '<div data-vimeo-id="54321">')"
+
+check "vimeo bare-id: short value on a generic data-*vimeo* attr declines" "no" \
+  "$(vimeo_ids_from_data_attrs '<div data-vimeo="54321">' >/dev/null && echo yes || echo no)"
+
+check "vimeo bare-id: a digit in the attribute NAME is not an id" "1144962023" \
+  "$(vimeo_ids_from_data_attrs '<div data-w3-vimeo="1144962023">')"
+
+# collect_urls is where the phantom second URL actually lived (argv branch);
+# read_urls always skipped blank lines, so only this exercises the fix
+check "collect_urls: argv value with a trailing newline is ONE url" "1" \
+  "$(POSITIONAL=($'https://x.com/a\n'); collect_urls | wc -l | tr -d ' ')"
+
+check "collect_urls: argv value is normalized like a file line" "https://x.com/a" \
+  "$(POSITIONAL=('  x.com/a  '); collect_urls)"
+
+# a 6-digit NON-id attribute (start offset, duration) must not become an id:
+# the short-circuit returned both, and handle_vimeo ran on the stranger's id
+check "vimeo bare-id: data-vimeo-start beside the real id yields only the id" "385365963" \
+  "$(vimeo_ids_from_data_attrs '<div data-vimeo-start="123456" data-vimeo-id="385365963">')"
+
+check "vimeo bare-id: data-vimeo-duration alone is not an id" "no" \
+  "$(vimeo_ids_from_data_attrs '<div data-vimeo-duration="600000">' >/dev/null && echo yes || echo no)"
+
+check "vimeo bare-id: data-vimeo-video-id carrier still found" "385365963" \
+  "$(vimeo_ids_from_data_attrs '<div data-vimeo-video-id="385365963">')"
+
+# a mistyped list-file name must not become https://urls.txt
+check "collect_urls: a missing list-file name yields no url" "" \
+  "$(POSITIONAL=('urls.txt'); collect_urls 2>/dev/null)"
+
+check "collect_urls: …and says so on stderr" "yes" \
+  "$(POSITIONAL=('urls.txt'); collect_urls 2>&1 >/dev/null | grep -q 'no such file: urls.txt' && echo yes || echo no)"
+
+check "collect_urls: a dotted host with a path is still a url" "https://example.com/a.json" \
+  "$(POSITIONAL=('example.com/a.json'); collect_urls)"
 
 # ── summary ─────────────────────────────────────────────────────────────────
 echo ""

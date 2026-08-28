@@ -45,6 +45,9 @@ VIMEO_MODE=false
 COOKIES=""
 JWT=""
 JWT_EXPIRY=0
+JWT_USER_ID=""
+JWT_SCOPES=""
+JWT_ANONYMOUS="unknown"   # true | false | unknown (payload undecodable)
 PREFER_SOURCE="${PREFER_SOURCE:-true}"
 ARIA2_CONNECTIONS="${ARIA2_CONNECTIONS:-16}"
 FORCE_DOWNLOAD=false
@@ -476,6 +479,18 @@ basename_from_url() {
   if [[ "$base" =~ ^https?://s\.hdnux\.com/photos/([0-9]+/){4}([0-9]+)/[0-9]+/[^/]+$ ]]; then
     base="hdnux_${BASH_REMATCH[2]}"
   fi
+  # player.vimeo.com progressive_redirect URLs all end in the same literal
+  # `file.mp4` — usually percent-encoded with a rendition suffix
+  # (`file.mp4%20%28720p%29.mp4`), which is both collision-prone and ugly on
+  # disk. Use the video id + rendition from the path instead.
+  if [[ "$base" =~ ^https?://player\.vimeo\.com/progressive_redirect/[^/]+/([0-9]+)/rendition/([^/]+)/ ]]; then
+    base="vimeo_${BASH_REMATCH[1]}_${BASH_REMATCH[2]}"
+  fi
+  # video.squarespace-cdn.com: the path ends in {variant}, /thumbnail or
+  # playlist.m3u8 — none of them a name. Stem on the asset id.
+  if [[ "$base" =~ ^https?://video\.squarespace-cdn\.com/content/v1/[A-Za-z0-9]+/([A-Za-z0-9-]+) ]]; then
+    base="sqsp_${BASH_REMATCH[1]}"
+  fi
   # i.discogs.com (signed imgproxy): the path ends in a chunk of the base64url-
   # encoded S3 source URL — meaningless and collision-prone as a stem. Decode
   # it and use the real source filename (e.g. R-6682162-1424536760-8982).
@@ -579,6 +594,55 @@ vimeo_extract_hash() {
     echo "$hash"
 }
 
+# Pure helper for vimeo_scrape_embed_ids Strategy 2: pull Vimeo ids out of
+# BARE-ID carriers — attributes and JSON-LD fields that hold the numeric id on
+# its own, with no player.vimeo.com URL anywhere in the served HTML.
+#
+# Webflow (and similar CMS) templates bind a "Vimeo ID" collection field to a
+# custom attribute whose NAME carries the platform and whose VALUE is the bare
+# id — `data-vimeo="1144962023"` — then build the iframe client-side at runtime,
+# so no URL-shaped matcher ever sees it. The same field is also templated into
+# the page's schema.org VideoObject as `"contentUrl": "<id>"` — an id where a
+# URL is expected, which is why that form is invisible too. bodeyco.com carries
+# both of these and nothing else; it previously fell through all 9 strategies
+# into the image pipeline and died.
+#
+# Matched, in fallback order:
+#   1. data-vimeo-id="<digits>" at any length (the platform's own attribute;
+#      pre-2008 ids are 5 digits — pre-existing behaviour, kept verbatim), or
+#      a data-*vimeo attribute whose name ENDS at vimeo / -video / -id (any
+#      prefix: data-vimeo, data-w3-vimeo, data-vimeo-video-id) with a bare 6+
+#      digit value. The suffix is the discriminator: an id carrier's name stops
+#      at the platform, while data-vimeo-start / -duration / -width name what
+#      they hold — and a 6-digit start offset returned as an id would send
+#      handle_vimeo after a stranger's upload and file the real one as _2.
+#   2. data-video-id="<digits>" (pre-existing behaviour, kept verbatim)
+#   3. JSON-LD "contentUrl": "<6+ digits>" — gated on the page mentioning vimeo
+#      at all, since a bare numeric contentUrl names no platform by itself
+vimeo_ids_from_data_attrs() {
+    local html="$1"
+    local ids
+
+    # each `|| true` keeps a declining grep from tripping `set -e` when this
+    # helper is called bare (as the offline test harness does)
+    # the VALUE is extracted between its quotes: a digit in the attribute
+    # NAME (data-w3-vimeo=) must never be read as an id
+    ids=$(grep -oiE 'data-vimeo-id="[0-9]+"|data-([a-z0-9]+-)*vimeo(-?video)?(-?id)?="[0-9]{6,}"' <<< "$html" \
+        | grep -oE '"[0-9]+"' | tr -d '"' | sort -u || true)
+    [[ -n "$ids" ]] && { echo "$ids"; return 0; }
+
+    ids=$(grep -oE 'data-video-id="[0-9]+"' <<< "$html" | grep -oE '[0-9]+' | sort -u || true)
+    [[ -n "$ids" ]] && { echo "$ids"; return 0; }
+
+    if grep -qi 'vimeo' <<< "$html"; then
+        ids=$(grep -oE '"contentUrl"[[:space:]]*:[[:space:]]*"[0-9]{6,}"' <<< "$html" \
+            | grep -oE '[0-9]{6,}' | sort -u || true)
+        [[ -n "$ids" ]] && { echo "$ids"; return 0; }
+    fi
+
+    return 1
+}
+
 # Pure helper for vimeo_scrape_embed_ids Strategy 4: extract Vimeo ids from
 # inline JSON data islands that embed api.vimeo.com video objects (Sanity /
 # Next.js router preloads, e.g. larkcreative.tv). The only stable marker is
@@ -649,12 +713,10 @@ vimeo_scrape_embed_ids() {
     local ids
     ids=$(echo "$html" | grep -oE 'player\.vimeo\.com/video/[0-9]+' | grep -oE '[0-9]+' | sort -u)
 
-    # Strategy 2: data-vimeo-id or data-video-id attributes
+    # Strategy 2: bare-id carriers — data-*vimeo* / data-video-id attributes and
+    # JSON-LD "contentUrl": "<id>" (see vimeo_ids_from_data_attrs)
     if [[ -z "$ids" ]]; then
-        ids=$(echo "$html" | grep -oE 'data-vimeo-id="[0-9]+"' | grep -oE '[0-9]+' | sort -u)
-    fi
-    if [[ -z "$ids" ]]; then
-        ids=$(echo "$html" | grep -oE 'data-video-id="[0-9]+"' | grep -oE '[0-9]+' | sort -u)
+        ids=$(vimeo_ids_from_data_attrs "$html") || true
     fi
 
     # Strategy 3: Vimeo IDs in inline JSON/script blocks
@@ -758,16 +820,65 @@ vimeo_refresh_jwt() {
         return 1
     fi
 
-    JWT_EXPIRY=$(echo "$JWT" | python3 -c "
+    # Decode the JWT payload once: expiry, user_id and scopes drive both the
+    # expiry-refresh check and the anonymous-cookie diagnostic below. The
+    # decoder's exit status is KEPT: an undecodable payload (python3 missing, a
+    # claim renamed upstream) must read as UNKNOWN, never as anonymous — or an
+    # authenticated cookie jar would be demoted to the transcode ladder on a
+    # decode hiccup, with a diagnosis that blames the operator's login.
+    local jwt_meta
+    JWT_ANONYMOUS="unknown"
+    if jwt_meta=$(echo "$JWT" | python3 -c "
 import sys, json, base64
 token = sys.stdin.read().strip()
 payload = token.split('.')[1]
 payload += '=' * (4 - len(payload) % 4)
 d = json.loads(base64.urlsafe_b64decode(payload))
 print(d.get('exp', 0))
-" 2>/dev/null)
+print(d.get('user_id') if d.get('user_id') is not None else '')
+print(d.get('scopes', ''))
+" 2>/dev/null); then
+        { read -r JWT_EXPIRY; read -r JWT_USER_ID; read -r JWT_SCOPES; } <<< "$jwt_meta" || true
+        # A JWT minted from cookies that carry no login session is scope=public /
+        # user_id=null. Vimeo removed download/files/play from the public scope,
+        # so the API source path CANNOT work with anonymous cookies.
+        if [[ -z "$JWT_USER_ID" ]] || [[ "$JWT_SCOPES" != *video_files* ]]; then
+            JWT_ANONYMOUS=true
+        else
+            JWT_ANONYMOUS=false
+        fi
+    else
+        JWT_EXPIRY=0; JWT_USER_ID=""; JWT_SCOPES=""
+    fi
 
-    vok "JWT acquired (expires $(date -r "$JWT_EXPIRY" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$JWT_EXPIRY"))"
+    if [[ "$JWT_EXPIRY" =~ ^[0-9]+$ ]] && (( JWT_EXPIRY > 0 )); then
+        vok "JWT acquired (expires $(date -r "$JWT_EXPIRY" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "$JWT_EXPIRY"))"
+    else
+        vok "JWT acquired (expiry unknown — payload not decoded)"
+    fi
+
+    case "$JWT_ANONYMOUS" in
+      true)
+        # warn once, loudly, instead of letting it fail later with the cryptic
+        # "No download/files fields" (the callers that silence stderr get the
+        # reason appended to their own fallback line via vimeo_api_unavailable_why)
+        vwarn "Cookies are ANONYMOUS (scope='${JWT_SCOPES:-public}', no user session)."
+        vwarn "The API source-master path needs authenticated cookies with the 'video_files' scope."
+        vwarn "Re-export cookies.txt while logged in to vimeo.com; otherwise the ceiling is the"
+        vwarn "config/yt-dlp transcode ladder (typically ≤1080p), not the uploaded source."
+        ;;
+      unknown)
+        vwarn "Could not decode the JWT payload — cannot tell whether the cookies carry a login session; trying the API anyway."
+        ;;
+    esac
+}
+
+# One-line reason for an "API unavailable" fallback, for callers that run
+# vimeo_process_api with stderr silenced (the anonymous warning above never
+# reaches them). Empty when there is nothing to add.
+vimeo_api_unavailable_why() {
+    [[ "$JWT_ANONYMOUS" == true ]] && printf ' (cookies are anonymous: no video_files scope)'
+    return 0
 }
 
 # ── Vimeo API path ──────────────────────────────────────────────────────────
@@ -1011,6 +1122,14 @@ vimeo_process_api() {
 
     vimeo_refresh_jwt || return 1
 
+    # Anonymous JWT: the API cannot return download/files (Vimeo dropped them from
+    # the public scope). Skip straight to the config/yt-dlp fallback rather than
+    # burn an API round-trip. Only a DECODED anonymous payload skips: an
+    # undecodable one is unknown, and unknown still gets its API attempt.
+    if [[ "$JWT_ANONYMOUS" == true ]]; then
+        return 1
+    fi
+
     local api_json
     api_json=$(vimeo_fetch_info "$video_id" "$unlisted_hash")
 
@@ -1023,7 +1142,7 @@ try:
     if 'error' in d:
         print(d.get('developer_message', d.get('error_code', d['error'])))
     elif not d.get('download') and not d.get('files'):
-        print('No download/files fields in response')
+        print('No download/files in API response (video files not exposed for this asset)')
 except Exception as e:
     print(f'Failed to parse API response: {e}')
 " 2>/dev/null)
@@ -1252,7 +1371,7 @@ vimeo_process_url() {
             fi
 
             # Fall back to player config path
-            vwarn "API unavailable for $video_id — trying player config path"
+            vwarn "API unavailable for $video_id$(vimeo_api_unavailable_why) — trying player config path"
             vimeo_process_player "$video_id" "$referer"
 
         done <<< "$embed_data"
@@ -3373,7 +3492,7 @@ handle_vimeo() {
       # Try API first, then player config with referer
       printf "${CYAN}[info]${RESET}  Processing video ${BOLD}%s${RESET} (embed, referer: %s)\n" "$vimeo_id" "$referer"
       if ! vimeo_process_api "$vimeo_id" 2>/dev/null; then
-        vwarn "API unavailable for $vimeo_id — trying player config path"
+        vwarn "API unavailable for $vimeo_id$(vimeo_api_unavailable_why) — trying player config path"
         vimeo_process_player "$vimeo_id" "$referer"
       fi
     else
@@ -3409,12 +3528,25 @@ handle_vimeo() {
 
   echo "   Vimeo ${vimeo_id} — fetching renditions..."
 
-  local dl_url ref_args=() manifest_info=""
+  local dl_url ref_args=() manifest_info="" had_referer=false
 
+  # A domain-restricted embed only yields a manifest when the embedding page's
+  # URL is sent as Referer. That request also fails INTERMITTENTLY (Vimeo hands
+  # back an empty/errored player config now and then), so retry once before
+  # concluding anything — a single transient miss used to be reported as a hard
+  # "embed-only" verdict even though the referer was supplied and correct,
+  # sending the user off to dig a progressive URL out of devtools by hand.
   if [[ -n "$referer" && "$referer" != "$url" && "$referer" != *"vimeo.com"* ]]; then
+    had_referer=true
     dl_url="https://player.vimeo.com/video/${vimeo_id}"
     ref_args=(--referer "$referer")
-    manifest_info="$(yt-dlp --list-formats "${ref_args[@]}" "$dl_url" 2>/dev/null)" || true
+    local attempt
+    for attempt in 1 2; do
+      manifest_info="$(yt-dlp --list-formats "${ref_args[@]}" "$dl_url" 2>/dev/null)" || true
+      echo "$manifest_info" | grep -qE '[0-9]+x[0-9]+' && break
+      manifest_info=""
+      (( attempt == 1 )) && sleep 2
+    done
   fi
 
   if [[ -z "$manifest_info" ]]; then
@@ -3424,9 +3556,15 @@ handle_vimeo() {
   fi
 
   if [[ -z "$manifest_info" ]] || ! echo "$manifest_info" | grep -qE '[0-9]+x[0-9]+'; then
-    echo "   !! embed-only video — needs the URL of the page that embeds it" >&2
-    echo "   usage: bash app.sh 'https://example.com/page-with-video'" >&2
-    echo "   (the page must server-render the Vimeo embed, not load it via JS)" >&2
+    if $had_referer; then
+      echo "   !! no renditions for ${vimeo_id} even with Referer: ${referer}" >&2
+      echo "   (the embed may be private/password-gated, or Vimeo is throttling —" >&2
+      echo "    retry, or use --vimeo -c cookies.txt for the authenticated path)" >&2
+    else
+      echo "   !! embed-only video — needs the URL of the page that embeds it" >&2
+      echo "   usage: bash app.sh 'https://example.com/page-with-video'" >&2
+      echo "   (the page must server-render the Vimeo embed, not load it via JS)" >&2
+    fi
     return 2
   fi
 
@@ -3440,15 +3578,28 @@ handle_vimeo() {
   [[ -n "$best_res" ]] && echo "   best → ${best_res} @ ${best_tbr:-?}bps"
 
   echo "   downloading via yt-dlp → $out"
-  if yt-dlp \
-      -f "bestvideo+bestaudio/best" \
-      --merge-output-format mp4 \
-      ${ref_args[@]+"${ref_args[@]}"} \
-      -o "$out" \
-      --no-overwrites \
-      "$dl_url" 2>&1 | sed 's/^/   /'; then
-    return 0
-  fi
+  # Vimeo throttles request bursts: the player-config fetch intermittently
+  # 401s even with a valid Referer — observed on bodeyco.com seconds after
+  # --list-formats had succeeded with the identical arguments. Retry the whole
+  # invocation so a throttle isn't reported as a download failure.
+  local dl_attempt
+  for dl_attempt in 1 2 3; do
+    if yt-dlp \
+        -f "bestvideo+bestaudio/best" \
+        --merge-output-format mp4 \
+        --retries 10 \
+        --extractor-retries 5 \
+        ${ref_args[@]+"${ref_args[@]}"} \
+        -o "$out" \
+        --no-overwrites \
+        "$dl_url" 2>&1 | sed 's/^/   /'; then
+      return 0
+    fi
+    if (( dl_attempt < 3 )); then
+      echo "   retrying in 5s (attempt $((dl_attempt + 1))/3)…"
+      sleep 5
+    fi
+  done
   return 2
 }
 
@@ -3601,6 +3752,46 @@ extract_youtube_from_page() {
   html="$(curl -sL --max-time 15 -A "$UA" "$url" 2>/dev/null)" || return 1
   [[ -n "$html" ]] || return 1
   youtube_ids_from_html "$html"
+}
+
+# ── Squarespace native video discovery ──────────────────────────────────────
+#
+# Squarespace's own video hosting (video.squarespace-cdn.com) renders no
+# <video src>, no iframe, and no manifest URL in the served HTML — the player
+# block carries an HTML-escaped JSON config (data-config-video) whose
+# alexandriaUrl is a {variant} template:
+#   https://video.squarespace-cdn.com/content/v1/<libraryId>/<systemDataId>/{variant}
+# so every URL-shaped extractor (Mux/Vimeo/YouTube/direct-media) missed it and
+# the page died in the image pipeline (marzmiller.com). The master playlist is
+# <base>/playlist.m3u8 — public and unsigned; it hands out freshly signed
+# variant playlists (AES-128 segments, public /key/), so yt-dlp takes it
+# end-to-end. The top HLS rung (h264 1080p) is the public ceiling: no
+# progressive/source/original/download variant exists (all probed → 404).
+#
+# Pure parser: HTML → playlist.m3u8 URLs, one per line, deduped, order kept.
+# Matches the base by host+path shape alone (self-attributing), so the
+# {variant} template, a poster /thumbnail reference, or an explicit playlist
+# URL all collapse onto the same base.
+squarespace_video_urls_from_html() {
+  local html="$1"
+  local bases
+  bases="$(grep -oE 'https://video\.squarespace-cdn\.com/content/v1/[A-Za-z0-9]+/[A-Za-z0-9-]+' <<< "$html" \
+    | awk '!seen[$0]++')" || true
+  [[ -n "$bases" ]] || return 1
+  local b
+  while IFS= read -r b; do
+    echo "${b}/playlist.m3u8"
+  done <<< "$bases"
+}
+
+# Extract Squarespace native-video playlist URLs from a webpage (network
+# wrapper over the parser). Echoes one URL per line; returns 1 if none found.
+extract_squarespace_video_from_page() {
+  local url="$1"
+  local html
+  html="$(curl -sL --max-time 15 -A "$UA" "$url" 2>/dev/null)" || return 1
+  [[ -n "$html" ]] || return 1
+  squarespace_video_urls_from_html "$html"
 }
 
 # ── Self-hosted / direct media discovery ────────────────────────────────────
@@ -3764,14 +3955,43 @@ USAGE
   exit 1
 }
 
+# Normalize one input URL: drop stray CR, trim whitespace, and supply a missing
+# scheme. A value copied out of devtools / an address bar routinely arrives bare
+# (`player.vimeo.com/progressive_redirect/…`). curl tolerates that, aria2c does
+# NOT — it dies with "Unrecognized URI or unsupported protocol" — so the whole
+# probe pipeline would succeed, pick a winner, and only then fail at download.
+# Protocol-relative `//host/…` gets https: as well.
+normalize_url() {
+  local u="$1"
+  u="${u//$'\r'/}"
+  u="${u#"${u%%[![:space:]]*}"}"   # ltrim
+  u="${u%"${u##*[![:space:]]}"}"   # rtrim
+  [[ -z "$u" ]] && return 1
+  # A scheme counts only at the START — `x.com/a?next=https://y` carries one
+  # in its query and used to pass as already-schemed. Host-shaped means a
+  # dotted name (labels may hold digits and `_`, so IPv4 and cdn_1.example.com
+  # qualify), or `localhost`, with an optional userinfo@ and :port — the
+  # classes aria2c rejects bare. Anything else is left alone so a genuinely
+  # malformed input still surfaces as itself in the log.
+  if [[ "$u" =~ ^[A-Za-z][A-Za-z0-9+.-]*:// ]]; then
+    :
+  elif [[ "$u" == //* ]]; then
+    u="https:${u}"
+  elif [[ "$u" =~ ^([^/@[:space:]]+@)?(([A-Za-z0-9_-]+\.)+[A-Za-z0-9_-]+|localhost)(:[0-9]+)?([/?#].*)?$ ]]; then
+    u="https://${u}"
+  fi
+  printf '%s\n' "$u"
+}
+
 read_urls() {
-  local line
+  local line norm
   while IFS= read -r line; do
     line="${line#"${line%%[![:space:]]*}"}"   # ltrim
     line="${line%"${line##*[![:space:]]}"}"   # rtrim
     [[ -z "$line" ]] && continue
     [[ "$line" == \#* ]] && continue
-    echo "$line"
+    norm="$(normalize_url "$line")" || continue
+    echo "$norm"
   done
 }
 
@@ -3789,8 +4009,17 @@ collect_urls() {
     for arg in "${POSITIONAL[@]}"; do
       if [[ -f "$arg" ]]; then
         while IFS= read -r u; do urls+=("$u"); done < <(read_urls < "$arg")
+      elif [[ "$arg" != *://* && "$arg" != */* && "$arg" =~ \.(txt|lst|list|urls|csv|har|json)$ ]]; then
+        # a list-file NAME with no such file: normalize_url reads `urls.txt` as
+        # a host (dotted, TLD-shaped), the run probed https://urls.txt, and the
+        # summary tallied one phantom failure with no "no such file" anywhere.
+        echo "!! no such file: $arg (expected a URL, or an existing URL list)" >&2
       else
-        urls+=("$arg")
+        # Route argv through the same reader as files/stdin. An argument pasted
+        # with a trailing newline inside the quotes used to become TWO urls —
+        # the second empty, which then ran the full pipeline and was tallied as
+        # a phantom failure — and a scheme-less one went unnormalized.
+        while IFS= read -r u; do urls+=("$u"); done < <(read_urls <<< "$arg")
       fi
     done
   else
@@ -4057,6 +4286,24 @@ stage_video_intercept() {
     if [[ $yt_rc -eq 0 ]]; then (( OK++ )) || true; _SKIP=1; return
     elif [[ $yt_rc -eq 2 ]]; then echo "   !! download failed" >&2; (( FAIL++ )) || true; _SKIP=1; return; fi
 
+  # Direct Squarespace native-video URL — the {variant} template, the poster
+  # /thumbnail, or the playlist itself. Without this arm the URL the registry
+  # names as the lever was a dead input on argv: the page gate below excludes
+  # .m3u8, and is_squarespace then claimed the host for the IMAGE ladder
+  # (?format=original + an image Accept header -> "no valid media format").
+  # The pure parser rebuilds <base>/playlist.m3u8 from any of those shapes.
+  elif [[ "$url" == *"video.squarespace-cdn.com/content/v1/"* ]]; then
+    sq_rc=0; sq_url=""
+    sq_url="$(squarespace_video_urls_from_html "$url")" || true
+    if [[ -z "$sq_url" ]]; then
+      echo "   !! unrecognized video.squarespace-cdn.com URL (want …/content/v1/<lib>/<asset>/…)" >&2
+      (( FAIL++ )) || true; _SKIP=1; return
+    fi
+    download_direct_media "${sq_url%%$'\n'*}" "$stem" || sq_rc=$?
+    if [[ $sq_rc -eq 0 ]]; then (( OK++ )) || true
+    else echo "   !! download failed" >&2; (( FAIL++ )) || true; fi
+    _SKIP=1; return
+
   # Page extraction: if URL looks like a webpage, try extracting embedded videos.
   elif ! echo "$url" | grep -qiE '\.(jpe?g|png|gif|webp|tiff?|mp[34]|webm|mov|flac|wav|aac|ogg|m3u8)(\?|$)' \
     && ! echo "$url" | grep -qE '(images?\.(mux|wsj|unsplash)|i[0-9]*\.(wp|imgur)|pbs\.twimg|staticflickr|res\.cloudinary|cdn-cgi/image|wp-content/uploads|vimeocdn)'; then
@@ -4137,6 +4384,33 @@ stage_video_intercept() {
       fi
     fi
 
+    # Try Squarespace native video — the player block carries only an escaped
+    # JSON {variant} template, so no URL-shaped media ref exists for the
+    # direct-media tiers to find. The playlist URL is rebuilt from the
+    # alexandriaUrl base and handed to download_direct_media's manifest path.
+    if ! $page_handled; then
+      sqsp_videos="$(extract_squarespace_video_from_page "$url")" || true
+      if [[ -n "$sqsp_videos" ]]; then
+        vid_count="$(echo "$sqsp_videos" | wc -l | tr -d ' ')"
+        echo "   found ${vid_count} Squarespace video(s)"
+        vid_ok=0; vid_fail=0; vid_idx=0
+        while IFS= read -r surl; do
+          (( vid_idx++ )) || true
+          local_stem="$stem"
+          (( vid_count > 1 )) && local_stem="${stem}_${vid_idx}"
+          (( vid_count > 1 )) && { echo ""; echo "   ── video ${vid_idx}/${vid_count}"; }
+          rc=0
+          download_direct_media "$surl" "$local_stem" "$url" || rc=$?
+          if [[ $rc -eq 0 ]]; then (( vid_ok++ )) || true
+          else (( vid_fail++ )) || true; fi
+        done <<< "$sqsp_videos"
+        (( OK += vid_ok )) || true
+        (( FAIL += vid_fail )) || true
+        (( TOTAL += vid_ok + vid_fail - 1 )) || true
+        page_handled=true
+      fi
+    fi
+
     # Try self-hosted / direct progressive media (plain <video src="…mp4">).
     # Runs last: Mux, Vimeo and YouTube are richer platform handlers, so they
     # get first refusal. This catches production-company and portfolio sites
@@ -4175,8 +4449,9 @@ stage_video_intercept() {
 # Content-Length, and uses aria2c -c (safe here: unlike the image path, a
 # direct page-embedded media URL is a fixed asset, not a probe winner that can
 # change between runs, so resuming can never splice two different files).
+# MREF (optional) is the embedding page, sent as Referer on the manifest path.
 download_direct_media() {
-  local murl="$1" mstem="$2"
+  local murl="$1" mstem="$2" mref="${3:-}"
   local ext info cl out
 
   ext="$(sed -E 's/^.*\.([A-Za-z0-9]{2,5})(\?.*)?$/\1/' <<< "$murl" | tr 'A-Z' 'a-z')"
@@ -4184,11 +4459,23 @@ download_direct_media() {
 
   # Streaming manifests need yt-dlp, not a byte fetch.
   if [[ "$ext" == "m3u8" || "$ext" == "mpd" ]]; then
-    if command -v yt-dlp >/dev/null 2>&1; then
-      echo "   stream manifest → $murl"
-      yt-dlp --no-warnings -o "${OUTDIR}/${mstem}.%(ext)s" "$murl" >/dev/null 2>&1 && return 0
+    if ! command -v yt-dlp >/dev/null 2>&1; then
+      echo "   !! cannot fetch stream manifest (yt-dlp required): $murl" >&2
+      return 1
     fi
-    echo "   !! cannot fetch stream manifest (yt-dlp required): $murl" >&2
+    echo "   stream manifest → $murl"
+    # yt-dlp's own words stay visible (an expired signature, a 403 on the key,
+    # a missing ffmpeg for AES-128 HLS, a throttle) — a failure here used to be
+    # reported as "yt-dlp required" with the tool installed. Same posture as
+    # the Vimeo path: the site UA, the embedding page as Referer when the
+    # caller knows it (signed Squarespace variants are served to the page's
+    # origin), and retries — a brief 403 on a key fetch is not a missing tool.
+    local ydl=(--no-warnings --retries 10 --fragment-retries 10 --user-agent "$UA")
+    [[ -n "$mref" ]] && ydl+=(--referer "$mref")
+    if yt-dlp "${ydl[@]}" -o "${OUTDIR}/${mstem}.%(ext)s" "$murl" 2>&1 | sed 's/^/   /'; then
+      return 0
+    fi
+    echo "   !! stream manifest download failed (yt-dlp output above): $murl" >&2
     return 1
   fi
 
@@ -4595,7 +4882,11 @@ while [[ $# -gt 0 ]]; do
     --force-download)  FORCE_DOWNLOAD=true; shift ;;
     --no-cdn)    NO_CDN=true; shift ;;
     --trust-cdn) TRUST_CDN=true; shift ;;
-    --referer|--referrer) VIMEO_REFERER="$2"; shift 2 ;;
+    --referer|--referrer)
+      # the same normalization as input URLs: scheme supplied, CR/whitespace
+      # stripped, //host form completed (a bare "https://" prefix mangled those)
+      VIMEO_REFERER="$(normalize_url "$2")" || VIMEO_REFERER="$2"
+      shift 2 ;;
     --filename)  CUSTOM_FILENAME="$2"; shift 2 ;;
     --format-discover) FORMAT_DISCOVER="$2"; shift 2 ;;
     -h|--help)   usage ;;
@@ -4648,6 +4939,7 @@ while IFS= read -r url; do
 done < <(collect_urls)
 
 # summary
+[[ $TOTAL -eq 0 ]] && echo "!! nothing to do: no URL was read from the arguments/stdin (see the messages above)" >&2
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " Done. ${OK}/${TOTAL} downloaded, ${FAIL} failed."
