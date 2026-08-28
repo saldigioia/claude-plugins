@@ -44,10 +44,32 @@
 set -euo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 . "$SELF_DIR/lib-exit.sh"   # exit-code contract trap: no stray code escapes
-IN="${1:?usage: zero-base.sh INPUT OUTPUT.ts (same container family as the input)}"
-OUT="${2:?need OUTPUT.ts (same container family as the input)}"
-[ $# -le 2 ] || { echo "unknown opt: $3" >&2; exit 2; }
+IN=""; OUT=""; PREFLIGHT_ONLY=0; SRC_TSH=""
+while [ $# -gt 0 ]; do case "$1" in
+  # --preflight-only: run THIS script's own refusal logic, write nothing, and
+  # report whether the source is eligible (0) or refused (2). Exists so other
+  # drivers can ASK instead of re-deriving the conditions — clean.sh used to
+  # model them and fell two axes behind twice (F12 multi-program; both PAFF
+  # arms). One authority, asked directly, cannot fall behind itself.
+  --preflight-only) PREFLIGHT_ONLY=1; shift;;
+  # --src-tsh: reuse a caller's saved `ts-health.sh SRC --kv` (verify-source's
+  # convention — one scanner, one truth), so asking does not re-run the
+  # whole-file rot scan the caller already paid for.
+  --src-tsh) SRC_TSH="${2:?--src-tsh needs FILE}"; shift 2;;
+  -*) echo "unknown opt: $1" >&2; exit 2;;
+  *) if   [ -z "$IN"  ]; then IN="$1"
+     elif [ -z "$OUT" ]; then OUT="$1"
+     else echo "unexpected extra argument: $1" >&2; exit 2; fi; shift;;
+esac; done
+[ -n "$IN" ] || { echo "usage: zero-base.sh INPUT OUTPUT.ts [--preflight-only] [--src-tsh FILE]" >&2; exit 2; }
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  # never created — only its NAME is inspected by the same-path/extension checks
+  OUT="${OUT:-$IN.preflight-probe.ts}"
+else
+  [ -n "$OUT" ] || { echo "need OUTPUT.ts (same container family as the input)" >&2; exit 2; }
+fi
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
+[ -z "$SRC_TSH" ] || [ -f "$SRC_TSH" ] || { echo "no such --src-tsh file: $SRC_TSH" >&2; exit 2; }
 [ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
   || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
@@ -56,7 +78,11 @@ OUT="${2:?need OUTPUT.ts (same container family as the input)}"
 . "$SELF_DIR/lib-rewrap.sh" # layout preservation + the prediction contract
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never the source
 
-echo "== zero-base: $IN -> $OUT =="
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  echo "== zero-base pre-flight only (report; nothing will be written): $IN =="
+else
+  echo "== zero-base: $IN -> $OUT =="
+fi
 
 # --- pre-flight -------------------------------------------------------------------
 CONT=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
@@ -119,7 +145,13 @@ fi
 # whole-file rot check — zero-base is not a timeline repair. Saved for reuse:
 # verify-source consumes the same scan via --src-tsh (one scanner, one truth).
 echo "-- pre-flight: whole-file health scan (ts-health) --"
-set +e; bash "$SELF_DIR/ts-health.sh" "$IN" --kv > "$TMP/src.tsh" 2>/dev/null; thrc=$?; set -e
+thrc=0
+if [ -n "$SRC_TSH" ]; then
+  echo "   (reusing the caller's scan: $SRC_TSH — one scanner, one truth)"
+  cat "$SRC_TSH" > "$TMP/src.tsh"
+else
+  set +e; bash "$SELF_DIR/ts-health.sh" "$IN" --kv > "$TMP/src.tsh" 2>/dev/null; thrc=$?; set -e
+fi
 [ -s "$TMP/src.tsh" ] || { echo "ts-health could not scan the source (rc=$thrc)" >&2; exit 1; }
 S_BACK=$(sed -n 's/^TSH_BACK=//p' "$TMP/src.tsh" | head -1)
 S_DUP=$(sed -n 's/^TSH_DUP=//p' "$TMP/src.tsh" | head -1)
@@ -131,6 +163,17 @@ if [ "${S_BACK:-0}" -gt 0 ] || [ "${S_DUP:-0}" -gt 0 ]; then
   echo "TIMELINE REPAIR and belongs to its own rungs. Route: scripts/diagnose.sh" >&2
   echo "(it picks pairfill/derive-dts/rebuild by the measured profile)." >&2
   exit 2
+fi
+
+# Every shape-based refusal has now been evaluated. A caller that only wanted
+# the verdict stops here — before the floor probe, the layout pass and the
+# prediction dry run, none of which are refusals and all of which cost.
+if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
+  echo ">> ELIGIBLE: no pre-flight refusal applies to this source."
+  echo "ZB_PREFLIGHT verdict=eligible container=$CONT programs=${NPROG:-1} paff=${PF_PAFF:-no} half_ts=${PF_HALF_TS:-no} back=${S_BACK:-0} dup=${S_DUP:-0}"
+  echo "   (eligibility is about the SOURCE SHAPE. The writer lock and disk"
+  echo "    headroom are build-time conditions and are checked then.)"
+  exit 0
 fi
 
 # --- the floor, announced before anything is built --------------------------------

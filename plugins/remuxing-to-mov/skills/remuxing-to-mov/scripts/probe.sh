@@ -21,35 +21,27 @@ IN="${1:?usage: probe.sh INPUT [--kv|--json]}"; MODE="${2:-human}"
 # dropped track 2. Emitted as PR_AUD_COUNT + PR_AUD_<n>_{CODEC,CHANNELS,LAYOUT,
 # LANG}; layouts are single-quoted (parens) — keys satisfy ^(PR|PF)_[A-Z0-9_]+=.
 aud_manifest_kv () {
-  # EMPTY ≠ ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the old form piped the
-  # probe straight into awk, whose END block printed PR_AUD_COUNT=0 even when
-  # the PRODUCER failed (measured: probe exits 1, 36 keys still emitted, the
-  # Dolby-E refusal loop silently disabled at every eval site). Capture the
-  # probe WITH its exit status; on failure emit the additive sentinel
+  # The query, the parse and the WO 3.4 view-merge live in lib-probe.sh
+  # (rtm_aud_manifest) — ONE WRITER (1.15.14). This function owns only the
+  # PRESENTATION: the PR_AUD_* key shape, and the "unknown" empty-layout
+  # fallback, which is this consumer's choice and not remux.sh's ("Nch").
+  #
+  # EMPTY != ABSENT (CHECKUP-2026-08-27 A1 / WO-1.15.4): the manifest is taken
+  # WITH its exit status. On failure emit the additive sentinel
   # PR_AUD_MANIFEST=failed, do NOT emit PR_AUD_COUNT, and return 1 so --kv
   # exits nonzero. Only a SUCCESSFUL empty probe may count zero tracks.
-  local am_raw am_rc
-  set +e
-  am_raw=$(ffp -v error -select_streams a \
-      -show_entries stream=index,codec_name,channels,channel_layout:stream_tags=language \
-      -of compact=p=0:nk=0 "$IN" 2>/dev/null); am_rc=$?
-  set -e
+  local am_tbl am_rc
+  if am_tbl=$(rtm_aud_manifest "$IN"); then am_rc=0; else am_rc=$?; fi
   if [ "$am_rc" -ne 0 ]; then
     printf 'PR_AUD_MANIFEST=failed\n'
     return 1
   fi
-  printf '%s\n' "$am_raw" | \
-  awk -F'|' 'NF{
-      c="unknown"; ch=0; lay=""; lang="und"; idx=""
-      for(i=1;i<=NF;i++){ eq=index($i,"="); k=substr($i,1,eq-1); v=substr($i,eq+1)
-        if(k=="index")idx=v; else if(k=="codec_name")c=v; else if(k=="channels")ch=v
-        else if(k=="channel_layout")lay=v; else if(k=="tag:language")lang=v }
-      # TS lists each stream under its program AND top-level -> dedupe by index
-      # (same quirk verify.sh dedupes for packet counts)
-      if(idx!=""){ if(idx in seen) next; seen[idx]=1 }
-      if(lay=="") lay="unknown"
+  printf '%s\n' "$am_tbl" | awk -F'|' '
+    BEGIN{ n=0 }
+    NF{
+      lay=($4==""?"unknown":$4)
       printf "PR_AUD_%d_CODEC=%s\nPR_AUD_%d_CHANNELS=%s\nPR_AUD_%d_LAYOUT=%c%s%c\nPR_AUD_%d_LANG=%s\n", \
-        n, c, n, ch, n, 39, lay, 39, n, lang
+        $1, $2, $1, $3, $1, 39, lay, 39, $1, $5
       n++
     } END{ printf "PR_AUD_COUNT=%d\n", n+0 }'
 }

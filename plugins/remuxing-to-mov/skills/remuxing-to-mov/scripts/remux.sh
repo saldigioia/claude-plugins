@@ -141,11 +141,11 @@ fi
 # a pre-flight refusal (exit 2, nothing written); only a SUCCESSFUL empty
 # probe means "no audio".
 PLANERR="$(mktemp)"
-set +e
-PLANRAW=$(ffp -v error -select_streams a \
-    -show_entries stream=index,codec_name,channels,channel_layout:stream_tags=language \
-    -of compact=p=0:nk=0 "$IN" 2>"$PLANERR"); plan_rc=$?
-set -e
+# The query, the parse and the WO 3.4 view-merge live in lib-probe.sh
+# (rtm_aud_manifest) — ONE WRITER (1.15.14). What stays here is this
+# consumer's own business: how loudly to refuse a failed probe, the "Nch"
+# empty-layout fallback for the curation key, and the policy pass itself.
+if PLANRAW=$(rtm_aud_manifest "$IN" "$PLANERR"); then plan_rc=0; else plan_rc=$?; fi
 if [ "$plan_rc" -ne 0 ]; then
   echo ">> REFUSED (pre-flight): the audio-manifest probe FAILED (ffprobe rc=$plan_rc) —" >&2
   echo "   cannot distinguish 'no audio' from 'probe broke', and planning on an empty" >&2
@@ -158,37 +158,16 @@ fi
 rm -f "$PLANERR"
 PLAN=$(printf '%s\n' "$PLANRAW" | \
   awk -F'|' -v pol="$KEEP" '
-    # BEGIN{n=0} is load-bearing: an UNINITIALIZED n used as an array subscript
-    # is the empty string (not 0) in POSIX awk, silently storing record 0 at
-    # C[""] — while n++ still counts it. Caught by probe on the first fixture.
     BEGIN{ n=0 }
     function rank(c){ if(c ~ /^pcm_/ || c=="flac" || c=="alac" || c=="truehd" || c=="mlp") return 3
                       if(c=="eac3" || c=="ac3" || c=="aac" || c=="opus" || c=="vorbis" || c=="dts" || c=="dca") return 2
                       if(c=="mp2" || c=="mp1" || c=="mp3") return 1
                       return 0 }
     function rname(r){ return r==3?"lossless":(r==2?"lossy-high":(r==1?"lossy-low":"unknown")) }
-    NF{
-      c="unknown"; ch=0; lay=""; lang="und"; idx=""
-      for(i=1;i<=NF;i++){ eq=index($i,"="); k=substr($i,1,eq-1); v=substr($i,eq+1)
-        if(k=="index")idx=v; else if(k=="codec_name")c=v; else if(k=="channels")ch=v
-        else if(k=="channel_layout")lay=v; else if(k=="tag:language")lang=v }
-      # WO 3.4 merge: when an index repeats, a KNOWN value beats the parser
-      # placeholder (unknown/0/empty/und) field-by-field — never whole-record
-      # replacement, so a tagged record with a missing layout cannot clobber a
-      # known one, whichever view arrives first. When both views know, the
-      # EARLIER wins; the record keeps its original slot, so track order and
-      # every order-derived tie-break (layout curation, a:N mapping) hold.
-      if(idx!=""){
-        if(idx in pos){ o=pos[idx]
-          if(C[o]=="unknown" && c!="unknown") C[o]=c
-          if(CH[o]+0==0     && ch+0!=0)      CH[o]=ch
-          if(L[o]==""       && lay!="")      L[o]=lay
-          if(G[o]=="und"    && lang!="und")  G[o]=lang
-          next }
-        pos[idx]=n
-      }
-      C[n]=c; CH[n]=ch; L[n]=lay; G[n]=lang; n++
-    }
+    # input is the rtm_aud_manifest merged table: ord|codec|channels|layout|lang,
+    # one line per track, already deduped across the TS double-listing. This
+    # pass does POLICY only.
+    NF{ o=$1+0; C[o]=$2; CH[o]=$3; L[o]=$4; G[o]=$5; if(o+1>n) n=o+1 }
     END{
       # "Nch" fallback is synthesized only AFTER every view has been merged —
       # doing it at store time would fill the slot and block a later view

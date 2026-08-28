@@ -101,20 +101,37 @@ fi
 # printed "ready to run" for a file zero-base refuses at pre-flight — B1
 # (no video: verify-source cannot bless the re-wrap) and F12 (multi-program:
 # the mpegts muxer cannot reconstruct the layout; measured refusal exit 2).
-NPROG=$(pget PR_NPROG); case "$NPROG" in ''|*[!0-9]*) NPROG=0;; esac
+# ASK, DON'T MODEL (1.15.13). This driver used to RE-DERIVE zero-base's
+# refusal conditions — container, program count, video presence, timeline rot,
+# and (1.15.11) both PAFF arms. Every axis added to zero-base had to be
+# mirrored here by hand, and twice it was not: F12 shipped the multi-program
+# mirror a round late, and the PAFF mirror was two rounds late and found in
+# the field. Enumeration cannot close: the sources supply axes faster than a
+# guard can list them.
+# zero-base now answers for itself. --preflight-only runs ITS OWN refusal
+# logic, writes nothing, and exits 0 eligible / 2 refused; --src-tsh hands it
+# the whole-file scan already taken in step 2, so asking costs no re-scan.
+# Offering a route that refuses is now structurally impossible — on every
+# axis, including ones nobody has met yet.
+set +e
+ZB_PF=$(bash "$SELF_DIR/zero-base.sh" "$IN" --preflight-only --src-tsh "$TMP/tsh" 2>&1); ZB_RC=$?
+set -e
 if [ "$(tget TSH_VIDEO)" = none ]; then
   finding scope "no video stream — the clinic's video-domain routes do not apply (ts-health scoped its scan the same way)" \
     "audio-only capture: extract/remux the audio directly (ffmpeg -map 0:a -c copy); zero-base/verify-source require video by design"
 fi
 if awk "BEGIN{exit !(($ST) > 0.05)}"; then
-  if [ "$IS_TS" = yes ] && [ "$(tget TSH_BACK)" = 0 ] && [ "$(tget TSH_DUP)" = 0 ] \
-     && [ "$(tget TSH_VIDEO)" != none ] && [ "${NPROG:-0}" -le 1 ]; then
+  if [ "$ZB_RC" -eq 0 ]; then
     finding timeline "timeline starts at ${ST}s, not zero (players rebase it; tools and clocks read it)" \
       "TIER 1 (structural): scripts/zero-base.sh \"$IN\" OUT.ts — lossless re-wrap to the floor, PID layout kept, prediction-gated"
     route zero-base
   else
+    # Relay, do not paraphrase: the refusal text is zero-base's, so this
+    # driver holds no copy of the reasoning that can drift out of date. The
+    # routes named below are the ones zero-base itself named.
     finding timeline "timeline starts at ${ST}s, not zero" \
-      "zero-base.sh applies only to rot-free single-program mpegts with video (back=$(tget TSH_BACK) dup=$(tget TSH_DUP) container=$CONT programs=${NPROG} video=$(tget TSH_VIDEO)) — it refuses this shape at pre-flight; see the scope/rot/container findings"
+      "NOT a zero-base job — zero-base.sh refuses this source at pre-flight, in its own words:"
+    printf '%s\n' "$ZB_PF" | grep -v '^== zero-base' | sed 's/^/             /'
   fi
 elif awk "BEGIN{exit !(($ST) < -0.05)}"; then
   # B4 (WO-1.15.7): the positive direction alone missed the unwrapped-wrap

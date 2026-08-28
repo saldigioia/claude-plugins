@@ -65,3 +65,59 @@ ffp () { ffprobe "${FF_INPUT_OPTS[@]}" "$@"; }
 # ways. Use ffp1 for any query that can emit more than one line; on
 # single-line queries it is byte-identical to `ffp ... | head -1`.
 ffp1 () { ffp "$@" | awk 'NF && !g { print; g=1 }'; }
+
+# rtm_aud_manifest IN [ERRFILE] — THE per-track audio manifest. ONE WRITER
+# (1.15.13 rule 2). This query, this parse and the WO 3.4 view-merge lived in
+# TWO copies — probe.sh and remux.sh — and WO 3.4 was applied to one of them:
+# the probe.sh copy then reported PR_AUD_n_LANG=und for four eng tracks for
+# four versions (1.15.10, found in the field). Fixing the copy did not fix the
+# copying, so the fact now has a single home and both drivers consume it.
+#
+# stdout: one line per track, already merged, in track order:
+#     ord|codec|channels|layout|lang
+# Values are RAW: an unknown layout stays EMPTY here on purpose. The fallback
+# is presentation and belongs to the consumer — probe.sh prints "unknown",
+# remux.sh synthesizes "Nch" for its curation key, and neither may impose its
+# choice on the other.
+# rc: ffprobe's own exit status, passed through untouched. EMPTY != ABSENT
+# (WO-1.15.4 A1): a FAILED probe must never be readable as "no audio", so the
+# caller decides how loudly to refuse — this function only declines to guess.
+# ERRFILE (optional) captures ffprobe stderr for callers that quote it.
+rtm_aud_manifest () {
+  local _in="${1:?rtm_aud_manifest needs INPUT}" _err="${2:-/dev/null}" _raw _rc
+  # `if` context, not `set +e`: a failing probe must not disarm the caller's
+  # errexit for the lines that follow it.
+  if _raw=$(ffp -v error -select_streams a         -show_entries stream=index,codec_name,channels,channel_layout:stream_tags=language         -of compact=p=0:nk=0 "$_in" 2>"$_err"); then _rc=0; else _rc=$?; fi
+  [ "$_rc" -eq 0 ] || return "$_rc"
+  printf '%s\n' "$_raw" | awk -F'|' '
+    # BEGIN{n=0} is load-bearing: an UNINITIALIZED n used as an array subscript
+    # is the empty string (not 0) in POSIX awk, silently storing record 0 at
+    # C[""] while n++ still counts it. Both former copies carried this note;
+    # the 1.15.10 port hit the trap on its first fixture anyway.
+    BEGIN{ n=0 }
+    NF{
+      c="unknown"; ch=0; lay=""; lang="und"; idx=""
+      for(i=1;i<=NF;i++){ eq=index($i,"="); k=substr($i,1,eq-1); v=substr($i,eq+1)
+        if(k=="index")idx=v; else if(k=="codec_name")c=v; else if(k=="channels")ch=v
+        else if(k=="channel_layout")lay=v; else if(k=="tag:language")lang=v }
+      # WO 3.4 merge. A program-bearing TS lists every stream TWICE (a bare
+      # top-level view, then the in-program view) and only ONE carries the PMT
+      # tags — language. Dedupe by index, MERGING field-by-field: a KNOWN value
+      # beats the parser placeholder (unknown/0/empty/und), never whole-record
+      # replacement, so a tagged view with a missing layout cannot clobber a
+      # known one whichever arrives first. When both views know, the EARLIER
+      # wins and the record keeps its slot, so a:N order and every
+      # order-derived tie-break hold. Pinned by tests 34 and 92.
+      if(idx!=""){
+        if(idx in pos){ o=pos[idx]
+          if(C[o]=="unknown" && c!="unknown") C[o]=c
+          if(CH[o]+0==0     && ch+0!=0)      CH[o]=ch
+          if(L[o]==""       && lay!="")      L[o]=lay
+          if(G[o]=="und"    && lang!="und")  G[o]=lang
+          next }
+        pos[idx]=n
+      }
+      C[n]=c; CH[n]=ch; L[n]=lay; G[n]=lang; n++
+    }
+    END{ for(i=0;i<n;i++) printf "%d|%s|%s|%s|%s\n", i, C[i], CH[i], L[i], G[i] }'
+}

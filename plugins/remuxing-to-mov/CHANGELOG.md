@@ -4,6 +4,301 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.16 — CONSTITUTION.md (2026-08-27)
+
+The rules of this plugin were distributed across work orders, checkups,
+changelog entries and code comments, cited by shorthand — `WO 3.4`, `D5`,
+`A1`, `F12`. Measured: `scripts/` and `tests/` carry hundreds of such
+citations, 48 to one checkup document alone. Every one resolves. That was
+never the problem.
+
+The problem is what resolving one GETS you: **where a claim was written, not
+whether it is still true.** A reader who doubts a rule must find the document
+and take its word, and documents go stale silently — the authoring session's
+own memory note asserted these work orders were "untracked, not committed";
+they have since been committed, so the note was true when written and false
+when read.
+
+`CONSTITUTION.md` inverts the authority. Each amendment states the rule so it
+stands without following any reference, the failure it prevents as something
+MEASURED, and **a test to run if you doubt it**. Provenance lines are
+explicitly discardable. Articles: what may be done to media; how verdicts are
+reached; how evidence is collected; how the code is structured; how the guards
+are guarded.
+
+- All 14 cited test files verified to EXIST and PASS at the time of writing —
+  a constitution whose tests do not run is the disease, not the cure.
+- **V.2's example was wrong on first draft, and verifying it proved its own
+  point.** It used `git checkout` to restore after a mutation. Run against a
+  tree with 1.15.14 still uncommitted, that reverted `lib-probe.sh` to a
+  version predating `rtm_aud_manifest` and destroyed the round — and the guard
+  then went GREEN, because the reverted file no longer contained the construct
+  being guarded, so the check skipped it. **A mutation test with a wrong
+  restore can report success while having deleted the thing under test.** The
+  amendment now backs up by copy and verifies the restore, not just the red.
+  (The work survived only because it had already been synced to the installed
+  copy — which is itself amendment V.4.)
+- Standing rule for amendments: if you cannot write the test, you have a
+  preference, not an amendment. Say so and leave it out.
+
+## 1.15.15 — "the standing sweep" round (2026-08-27)
+
+The method, not another instance. 1.15.10/.11/.12 were each found by tripping
+over them — and .12 only because a suite run happened to share a machine with
+a 24 GB build. Finding a CLASS and then waiting to meet its next INSTANCE is
+not a method. Test **94** enumerates every class this plugin has actually
+shipped, mechanically, over the whole tree, every run.
+
+- **Guards (all five mutation-verified — a guard nobody has seen fail is a
+  guard nobody knows works):**
+  1. every script and test parses under `bash -n` — the exact detector for the
+     apostrophe-in-single-quoted-awk trap, hit TWICE in one session;
+  2. every counter-subscripted awk initializes its counter (1.15.10);
+  3. nothing scans shared temp ground for files it did not write (1.15.12);
+  4. all 10 `census_rc` consumers treat rc=10 as REVIEW, not error;
+  5. no centralized fact grows a second definition.
+- **Two of the five were VACUOUS when first written, and mutation testing
+  caught both.** §2's pattern `BEGIN{ *n=0` is also how the idiom is DESCRIBED,
+  so a comment mentioning it satisfied the guard — comments are now stripped
+  first. §5 used `grep -l`, counting FILES, so a second definition pasted into
+  the same file was invisible — it now counts definitions. Both would have
+  shipped green and guarded nothing.
+- **§3 was deliberately narrowed.** The first form audited every `rm -rf` and
+  false-positived on `.lock` paths, on a string assertion, and on itself. A
+  tree-wide guard that cries wolf gets disabled — and then the class is
+  unguarded AND believed guarded. It now pins the precise defect shape (the
+  scan, not the delete) with zero false positives, and a negative control
+  proves it catches a reintroduction.
+- Classes swept and found CLEAN, recorded so they are not re-chased: no
+  `ffp … | head -1` code sites survive (the one hit is a comment documenting
+  the idiom — 1.15.9 D3 genuinely holds); exactly ONE site uses the bare
+  counter-subscript shape and it is initialized; no apostrophe-in-awk survives;
+  every `rm -rf` targets owned scratch.
+- **Investigated and found SOUND** (recorded so it is not re-chased): the
+  colour-primaries probe is duplicated 5x with drifted error handling
+  (`|| true` in three, absent in two), which looked like A1 on the colour axis
+  — a failed probe silently dropping `write_colr`. MEASURED with a PATH shim
+  failing only that query: the two outputs are BYTE-IDENTICAL. `movenc` writes
+  `colr` from input stream parameters regardless, so the flag is a no-op here
+  and the drift has no observable consequence. Not a defect.
+- **Known duplication left standing, deliberately:** `census_rc` handling is 9
+  genuinely different forms across 10 builders. The wrapping differs
+  legitimately per builder; the SEMANTIC is uniform and now pinned by §4. This
+  is the lockstep treatment the mux-confession vocabularies already get:
+  duplication not being refactored today must at least be held in step.
+
+## 1.15.14 — "one writer: the audio manifest" round (2026-08-27)
+
+1.15.13 rule 2, applied to the outstanding case it named. 1.15.10 fixed the
+COPY; this fixes the COPYING.
+
+- **What was duplicated:** the audio-manifest ffprobe query, the field-parse
+  loop, and the WO 3.4 view-merge existed in full in BOTH `probe.sh` and
+  `remux.sh`. WO 3.4 was applied to one of them, so `probe.sh` reported
+  `PR_AUD_n_LANG=und` for four `eng` tracks for four versions until the field
+  run caught it. Nothing prevented the next edit from landing in one copy
+  again.
+- **The single writer:** `rtm_aud_manifest IN [ERRFILE]` in `lib-probe.sh`.
+  stdout is one line per track, already merged, in track order —
+  `ord|codec|channels|layout|lang`. rc is ffprobe's own status, passed through
+  untouched, because EMPTY != ABSENT (A1): a failed probe must never read as
+  "no audio", so the function declines to guess and the CALLER decides how
+  loudly to refuse. It runs the probe in `if` context rather than `set +e`, so
+  a failing probe cannot disarm the caller's errexit for the lines after it.
+- **What deliberately did NOT move.** The two consumers differ in exactly two
+  ways, and both stay local: how loudly to refuse a failed probe (`probe.sh`
+  emits the `PR_AUD_MANIFEST=failed` sentinel and returns 1; `remux.sh` is a
+  pre-flight refusal, exit 2, quoting probe stderr), and the empty-layout
+  fallback — `probe.sh` prints `unknown`, `remux.sh` synthesizes `Nch` for its
+  curation key. The shared writer therefore emits RAW values with an empty
+  layout left empty; imposing either fallback would have made one consumer
+  wrong. Sharing the FACT is the goal; sharing the presentation is a
+  different bug.
+- **Test 92 §4 is now a class guard rather than a per-copy check.** It asserts
+  the merge exists in exactly ONE file, that the file is `lib-probe.sh`, that
+  both consumers call `rtm_aud_manifest` and hold no private copy, and that
+  each keeps its own fallback. "Does this copy merge correctly" is a question
+  that scales with the number of copies; "does the merge exist once" stays one
+  assertion forever. 92 goes 19 -> 26.
+- Same apostrophe trap as 1.15.10, hit again and recorded again: a `'` inside
+  an awk program in single quotes (`rtm_aud_manifest's`) closes the shell
+  string. Both former copies avoided possessives for this reason.
+
+## 1.15.13 — "ask, do not model" round (2026-08-27)
+
+Not a defect round. A structural answer to why the defect rounds keep coming.
+
+**The pattern.** 1.15.10, 1.15.11 and 1.15.12 were found in a single field
+session, and they are one shape wearing three coats: a fact written in two
+places and corrected in one.
+
+| round | the fact | written in | fixed in |
+|---|---|---|---|
+| 1.15.10 | how to read a per-track audio manifest | `probe.sh` + `remux.sh` | `remux.sh` |
+| 1.15.11 | what `zero-base` refuses | `zero-base.sh` + `clean.sh`'s guard | `zero-base.sh` + 2 of 3 axes |
+| 1.15.12 | which scratch directory is mine | the code + the test's scanner | neither |
+
+None is a muxing bug. The plugin's own 1.15.2 note — "every defect sat in the
+honesty machinery, never in the muxing" — is true and incomplete: they sit
+specifically in DUPLICATED knowledge, and the repair has been to add one more
+enumerated condition. Enumeration cannot close. Real sources supply axes
+faster than a guard can list them, so each round ships the next round's bug.
+
+**The change.** `clean.sh` no longer re-derives `zero-base`'s refusal
+conditions. `zero-base.sh` gains `--preflight-only`: it runs ITS OWN refusal
+logic, writes nothing, and exits 0 eligible / 2 refused; `--src-tsh` (the
+`verify-source` convention — one scanner, one truth) hands it the whole-file
+scan `clean.sh` already took, so asking costs no second pass. The clinic then
+RELAYS the refusal verbatim rather than paraphrasing it, so it holds no copy
+of the reasoning that can drift.
+
+The five-term modelled guard becomes one asked question:
+
+```
+-  if [ "$IS_TS" = yes ] && [ "$(tget TSH_BACK)" = 0 ] && [ "$(tget TSH_DUP)" = 0 ] \
+-     && [ "$(tget TSH_VIDEO)" != none ] && [ "${NPROG:-0}" -le 1 ] \
+-     && [ "$ZB_PAFF_OK" = yes ]; then
++  if [ "$ZB_RC" -eq 0 ]; then
+```
+
+Offering a route that refuses is now structurally impossible — on every axis,
+including ones nobody has met yet. 1.15.11's `ZB_PAFF_OK` term is deleted: it
+was the right fix to the wrong layer, and keeping it would preserve the model
+the round exists to remove.
+
+**Test 93 §6 is the claim, made falsifiable.** It runs the clinic on a
+MULTI-PROGRAM source — F12's axis — and asserts three things: no ready-to-run
+command is offered, `zero-base` does refuse it (rc=2, so the ask matched the
+authority), and `clean.sh` contains no multi-program code at all. An axis
+closing in a driver that has never heard of it is the whole thesis. §5 pins
+the structure (the ask is made, the scan is shared, no hand-mirrored term has
+crept back); §4's invariant — a printed command must not refuse — remains the
+general guard over all of it.
+
+**Recorded as the standing rule, in preference to more guards:**
+1. Ask the authority, never model it. A driver that can name another script's
+   refusal conditions is already wrong.
+2. One writer per fact. (Still outstanding: the audio manifest lives twice,
+   in `probe.sh` and `remux.sh` — 1.15.10 fixed the copy, not the copying.
+   It belongs in `lib-probe.sh`, consumed by both.)
+3. Invariants over enumerations in tests. Verdicts may stay conservative —
+   gate (g) answering REVIEW on unproven attribution is correct and should
+   not change. It is the GUARDS that must be general, not the verdicts.
+
+## 1.15.12 — "a test with no jurisdiction" round (2026-08-27)
+
+Test-only round (the 1.15.8 harness precedent: the bench is versioned too).
+Surfaced by running the suite alongside the 24 GB field build — the first
+time this bench has been asked to share a machine.
+
+- **The defect:** test 84's D2 leak watch scanned the WHOLE shared darwin
+  temp dir for any `tmp.*/s` newer than a marker file. It had no jurisdiction
+  over what it found. Two consequences, both measured: it **false-FAILed**
+  when a concurrent process created matching scratch inside its window (the
+  definitive 1.15.11 suite run came back 290/1 for exactly this, with the
+  build's `verify.sh` scratch as the culprit); and its else-arm
+  **`rm -rf`'d the directory it found** — a live scratch dir belonging to
+  another process. A test that deletes another process's working files is a
+  hazard, not a check; had the timing shifted slightly it would have been
+  deleting from under a 24 GB archival build.
+- **Why the old design existed:** re-measured and CONFIRMED — macOS
+  `mktemp -d` with no template ignores `TMPDIR`, and so does `-t`; only an
+  explicit template honours it. So the watch could not simply point at a
+  private `TMPDIR`, and fell back to scanning shared ground.
+- **The fix:** shim `mktemp` beside the existing `ffmpeg` shim — the code
+  under test calls it bare, so PATH interception is exact — and force its
+  scratch into a test-owned directory. The watch then looks only where this
+  run could have written: jurisdiction stated, no time window, no foreign
+  deletion. The shim intercepts ONLY the bare `-d` form; anything carrying
+  its own template passes through.
+- **Two new assertions** pin both halves: a foreign scratch dir planted
+  during the window is neither mistaken for this run's leak nor deleted.
+  Test 84 goes 16 -> 18.
+- Investigated and found SOUND (recorded so it is not re-chased): the
+  `mktemp`/`TMPDIR` split does NOT affect `rtm_disk_preflight`.
+  `rebuild-paff.sh` passes the ACTUAL `$WORK` path it received from `mktemp`
+  as STAGE_DIR, so the preflight measures the volume genuinely being staged
+  to, whatever `TMPDIR` says. The header comment's "the TMPDIR volume" is
+  loose wording over correct-by-construction code. The real residual is a
+  LIMITATION, not a bug: on macOS an operator cannot redirect plugin scratch
+  to another volume via `TMPDIR`.
+
+## 1.15.11 — "the clinic must not hand you a refusal" round (2026-08-27)
+
+Second defect from the same field run. Test **93**, red-verified against
+1.15.10 (9 red of 15).
+
+- **The defect:** `clean.sh` printed
+  `TIER 1 (structural): scripts/zero-base.sh "feed.ts" OUT.ts` as ready to
+  run for a source `zero-base.sh` **refuses at pre-flight** — while step 1 of
+  the same report printed `paff=yes`, three lines above.
+- **It is 1.15.7 F12's rule, on the axis F12 did not close.** F12's own
+  entry reads "clean.sh printed a ready-to-run zero-base command that refuses
+  exit 2 on a 2-program TS, measured"; B1 closed no-video. The guard tested
+  `IS_TS / TSH_BACK / TSH_DUP / TSH_VIDEO / NPROG` and its comment named its
+  coverage as "B1 … and F12". **PAFF was never added** — even though PAFF is
+  the refusal 1.15.2 Defect C introduced, *for this exact capture*, and BOTH
+  of zero-base's PAFF arms refuse (1.15.2 pair-timestamped; 1.15.7 F1
+  full-timestamp, as policy). `PF_PAFF`/`PF_HALF_TS` were already in the
+  `--kv` block the driver parses for `PR_NPROG`.
+- **The fix:** `ZB_PAFF_OK` joins the Tier-1 guard, plus a PAFF-specific
+  else-arm — named separately from the generic one because PAFF is not a
+  defect to correct but a source whose `.ts` IS the master, so the honest
+  route is `pairfill-paff.sh`, not a re-wrap. The generic arm keeps its
+  wording verbatim (tests 72/88 pins hold).
+- **Test 93 §4 is the part that matters:** rather than enumerate refusals
+  forever, it pins the INVARIANT — *if the clinic printed the ready-to-run
+  command, running it must not come back as a pre-flight refusal* — swept
+  across all three profiles. That assertion would have caught B1, F12 **and**
+  this one before any of them shipped.
+- Bench note in the test: the house pair-injection table is calibrated to a
+  29.97 nominal rate; on a 25 fps fixture the ratio lands at 1.6 and reads
+  `paff=no`. Also recorded: the pre-fix §5 guard ("does clean.sh mention
+  PF_PAFF anywhere") passed before the fix — step 1 already prints `paff=` —
+  so it was vacuous and now pins the gate term itself.
+
+## 1.15.10 — "the unfixed sibling" round (2026-08-27)
+
+Found by the field battery on the 2022-08-28 VMA capture — the run that was
+supposed to be a victory lap for 1.15.2–1.15.9. Test **92**, red-verified
+against 1df5941 (9 red of 19).
+
+- **The defect:** a program-bearing TS emits every stream section TWICE (a
+  bare top-level view, then the in-program view) and only ONE carries the
+  PMT tags — language. `probe.sh`'s per-track audio manifest deduped by
+  index KEEP-FIRST (`if(idx in seen) next`), keeping whichever view arrived
+  first — the tag-less one — so `PR_AUD_n_LANG` read `und` for every track
+  on a source whose tracks are all `eng`. Measured on the field capture:
+  `remux.sh --print-plan` said `lang=eng` ×4 while `probe.sh --kv` said
+  `und` ×4, **in the same run, on the same file**.
+- **This is WO 3.4, unapplied.** 3.4 diagnosed this exact bug ("the
+  keep-first dedupe read every TS track as lang=und"), fixed it at
+  `remux.sh`'s manifest with a field-by-field MERGE, and pinned it in test
+  34 — but only against `remux.sh`'s PLAN. The sibling manifest in
+  `probe.sh` was never converted, and no test asserted `probe.sh`'s
+  `PR_AUD_*_LANG`, so the machine API kept shipping `und` for four
+  versions while the human `-- audio --` section of the same run printed
+  `eng`. The fix is 3.4's merge, ported verbatim — including its
+  `BEGIN{n=0}` (load-bearing: an uninitialized `n` used as an array
+  subscript is the empty string, not 0, so record 0 lands at `C[""]` while
+  `n++` still counts it — the porting attempt hit it immediately, exactly
+  as the remux.sh note warns).
+- **Blast radius, swept not assumed:** `PR_AUD_*_LANG` has no consumer in
+  `scripts/` — this corrupted the documented `--kv`/`--json` machine API
+  (and any operator or agent reading it), never the build path; delivered
+  MOVs carry correct languages because the mux reads them elsewhere. Of the
+  11 index-dedupe sites in the tree, `probe.sh`'s was the ONLY one deduping
+  a query requesting `stream_tags`; the other ten extract index/codec/type,
+  identical in both views, where keep-first is harmless. Test 92 §4 pins
+  that as a class guard on the idiom, not the file.
+- **The invariant that would have caught it**, now pinned (§3): `probe.sh
+  --kv` and `remux.sh --print-plan` must agree track-for-track on the same
+  file. Two manifests over one source is the smell; agreement is the test.
+- Bench note recorded in the test: `movenc` does not write `mdhd` language
+  from `-metadata:s:a:0` on ffmpeg 9.0.1, so a `.mov` single-view fixture
+  reads `und` on every track and cannot tell a working read from a broken
+  one — §6 rides Matroska instead.
+
 ## 1.15.9 — "docs + hygiene" round (2026-08-27)
 
 `WO-1.15.9-DOCS-HYGIENE.md` — the final checkup round: **F2, F5, F6, F7**

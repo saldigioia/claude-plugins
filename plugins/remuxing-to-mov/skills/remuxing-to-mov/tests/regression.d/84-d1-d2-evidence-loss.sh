@@ -72,19 +72,49 @@ case "\$*" in *"-f framemd5"*) "$REAL_FFMPEG" "\$@"; exit 1;; esac
 exec "$REAL_FFMPEG" "\$@"
 EOF
 chmod +x "$WORK/shim/ffmpeg"
-# leak watch: macOS mktemp -d (no template) IGNORES TMPDIR (measured — it
-# uses the darwin per-user temp dir), so the watch marks time and then looks
-# for a NEW tmp.* dir still holding hlist's 's' file after the run.
+# leak watch. macOS `mktemp -d` (no template) IGNORES TMPDIR (re-measured
+# 2026-08-27: bare -d AND -t both land in the darwin per-user temp dir; only
+# an explicit template honours it), so this watch USED TO mark time and scan
+# the whole shared temp dir for any new tmp.*/s. That gave it no jurisdiction:
+# it false-FAILed on any concurrent run that happened to create one inside the
+# window (measured — a suite run alongside a 24 GB build), and worse, its
+# else-arm `rm -rf`'d the directory it found, which it did not own. A test
+# that deletes another process's live scratch is a hazard, not a check.
+# Fix: shim `mktemp` beside the ffmpeg shim (the code under test calls it
+# bare, so PATH interception is exact) and force ITS scratch into a
+# test-owned dir. The watch then looks only where this run could have written
+# — jurisdiction stated, no time window, no foreign deletion.
+REAL_MKTEMP="$(command -v mktemp)"
+SCRATCH="$WORK/scratch"; mkdir -p "$SCRATCH"
+cat > "$WORK/shim/mktemp" <<EOF
+#!/bin/bash
+# intercept ONLY the bare \`mktemp -d\` form this leak is about; anything
+# carrying its own template passes through untouched.
+case "\$*" in
+  "-d") exec "$REAL_MKTEMP" -d "$SCRATCH/tmp.XXXXXXXXXX";;
+esac
+exec "$REAL_MKTEMP" "\$@"
+EOF
+chmod +x "$WORK/shim/mktemp"
+# a FOREIGN scratch dir, created in the shared temp dir during the window —
+# stands in for the concurrent build that tripped the old watch.
 TD="$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)"; TD="${TD:-${TMPDIR:-/tmp}}"
-MARK="$WORK/mark"; touch "$MARK"; sleep 1
+FOREIGN="$("$REAL_MKTEMP" -d)"; : > "$FOREIGN/s"
 o=$(PATH="$WORK/shim:$PATH" bash "$SC/verify.sh" "$S" "$CP" --full 2>&1); rc=$?
 has "$o" "FAILED mid-stream" "the mid-decode failure is DIAGNOSED (pre-fix: silent exit 1)"
 has "$o" "INCONCLUSIVE" "the check calls itself inconclusive — UNPROVEN, not FAILED"
 has "$o" ">> REVIEW" "a verdict line closes the run (pre-fix: none)"
 [ "$rc" -eq 0 ] && ok "REVIEW-side exit 0 (never a bare FAIL off a broken ruler)" || no "rc=$rc"
-leaked=$(find "$TD" -maxdepth 2 -type f -name s -newer "$MARK" -path '*/tmp.*' 2>/dev/null | head -1)
+leaked=$(find "$SCRATCH" -maxdepth 2 -type f -name s 2>/dev/null | head -1)
 [ -z "$leaked" ] && ok "no mktemp leak (pre-fix: ~40 MB of framemd5 lists per occurrence)" \
   || { no "leaked hlist scratch survives: $leaked"; rm -rf "$(dirname "$leaked")"; }
+# jurisdiction: the watch must ignore — and must NOT delete — scratch that is
+# not this run's. Both halves matter; the second is the one that could have
+# corrupted a live build.
+case "$leaked" in "$FOREIGN"*) no "the watch reached outside its own scratch";; *) ok "foreign scratch not mistaken for this run's leak";; esac
+[ -d "$FOREIGN" ] && ok "foreign scratch left intact (never rm -rf what you do not own)" \
+  || no "the leak watch DELETED a directory it did not own: $FOREIGN"
+rm -rf "$FOREIGN"
 # control: unshimmed --full on the same pair still settles green
 o=$(bash "$SC/verify.sh" "$S" "$CP" --full 2>&1); rc=$?
 { [ "$rc" -eq 0 ] && case "$o" in *">> OK"*) true;; *) false;; esac; } \
