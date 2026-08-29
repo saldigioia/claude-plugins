@@ -37,7 +37,9 @@
 # NOT part of the regression suite — it audits the suite, mutates a tree copy,
 # and costs many minutes. It lives in tests/ (not tests/regression.d/) exactly
 # so run_subsuites never enrolls it. Run it whenever a tree-wide guard is added
-# or changed.
+# or changed. (One exception, and it is not an enrollment: 90 §7 invokes this
+# script with a SINGLE named case, twice, to prove the verdict channel below
+# still has two agreeing ends — about 20 seconds, not a roster run.)
 #
 # Usage:
 #   bash tests/mutation-audit.sh                 # every case
@@ -48,6 +50,18 @@
 #
 # Exit 0 = every guard CAUGHT its defect and stayed CLEAN on prose;
 #        1 = at least one MISSED or FALSE-POSITIVE; 2 = env/harness failure.
+#
+# THE VERDICT IS ALSO ON DISK. Every completed run ends with one machine line,
+#   MA_SUMMARY total=<N> bad=<N> verdict=pass|fail
+# printed after the per-case table AND written to $OUTDIR/VERDICT. The exit
+# contract above is unchanged (0 only when bad=0) — the file is a SECOND
+# channel, not a replacement, and it exists because an exit status observed
+# through a pipe belongs to the last command in the pipe: measured 2026-08-29,
+# a red audit (G45 MUTATE-NOOP) was read green off `tail`'s status and the
+# per-scope-modulus guard had been audited zero times while reading as
+# harmless. A later reader greps the file instead of trusting a remembered rc.
+# No VERDICT file = no verdict from this run; a stale one from an earlier run
+# in a persisted MA_OUTDIR is removed at start, never left to judge this tree.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 SKILL="$(cd "$HERE/.." && pwd)"          # skills/remuxing-to-mov
@@ -66,6 +80,11 @@ else
   OUTDIR="$(mktemp -d)"
   [ "${MA_KEEP:-0}" = 1 ] || trap 'rm -rf "$OUTDIR"' EXIT
 fi
+# the same reason baseline_one re-takes its baselines: a verdict left in a
+# persisted MA_OUTDIR by an earlier tree state must never be read as this
+# run's. Absent means "this run reached no verdict", which is the honest
+# answer for an env failure (exit 2) that never got to a case.
+rm -f "$OUTDIR/VERDICT"
 . "$HERE/lib-harness.sh"   # rtm_strip_comments: the SAME stripper the guards read through
 
 command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || { echo "need ffmpeg+ffprobe"; exit 2; }
@@ -410,6 +429,28 @@ pro_nprog_model ()  { printf '\n# F12 note: NPROG is asked of zero-base now, not
 # a prose case the guard never reads cannot FALSE-POSITIVE by construction.
 pro_unask_zerobase () { printf '\n# clean.sh asks zero-base --preflight-only; it holds no model\n' >> "$1/scripts/clean.sh"; }
 
+mut_suppress_ma_verdict () {  # the audit stops writing its verdict where it can be re-read
+  # 1.16.4's misreading in one edit: with only stdout and an exit status left,
+  # the verdict is whatever the observer remembers — and `| tail` remembers
+  # tail's. The exit contract is untouched by this mutation on purpose; what
+  # goes away is the SECOND channel, and test 90 §7 must notice.
+  perl -pi -e 's{> "\$OUTDIR/VERDICT"}{> /dev/null}' "$1/tests/mutation-audit.sh"
+}
+pro_suppress_ma_verdict () {  # prose naming the write stays CLEAN
+  printf '\n# never: drop the > "$OUTDIR/VERDICT" write — an exit status seen through a\n# pipe is the pipe\x27s, and a remembered one is not evidence at all (test 90 §7)\n' \
+    >> "$1/tests/mutation-audit.sh"
+}
+mut_alias_ffp_head () {  # the 1.15.2 SIGPIPE class, hidden one alias deep
+  # THREE lines, deliberately: on ONE line the literal `ffp … | head -1` also
+  # trips 91 §5's first arm, and the alias arm would be credited for a catch
+  # that was not its own. Split, only the alias arm can see it.
+  printf '\n_alias_probe () {\n  local _q="ffp -v error -select_streams"\n  $_q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$1" | head -1\n}\n' \
+    >> "$1/scripts/clock.sh"
+}
+pro_alias_ffp_head () {  # prose naming the aliased shape stays CLEAN
+  printf '\n# never: q="ffp -v error -select_streams" and then $q … | head -1 — behind an\n# alias or not, a two-line ffprobe write into an early-exit reader is the\n# 1.15.2 SIGPIPE class; use ffp1 (test 115)\n' >> "$1/scripts/clock.sh"
+}
+
 # --------------------------------------------------------------------- roster
 # ID|LANE|TEST|MARKER|MUTATION[|FAILMARK]        LANE: defect | prose | new
 # MARKER is a substring UNIQUE to the guard's own PASS line.
@@ -502,6 +543,10 @@ G47|defect|113-poc-type2-scopes.sh|no picture emits nothing|mut_suppress_t2_row|
 P47|prose|113-poc-type2-scopes.sh|no picture emits nothing|pro_suppress_t2_row
 G48|defect|114-capability-one-authority.sh|the shell probe agrees|mut_model_the_capability|two writers, one fact
 P48|prose|114-capability-one-authority.sh|the shell probe agrees|pro_model_the_capability
+G49|defect|90-harness-honesty.sh|the durable channel|mut_suppress_ma_verdict
+P49|prose|90-harness-honesty.sh|the durable channel|pro_suppress_ma_verdict
+G50|defect|91-flags-parsers-docs.sh|the class swept one alias deep|mut_alias_ffp_head
+P50|prose|91-flags-parsers-docs.sh|the class swept one alias deep|pro_alias_ffp_head
 '
 
 # --------------------------------------------------------------------- runner
@@ -633,4 +678,10 @@ done <<< "$rows"
 
 echo
 echo "mutation-audit: $((total-bad))/$total cases in contract (CAUGHT for defect, CLEAN for prose)"
+# the verdict, in one line a machine can read, on two channels that must agree.
+# $OUTDIR is this run's OWN scratch (III.3) — the file goes nowhere else.
+ma_verdict=fail; [ "$bad" -eq 0 ] && ma_verdict=pass
+ma_summary="MA_SUMMARY total=$total bad=$bad verdict=$ma_verdict"
+printf '%s\n' "$ma_summary"
+printf '%s\n' "$ma_summary" > "$OUTDIR/VERDICT"
 [ "$bad" -eq 0 ]

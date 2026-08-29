@@ -4,6 +4,92 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.16.5 — the verdict that survives being observed (2026-08-29)
+
+Two verdicts were misread in the 1.16.4 round, and neither was the harness's
+fault. The mutation audit's exit status was read through `| tail`, so the
+status observed was tail's and a red audit (G45 `MUTATE-NOOP` — the
+per-scope-modulus guard, audited zero times) read green. And
+`12-probe-retry`'s contention red was closed by a standalone pass taken on a
+quiet machine. Both failures are in the **observation channel**, so this round
+makes each verdict independent of how it is looked at.
+
+**The audit now writes its verdict where it can be re-read.** Every completed
+run ends with one machine line — `MA_SUMMARY total=<N> bad=<N> verdict=pass|fail`
+— printed after the per-case table and written to `$OUTDIR/VERDICT`. The exit
+contract is unchanged (0 only when `bad=0`); the file is a second channel, not
+a replacement, and it is the one that survives a pipe. A stale `VERDICT` in a
+persisted `MA_OUTDIR` is removed at start, for the same reason `baseline_one`
+re-takes its baselines: **absent means this run reached no verdict**, which is
+the honest answer for an env failure that never reached a case. Constitution
+V.4's checklist now names the outdir and reads the file.
+
+New `tests/regression.d/90-harness-honesty.sh` §7 (6 assertions) asserts both
+directions, because a file that always says `pass` is worse than no file: a
+clean run writes `verdict=pass` and exits 0, and a run with an injected bad
+case — a throwaway copy whose `mut_temp_scan` is neutered, exactly the
+`MUTATE-NOOP` shape 1.16.4 misread — writes `verdict=fail` and exits nonzero.
+Guard G49 redirects the write to `/dev/null` in a throwaway tree, leaving
+stdout and the exit code intact, and §7 notices.
+
+**And the contention red was a real defect, hiding one alias deep.** Running it
+down (WO-1.16.5) reached `probe_struct`, which held its ffprobe query in a
+local:
+
+```
+local q="ffp -v error -select_streams"
+vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)   # x9
+```
+
+On a **program-bearing** transport stream ffprobe lists every stream twice —
+the bare view, then the in-program view — so each of those nine queries writes
+two lines. `head -1` takes the first and closes the pipe; when ffprobe loses
+that race it dies of SIGPIPE (141), `pipefail` promotes it, `set -e` fires, and
+`lib-exit.sh` maps the stray to a bare `exit 1`. `mov.sh` then reads a failed
+`--kv` and declines a clean source at the front door:
+
+```
+>> REFUSED (pre-flight): probe.sh --kv failed (rc=1) or returned no audio
+   manifest — cannot classify this source (EMPTY is not ABSENT). Nothing written.
+```
+
+Measured on this bench (6 CPU spinners; the same recipe before and after):
+
+```
+                                            before        after
+24 concurrent probe.sh --kv                 3/24, 4/24    0/24
+12 concurrent mov.sh, default window        2/8, 2/10     0/12
+3 concurrent 12-probe-retry x 3 rounds      1/9 red       0/9
+```
+
+**This is the 1.15.2 SIGPIPE class, and it had a guard the whole time.** `ffp1`
+(awk reads to EOF, so the writer always completes) has existed since 1.15.2 and
+91 §5 has swept for the shape since 1.15.9 — by matching the literal token
+`ffp`. Behind `$q`, nine armed sites read as zero for four minor versions. So
+the sweep now goes **one alias deep** (V.1): it collects every variable in
+`scripts/` assigned an `ffp`/`ffprobe` command line, then checks whether that
+variable is piped into an early-exit reader. Exactly one such variable has ever
+existed in this tree, and the fix is to alias `ffp1` instead — deliberately not
+in the alternation, because aliasing *it* is the answer, not the defect. The
+`--kv` output is byte-identical to a pre-fix good run.
+
+New `tests/regression.d/115-probe-head-race.sh` (6 assertions) pins the
+precondition (those queries really do write two lines), 24 concurrent `--kv`
+runs under four self-owned spinners that must all exit 0 **and recover the real
+values** — exit 0 with a hollowed-out manifest is the same bug in a different
+hat — and the shape, including that all nine query sites survive the
+conversion, since a "fix" that deleted them would satisfy the other checks and
+probe nothing. Guard G50 re-arms the aliased shape in a throwaway `clock.sh`,
+split across three lines so 91 §5's literal arm cannot see it and only the new
+alias arm can claim the catch.
+
+Like test 73, 115 cannot pin "red before" on every bench — the race is
+scheduling-dependent and winnable (0/12 concurrent probes with no spinners).
+Its §1 green is scoped to that load and says so in its header, with the
+measured pre-fix rates recorded so the next contention red has a baseline.
+
+Suite 311/311 (was 310), mutation audit 89/89 (was 85).
+
 ## 1.16.4 — a picture the extractor skipped, blamed on the file (2026-08-29)
 
 Gate (k) declined a whole class of capture with a symptom it had manufactured

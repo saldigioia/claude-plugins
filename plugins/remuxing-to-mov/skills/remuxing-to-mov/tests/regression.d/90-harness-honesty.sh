@@ -17,7 +17,7 @@
 # Standalone: bash tests/regression.d/90-harness-honesty.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-TESTS="$HERE/.."; SC="$TESTS/../scripts"
+TESTS="$HERE/.."; SC="$TESTS/../scripts"; PLUGIN="$(cd "$TESTS/../../.." && pwd)"
 command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || { echo "need ffmpeg+ffprobe"; exit 2; }
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
@@ -216,6 +216,60 @@ LOG
     && t_ok "empty log: 0/0 (no phantom counts)" || t_no "phantom counts on an empty log"
 else
   t_no "lib-rewrap.sh functions not sourceable"
+fi
+
+echo
+echo "== 7. the mutation audit's verdict is re-readable from disk =="
+# WHY (measured 2026-08-29, the 1.16.4 round): the audit's exit status was
+# observed through `| tail`, so the status read was TAIL's, and a red audit
+# (G45 MUTATE-NOOP — the per-scope-modulus guard, audited zero times) was
+# closed as green. The harness was honest both times; the OBSERVATION CHANNEL
+# was not. A remembered exit code is a claim about the past with no artifact
+# behind it, so the verdict is now also written where a later reader can grep
+# it: MA_SUMMARY on stdout, and the same line in $OUTDIR/VERDICT.
+#
+# Both directions are asserted, because a file that always says pass is worse
+# than no file. G03 is the case under both runs — a static sweep, the cheapest
+# in the roster — and the FAIL direction is minted the sanctioned way (III.3):
+# a THROWAWAY COPY of the plugin whose mut_temp_scan is neutered, which is
+# exactly the MUTATE-NOOP shape 1.16.4 misread.
+MA="$TESTS/mutation-audit.sh"
+if [ ! -f "$MA" ]; then
+  t_no "tests/mutation-audit.sh does not exist"
+else
+  MAOUT="$WORK/ma-pass"; mkdir -p "$MAOUT"
+  ( cd "$TESTS/.." && MA_OUTDIR="$MAOUT" bash tests/mutation-audit.sh G03 ) > "$WORK/ma-pass.log" 2>&1; marc=$?
+  mapass=$(cat "$MAOUT/VERDICT" 2>/dev/null || echo "(no VERDICT file)")
+  t_has "$(cat "$WORK/ma-pass.log")" "MA_SUMMARY total=1 bad=0 verdict=pass" "clean run prints the machine summary line"
+  [ "$mapass" = "MA_SUMMARY total=1 bad=0 verdict=pass" ] \
+    && t_ok "clean run leaves the same line in \$OUTDIR/VERDICT (the durable channel)" \
+    || t_no "\$OUTDIR/VERDICT reads '$mapass', want 'MA_SUMMARY total=1 bad=0 verdict=pass'"
+  { [ "$marc" -eq 0 ] && case "$mapass" in *verdict=pass*) true;; *) false;; esac; } \
+    && t_ok "…and it AGREES with the exit code (rc=0 <-> verdict=pass)" \
+    || t_no "clean run: rc=$marc vs VERDICT '$mapass' — file and exit code disagree"
+
+  # the FAIL direction, on a throwaway copy we own end to end
+  BAD="$WORK/badtree"; mkdir -p "$BAD"
+  base="$(basename "$PLUGIN")"
+  ( cd "$PLUGIN/.." && tar -cf - --exclude fixtures --exclude __pycache__ "$base" ) | ( cd "$BAD" && tar -xf - )
+  BSK="$BAD/$base/skills/remuxing-to-mov"
+  mkdir -p "$BSK/tests/fixtures"
+  for fx in "$TESTS/fixtures"/*; do [ -e "$fx" ] && ln -s "$fx" "$BSK/tests/fixtures/$(basename "$fx")"; done
+  # neuter ONE mutation function: its mutation now changes nothing, the harness
+  # calls that MUTATE-NOOP, and MUTATE-NOOP counts against `bad`
+  perl -0pi -e 's/\nmut_temp_scan \(\) \{.*?\n\}\n/\nmut_temp_scan () { : ; }\n/s' "$BSK/tests/mutation-audit.sh"
+  MBOUT="$WORK/ma-fail"; mkdir -p "$MBOUT"
+  ( cd "$BSK" && MA_OUTDIR="$MBOUT" bash tests/mutation-audit.sh G03 ) > "$WORK/ma-fail.log" 2>&1; mbrc=$?
+  mbfail=$(cat "$MBOUT/VERDICT" 2>/dev/null || echo "(no VERDICT file)")
+  t_has "$(cat "$WORK/ma-fail.log")" "MA_SUMMARY total=1 bad=1 verdict=fail" "an injected bad case prints verdict=fail"
+  { [ "$mbrc" -ne 0 ] && case "$mbfail" in *verdict=fail*) true;; *) false;; esac; } \
+    && t_ok "…and the file says fail while the exit code is nonzero (rc=$mbrc) — agreement both ways" \
+    || t_no "bad run: rc=$mbrc vs VERDICT '$mbfail' — the two channels disagree"
+  # the point of the whole item: the file, not a remembered status, decides
+  case "$mbfail" in *verdict=fail*)
+      t_ok "a later reader can grep the verdict without trusting a remembered exit status";;
+    *) t_no "nothing greppable survived the bad run (VERDICT: '$mbfail')";;
+  esac
 fi
 
 echo

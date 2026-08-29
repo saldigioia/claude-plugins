@@ -318,12 +318,21 @@ and verified RED before the fix.
 **Test.**
 ```
 bash tests/regression.sh                                   # expect: FAILED: 0
-bash tests/mutation-audit.sh    # when a tree-wide guard changed (V.2)
+# when a tree-wide guard changed (V.2). Name the outdir and read the VERDICT
+# FILE — never a remembered exit status, and never one seen through a pipe:
+MA_OUTDIR=/tmp/ma bash tests/mutation-audit.sh
+cat /tmp/ma/VERDICT                    # expect: MA_SUMMARY total=N bad=0 verdict=pass
 cd ../../.. && claude plugin validate ./plugins/remuxing-to-mov --strict
                 claude plugin validate . --strict
 diff -rq --exclude=__pycache__ --exclude=fixtures \
   plugins/remuxing-to-mov ~/.claude/plugins/marketplaces/rare-data-club/plugins/remuxing-to-mov
 ```
+An exit code read through a pipe is the LAST command's, not the audit's:
+measured 2026-08-29, `bash tests/mutation-audit.sh | tail` reported green on a
+run whose own table said MUTATE-NOOP, and a guard that had been audited zero
+times shipped reading as harmless. The exit contract is unchanged (0 only when
+bad=0); `$OUTDIR/VERDICT` is the channel that survives being observed. No
+VERDICT file means the run reached no verdict — that is not a pass.
 
 ### V.5 — A behavioral edit that reaches a bench carries a version bump
 **Rule.** Any change to behavior that lands on an installed copy carries a

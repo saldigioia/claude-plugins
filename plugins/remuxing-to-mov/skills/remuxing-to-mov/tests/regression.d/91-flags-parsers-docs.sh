@@ -100,6 +100,29 @@ for s in "$SC"/*.sh; do
 done
 [ -z "$d3_bad" ] && ok "every single-pipe ffp|head-1 site converted to ffp1 (the 1.15.2 SIGPIPE class)" \
   || no "ffp|head-1 sites remain:$d3_bad"
+# THE ALIAS BLIND SPOT (measured 2026-08-29). The arm above matches the literal
+# token `ffp`, and probe_struct held its query in a variable —
+#   local q="ffp -v error -select_streams"   …   $q v:0 -show_entries … | head -1
+# — so NINE armed sites read as zero for four minor versions. On a
+# program-bearing TS every one of those queries emits the stream TWICE (the
+# bare view, then the in-program view), head -1 takes the first and closes, and
+# the loser of that race is ffprobe with SIGPIPE (141) -> pipefail -> set -e ->
+# probe.sh exits 1 with no diagnostic -> mov.sh refuses pre-flight (rc 2).
+# Measured 3/24 concurrent probe.sh runs and 2/10 mov.sh runs on this bench.
+# So the class is swept ONE ALIAS DEEP: find every variable assigned an
+# ffp/ffprobe command line, then check whether that variable is piped into an
+# early-exit reader. `ffp1 ` is deliberately not in the alternation — it is the
+# SIGPIPE-safe helper, and aliasing IT is the fix, not the defect.
+d3_alias=""
+for s in "$SC"/*.sh; do
+  asrc=$(rtm_strip_comments "$s")
+  for v in $(printf '%s\n' "$asrc" | grep -oE '[A-Za-z_][A-Za-z0-9_]*=["'"'"']?(ffprobe|ffp) ' | sed 's/=.*//' | sort -u); do
+    n=$(printf '%s\n' "$asrc" | grep -cE '\$\{?'"$v"'\}?[^|]*\|[[:space:]]*head' || true)
+    [ "${n:-0}" -eq 0 ] || d3_alias="$d3_alias $(basename "$s"):\$$v:$n"
+  done
+done
+[ -z "$d3_alias" ] && ok "no variable-aliased ffp query pipes into head either — the class swept one alias deep" \
+  || no "aliased ffp|head sites remain:$d3_alias"
 # the D1 sibling: dim-scan's FIRST_CH assignment no longer grep|head|awk's
 dsrc=$(rtm_strip_comments "$SC/dim-scan.sh")
 hasnt "$dsrc" "grep '^CHANGE ' \"\$TMP/scan\" | head -1" "dim-scan's assignment-position pipeline (D1 sibling) is gone"

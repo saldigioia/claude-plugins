@@ -138,7 +138,14 @@ pr_derive_sig () {
 # from codec/PAFF/audio only; timestamp-driven escalation (Rung 2/3 on non-PAFF)
 # happens reactively in auto.sh from the verify verdict.
 probe_struct () {
-  local mode="$1" q="ffp -v error -select_streams"
+  # ffp1, not ffp: on a program-bearing TS every one of the nine scalar
+  # queries below writes the stream TWICE (bare view, then in-program view),
+  # so a `| head -1` closes the pipe on a still-writing ffprobe and takes it
+  # down with SIGPIPE (141) -> pipefail -> set -e -> a silent exit 1, and
+  # mov.sh refuses a clean source at pre-flight. Measured 2026-08-29 at 3-4
+  # of 24 concurrent probes. ffp1 reads to EOF, so the writer always
+  # finishes; test 115 pins it, 91 §5 sweeps the class one alias deep.
+  local mode="$1" q="ffp1 -v error -select_streams"
   local container vcodec vtag isavc acodec aaction rung rung_json cmd cp ct cs cr pixfmt vnat
   local tag_advice tagadv_json nprog
   container=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
@@ -148,15 +155,15 @@ probe_struct () {
   # on a 2-program TS (measured). 0 = container carries no program concept.
   nprog=$(ffp1 -v error -show_entries format=nb_programs -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
   case "$nprog" in ''|*[!0-9]*) nprog=0;; esac
-  vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  vtag=$($q v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  pixfmt=$($q v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  isavc=$($q v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  acodec=$($q a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  cp=$($q v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  ct=$($q v:0 -show_entries stream=color_transfer -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  cs=$($q v:0 -show_entries stream=color_space -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
-  cr=$($q v:0 -show_entries stream=color_range -of default=nw=1:nk=1 "$IN" 2>/dev/null | head -1)
+  vcodec=$($q v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  vtag=$($q v:0 -show_entries stream=codec_tag_string -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  pixfmt=$($q v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  isavc=$($q v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  acodec=$($q a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  cp=$($q v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  ct=$($q v:0 -show_entries stream=color_transfer -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  cs=$($q v:0 -show_entries stream=color_space -of default=nw=1:nk=1 "$IN" 2>/dev/null)
+  cr=$($q v:0 -show_entries stream=color_range -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   eval "$(pf_detect "$IN")"
   # PF_PPF_IN passes pf_detect's measured essence result down so the bounded
   # decode probe runs once per probe pass, not once per function that wants it.
