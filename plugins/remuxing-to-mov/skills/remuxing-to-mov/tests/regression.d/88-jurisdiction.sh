@@ -117,18 +117,25 @@ S2="$WORK/s2997.ts"
 ff -f lavfi -i testsrc2=s=320x240:r=30000/1001 -f lavfi -i sine=1000 -t 3 \
    -c:v libx264 -g 30 -pix_fmt yuv420p -c:a mp2 -f mpegts "$S2" || { echo "mint failed"; exit 2; }
 awk 'BEGIN{for(i=0;i<180;i++){t=i*0.016683; printf "%.6f,%.6f\n", t, t}}' > "$WORK/full2x.csv"
+# CONVERTED IN 1.16.0 (TIERS.md T3.3). F1's contribution was the DIAGNOSIS —
+# the two PAFF shapes must not be confused, and a full-timestamp source must
+# never be told it has untimestamped mates. That contribution stands and is
+# still pinned here. What changed is the CONSEQUENCE: the refusal was a
+# prediction about the quality of the output (its own text said "POLICY, not
+# measurement"), so it is now a warning and the build is attempted.
 o=$(PF_PKT_FILE="$WORK/full2x.csv" bash "$SC/zero-base.sh" "$S2" "$WORK/zb2.ts" 2>&1); rc=$?
-[ "$rc" -eq 2 ] && ok "full-TS PAFF still refused (exit 2 — the POLICY stands)" || no "full-TS PAFF rc=$rc, want 2"
+[ "$rc" -ne 2 ] && ok "full-TS PAFF is no longer refused at pre-flight (rc=$rc)" || no "full-TS PAFF still refuses (rc=2)"
+has "$o" "WARNING (not a refusal)" "it is announced as a warning, in those words"
 hasnt "$o" "untimestamped mates" "no false 'untimestamped mates' diagnosis on a complete timestamp column"
-hasnt "$o" "pair-timestamped PAFF source" "not labeled the pair-timestamped class"
-has "$o" "half_ts=no" "the refusal states the measured profile"
-has "$o" "pairfill-paff.sh would refuse" "…and says the OLD route would exit 3 on this very file"
+hasnt "$o" "pair-timestamped PAFF (paff" "not labeled the pair-timestamped class"
+has "$o" "half_ts=no" "the warning states the measured profile"
+has "$o" "pairfill-paff.sh" "…and names the route that would refuse this very file"
 has "$o" "mov.sh" "…and names a route that actually accepts the file (the copy ladder)"
-# the pair-timestamped arm keeps its 1.15.2 message verbatim (test 75's pins)
+# the pair-timestamped arm keeps its own diagnosis, now as a warning
 awk 'BEGIN{for(i=0;i<120;i++){printf "%.6f,%.6f\nN/A,N/A\n", i*0.033367, i*0.033367}}' > "$WORK/pair.csv"
 o=$(PF_PKT_FILE="$WORK/pair.csv" bash "$SC/zero-base.sh" "$S2" "$WORK/zb3.ts" 2>&1); rc=$?
-{ [ "$rc" -eq 2 ] && case "$o" in *"pair-timestamped PAFF source"*) true;; *) false;; esac; } \
-  && ok "half_ts arm unchanged (pair-timestamped message, exit 2)" || no "half_ts arm regressed (rc=$rc)"
+case "$o" in *"pair-timestamped PAFF"*) ok "half_ts arm still diagnosed as the pair-timestamped class";; *) no "half_ts arm regressed (rc=$rc)";; esac
+has "$o" "Timestamps are unset" "…and still quotes the measured hard-stop class it may hit"
 
 echo
 echo "== 7. F12: multi-program topology reaches the machine consumers =="

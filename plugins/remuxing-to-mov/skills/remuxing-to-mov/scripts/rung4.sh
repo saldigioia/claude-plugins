@@ -60,15 +60,14 @@ if [ "$ATT" != "$RTM_RUNG4_ATTEST" ]; then
   echo "  defined once in scripts/lib-attest.sh (RTM_RUNG4_ATTEST) and must be" >&2
   echo "  typed by the operator via --attest or REMUX_ATTEST — verbatim, no" >&2
   echo "  paraphrase, and never supplied on the operator's behalf." >&2
-  exit 2
+  exit 2   # TIER 1 T1.1 the re-encode consent gate
 fi
 
 case "$PROFILE" in prores) DEXT=mov;; *) DEXT=mp4;; esac
 if [ -z "$OUT" ]; then
   b="$(basename "$IN")"; OUT="$(dirname "$IN")/${b%.*}.rung4-${PROFILE}.${DEXT}"
 fi
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "rung4.sh: refusing to target the source" >&2; exit 2; }
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 [ ! -e "$OUT" ] || { echo "rung4.sh: $OUT already exists — a rung4 derivative never overwrites anything (masters included). Pick another name." >&2; exit 2; }
 
 echo "== rung4 ($PROFILE): $IN -> $OUT =="

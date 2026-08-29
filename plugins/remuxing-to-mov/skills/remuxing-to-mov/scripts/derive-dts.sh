@@ -62,11 +62,10 @@ while [ $# -gt 0 ]; do case "$1" in
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # pf_reorder_scan (unit-aware depth), PF_SCAN_WINDOW, mux_confessions
 . "$SELF_DIR/lib-mux.sh"    # rtm_part/rtm_sidecar (extension-keeping atomics), mux_census (D5)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 . "$SELF_DIR/lib-attest.sh" # precond_attest: recorded operator override of a precondition
 # NOTE: no backhaul_gate here, deliberately — its timeline-rot arm measures the
 # DTS column, which on this rung's input class is the demuxer's broken
@@ -110,8 +109,15 @@ eval "$(printf '%s\n' "$dd_raw" | awk -F, 'NF{
     if($1=="N/A"||$1==""){ na++; next }
     c[$1]++; if(c[$1]==2) dup++
   } END{ printf "DD_N=%d DD_NA=%d DD_DUP=%d\n", n+0, na+0, dup+0 }')"
-echo "   packets=$DD_N  N/A-PTS=$DD_NA  duplicate-PTS values=$DD_DUP"
-[ "${DD_N:-0}" -gt 0 ] || { echo "no video packets read" >&2; exit 3; }
+# WO-1.15.21 B1: SCOPE THE NUMBER AT THE POINT OF PRINT. The header says
+# "window"; the value line did not, and read as an absolute fact — on the 2024
+# VMA capture it printed `duplicate-PTS values=0` while the whole-file truth
+# was 10, and the refusal below is phrased as an absolute too. A windowed zero
+# is "none in the window", never "none": the absence claim is the one a window
+# is least entitled to make.
+echo "   packets=$DD_N (in window)  N/A-PTS=$DD_NA (in window)  duplicate-PTS values=$DD_DUP (in window)"
+[ "${DD_DUP:-0}" -ne 0 ] || echo "   note: 0 duplicate PTS IN THIS WINDOW is not 0 in the file — the whole-file census is scripts/diagnose.sh, and the python pass re-checks every packet before a byte is written."
+[ "${DD_N:-0}" -gt 0 ] || { echo "no video packets read" >&2; exit 3; }   # TIER 1 instrumentation: nothing was read, so nothing is claimed
 # WO-1.15.20 S0: MEASURE the timestamp profile here rather than read a global
 # nothing in this script sets. The F9 routing branches on half_ts, and an unset
 # PF_HALF_TS defaulted to `no` — so the "this IS the pairfill class" arm could
@@ -162,12 +168,20 @@ elif [ "${DD_NA:-1}" -ne 0 ]; then
     echo "   ${RTM_SPARSE_NOPTS_MAX:-0.01} and $DD_NA of $DD_N windowed packets is past it. NO AUTOMATIC ROUTE:"
     echo "   diagnose first (scripts/diagnose.sh) and keep the source as the master."
   fi
-  exit 3
+  exit 3   # TIER 3 T3.4 unstamped-packet signature (whole file re-decides)
 fi
 if [ "${DD_DUP:-1}" -ne 0 ]; then
-  echo ">> SIGNATURE REFUSED: $DD_DUP duplicate PTS value(s) — the derivation assumes a"
-  echo "   unique display timeline. Diagnose the duplication first (scripts/diagnose.sh)."
-  exit 3
+  # TIERS.md T3.5 — CONVERTED in 1.16.0. This used to refuse here, on a
+  # WINDOWED count, for a condition the whole-file pass can now often settle:
+  # where the bitstream states each picture's display position, the stale
+  # holder of a shared rung is identifiable and movable from evidence (10 of
+  # 10 on the capture that motivated this round). Refusing on the window
+  # denied the file the pass that would have adjudicated it.
+  echo "   $DD_DUP duplicate PTS value(s) in this window — NOT a refusal (T3.5):"
+  echo "   the whole-file pass adjudicates each one from the bitstream's own display"
+  echo "   positions and refuses only what the evidence cannot settle, naming it."
+  echo "   Whole-file census (count, values, positions, and how many straddle an"
+  echo "   unstamped run): scripts/diagnose.sh \"$IN\""
 fi
 eval "$(pf_reorder_scan "$IN")"
 echo "   reorder=$PF_REORDER  depth=$PF_DEPTH_PICS pic(s) (window)  declared=$PF_DECL_DEPTH  ppf=$PF_PPF"
@@ -176,7 +190,7 @@ if [ "$PF_REORDER" != yes ]; then
   echo ">> SIGNATURE REFUSED: no presentation reorder measured — there is no DTS to"
   echo "   derive that a plain copy (remux.sh) or constant-rate rebuild (rebuild-paff.sh)"
   echo "   would not already produce."
-  exit 3
+  exit 3   # TIER 3 routing: named routes, nothing is prevented
 fi
 DD_ATTESTED=""   # " attested=dd-depth-class" on a precond_attest override (appended to DERIVE_DTS)
 case "$PF_DEPTH_CLASS" in
@@ -204,19 +218,19 @@ case "$PF_DEPTH_CLASS" in
       echo "   file would get a derived timeline on evidence that cannot support one."
       echo "   Diagnose first (scripts/diagnose.sh), or rerun with --force (announced)."
       precond_attest_route dd-depth-class derive-dts.sh
-      exit 3
+      exit 3   # TIER 3 routing: named routes + --force
     else
       echo ">> SIGNATURE REFUSED: depth class $PF_DEPTH_CLASS — the declaration accounts"
       echo "   for the measured depth, so ffmpeg's own reconstruction is not provably short"
       echo "   here. If the container timeline is rotten anyway, rerun with --force."
       precond_attest_route dd-depth-class derive-dts.sh
-      exit 3
+      exit 3   # TIER 3 routing: named routes + --force
     fi ;;
 esac
 
 # --- the repair (python writes an intermediate; extension kept — D6) ---------
 trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
-rtm_writer_preflight "$OUT" "$IN" || exit 2
+rtm_writer_preflight "$OUT" "$IN" || exit 2   # TIER 1 T1.5/T1.6 one writer + disk pre-flight
 PART="$(rtm_part "$OUT")"
 NCHAP=$(ffp -v error -show_chapters -of csv "$IN" 2>/dev/null | grep -c '^chapter' || true)
 case "$NCHAP" in ''|*[!0-9]*) NCHAP=0;; esac
@@ -230,7 +244,7 @@ set -e
 printf '%s\n' "$py_out" | sed 's/^/   /'
 case "$prc" in
   0) : ;;
-  3) echo ">> whole-file precondition REFUSED the derivation (see above)."; rm -f "$PYOUT"; exit 3;;
+  3) echo ">> whole-file precondition REFUSED the derivation (see above)."; rm -f "$PYOUT"; exit 3;;   # TIER 3 T3.4/T3.5 relay of the whole-file refusal
   10) exit 10;;
   *) echo ">> derivation FAILED (python exit $prc); partial output removed."; rm -f "$PYOUT"; exit 1;;
 esac

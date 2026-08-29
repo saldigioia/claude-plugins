@@ -162,6 +162,7 @@ fi
 # the disk half of the pre-flight themselves.
 trap 'rtm_unlock' EXIT
 rtm_lock "$OUT" || exit 2
+rtm_claim_out "$OUT" || exit 2   # TIER 1 T1.10 final-OUT no-clobber (claimed once, here)
 
 # OPT-IN metadata: applied as a -c copy pass on the finished file ONLY when the user
 # passed metadata flags. NEVER automatic. Proper QuickTime format + drops the generic
@@ -191,7 +192,7 @@ set +e; PKV=$(bash "$SELF_DIR/probe.sh" "$IN" --kv); pkv_rc=$?; set -e
 if [ "$pkv_rc" -ne 0 ] || ! printf '%s\n' "$PKV" | grep -q '^PR_AUD_COUNT='; then
   echo ">> REFUSED (pre-flight): probe.sh --kv failed (rc=$pkv_rc) or returned no audio" >&2
   echo "   manifest — cannot classify this source (EMPTY is not ABSENT). Nothing written." >&2
-  exit 2
+  exit 2   # TIER 1 instrumentation: a failed probe is not a measurement (III.1)
 fi
 eval "$(printf '%s\n' "$PKV" | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
 echo "== mov: $IN -> $OUT =="
@@ -207,7 +208,7 @@ echo "   video=$PR_VCODEC  audio=$PR_ACODEC  paff=$PF_PAFF"
 # so auto.sh and remux.sh refuse identically — gate at every entry point.
 if unroutable_v "$PR_VCODEC"; then
   unroutable_v_refuse "$PR_VCODEC"
-  exit 11
+  exit 11   # TIER 3 T3.8 cached deterministic attempt
 fi
 # Dolby E scan honors --audio-keep: the whole per-track manifest is checked
 # (a:0-only was the transcript-1 blind-spot class), and an explicit keep-list
@@ -231,7 +232,7 @@ while [ "$ua_i" -lt "${PR_AUD_COUNT:-0}" ]; do
 done
 if [ -n "$DBE_ORD" ]; then
   unroutable_a_refuse "$DBE_ORD"   # shared voice (lib-paff.sh) — same refusal at auto.sh/remux.sh
-  exit 11
+  exit 11   # TIER 3 T3.8 cached deterministic attempt
 fi
 
 # --- measured-native video matrix (WO 5.1): recognition, never conversion ----
@@ -451,7 +452,7 @@ if [ "${PREKEY:-0}" -gt 0 ]; then
         echo ">> REFUSED (pre-flight): re-probe of the trimmed intermediate failed (rc=$pkv_rc)" >&2
         echo "   — cannot classify what the build would consume. Nothing further written." >&2
         [ -n "$TRIMTMP" ] && echo "   (trimmed intermediate kept at $TRIMTMP for inspection)" >&2
-        exit 2
+        exit 2   # TIER 1 instrumentation: a failed re-probe is not a measurement (III.1)
       fi
       eval "$(printf '%s\n' "$PKV" | grep -E '^(PR|PF)_[A-Z0-9_]+=')"
       echo "   building from the trimmed intermediate: $TRIMTMP"
@@ -497,7 +498,7 @@ if [ "$PF_PAFF" = yes ]; then
     echo "   on multi-track sources; the copy rung keeps every track). Re-run without" >&2
     echo "   --audio-keep, or curate tracks on the finished .mov afterwards (the remux" >&2
     echo "   ladder's --audio-keep applies there). Nothing was written." >&2
-    exit 2
+    exit 2   # TIER 1 config honesty: never silently ignore an operator flag
   fi
   # F5 (WO-1.15.9): --mp4-swap rides through to auto.sh, which OWNS the swap
   # (it fires on a post-build fidelity FAIL) — the flag used to be accepted

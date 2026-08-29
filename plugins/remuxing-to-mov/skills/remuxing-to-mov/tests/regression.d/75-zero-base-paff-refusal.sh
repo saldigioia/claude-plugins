@@ -1,21 +1,31 @@
 #!/usr/bin/env bash
-# 75-zero-base-paff-refusal.sh — 1.15.2 Item C: zero-base refuses
-# pair-timestamped PAFF at PRE-FLIGHT, before any whole-file work.
+# 75-zero-base-paff-refusal.sh — TIERS.md T3.3: zero-base WARNS about a
+# field-coded source and builds; it no longer refuses one at pre-flight.
 #
-# Field measurement (2022-08-28 source): a TS->TS copy of the pair-timestamped
-# shape makes the mpegts muxer confess 'Timestamps are unset' — the
-# invented-timing hard-stop class — so 1.15.1 burned a 54 s whole-file scan
-# plus a 23.68 GB build to reach a foregone refusal, chasing 40 ms on a
-# start_time every player rebases away.
+# WHAT THIS TEST USED TO ASSERT, and why it changed. From 1.15.2 (Item C) to
+# 1.15.20 this file pinned a REFUSAL: a pair-timestamped PAFF source exited 2
+# with nothing written, because a measured field run had spent 23.68 GB to
+# reach a hard stop for a prize of 40 ms on a start_time players rebase away.
+# The measurement was real and it is still quoted below. The INFERENCE — that
+# the outcome was therefore known and the attempt could be skipped — is the
+# one this plugin retired on 2026-08-29, after the same reasoning refused a
+# 25 GB capture across three sessions that it turns out could be converted.
+#
+# So the prediction stays and the refusal goes: the warning is printed with its
+# measurement, the build is attempted, and the mux-confession stop plus
+# verify-source.sh judge the artifact that exists. An operator who wants the
+# old answer without the build asks for it: --preflight-only.
+#
+# NOTHING DOWNSTREAM IS LOOSENED, and §4 is what pins that: the confession
+# stop still refuses to bless an invented timeline.
 #
 # Pins:
-#   1. half_ts profile (pf_detect's PF_PKT_FILE hook — real PAFF cannot be
-#      minted in a sandbox) -> exit 2, nothing written;
-#   2. the refusal names pairfill-paff.sh as the route;
-#   3. it fires at pre-flight: no floor announcement, no prediction pre-pass,
-#      no ts-health scan output in the transcript.
-# (The no-false-refusal control is 68-zero-base.sh: its full-timestamp fixture
-# must keep passing pre-flight and building.)
+#   1. a pair-timestamped PAFF source is WARNED about, not refused;
+#   2. the warning carries the measurement it rests on, and says it is not a refusal;
+#   3. the build is actually attempted (the floor, the pre-pass, the scan all run);
+#   4. an invented timeline is still NOT blessed — the artifact is kept as .part;
+#   5. --preflight-only still answers without building, and now reports the warning;
+#   6. the full-timestamp control (68-zero-base.sh) still builds cleanly.
 #
 # Standalone: bash tests/regression.d/75-zero-base-paff-refusal.sh
 set -uo pipefail
@@ -40,16 +50,53 @@ ff -f lavfi -i "testsrc2=s=320x240:r=25" -f lavfi -i "sine=1000" -t 3 \
 awk 'BEGIN{for(i=0;i<120;i++){printf "%.6f,%.6f\nN/A,N/A\n", i*0.033367, i*0.033367}}' > "$WORK/pair.csv"
 
 echo
-echo "== pair-timestamped PAFF -> pre-flight refusal, nothing written =="
-out=$(PF_PKT_FILE="$WORK/pair.csv" bash "$SC/zero-base.sh" "$S" "$WORK/nope.ts" 2>&1); rc=$?
-[ "$rc" -eq 2 ] && ok "exit 2 (usage/pre-flight class)" || no "rc=$rc (want 2)"
-has "$out" "pairfill-paff.sh" "the refusal names the pairfill route"
-has "$out" "Timestamps are unset" "the refusal names the measured hard-stop class"
-found=$(find "$WORK" -name 'nope*' | head -1)
-[ -z "$found" ] && ok "nothing written (no output, no .part)" || no "refusal left bytes behind: $found"
-hasnt "$out" "FLOOR" "refused before the floor announcement"
-hasnt "$out" "prediction pre-pass" "refused before the prediction pre-pass"
-hasnt "$out" "whole-file health scan" "refused before the whole-file ts-health scan"
+echo "== 1. the field-coded profile WARNS and proceeds =="
+out=$(PF_PKT_FILE="$WORK/pair.csv" bash "$SC/zero-base.sh" "$S" "$WORK/o.ts" 2>&1); rc=$?
+has "$out" "WARNING (not a refusal)" "the profile is announced as a warning, in those words"
+has "$out" "pair-timestamped PAFF" "…naming the measured profile"
+has "$out" "Timestamps are unset" "…and the measured hard-stop class it may hit"
+has "$out" "23.68 GB" "…with the field measurement that motivated the old refusal"
+has "$out" "pairfill-paff.sh" "the QuickTime route is still named"
+has "$out" "--preflight-only" "…and so is the way to get this verdict without building"
+[ "$rc" -ne 2 ] && ok "it is not a pre-flight refusal any more (rc=$rc, not 2)" || no "still refusing at pre-flight (rc=2)"
+
+echo
+echo "== 2. the build was actually attempted =="
+has "$out" "FLOOR" "the floor announcement ran (the pre-flight no longer short-circuits)"
+has "$out" "whole-file health scan" "the whole-file ts-health scan ran"
+case "$out" in
+  *"prediction pre-pass"*|*"predicted"*) ok "the prediction pre-pass ran" ;;
+  *) no "the prediction pre-pass did not run" ;;
+esac
+
+echo
+echo "== 3. the verdict is about the artifact, not a forecast =="
+case "$rc" in
+  0)  ok "the build completed and was blessed (rc=0) — the forecast was wrong, and now we know" ;;
+  1)  ok "the build was attempted and NOT blessed (rc=1) — the forecast was right, and now it is evidence" ;;
+  10) ok "the build was attempted and landed REVIEW (rc=10)" ;;
+  *)  no "unexpected rc=$rc from an attempted build" ;;
+esac
+hasnt "$out" "refusing at pre-flight" "no pre-flight refusal language survives on this path"
+
+echo
+echo "== 4. an invented timeline is still NOT blessed (nothing downstream loosened) =="
+case "$out" in
+  *"HARD STOP"*)
+    hasnt "$out" ">> DONE" "a confessed timeline is never reported DONE"
+    has "$out" "NOT blessed" "…and the report says the output was not blessed" ;;
+  *)
+    ok "(this fixture's build did not trip the confession stop — §4's lane does not apply)" ;;
+esac
+
+echo
+echo "== 5. --preflight-only still answers without building, and carries the warning =="
+out=$(PF_PKT_FILE="$WORK/pair.csv" bash "$SC/zero-base.sh" "$S" --preflight-only 2>&1); rc=$?
+has "$out" "ZB_PREFLIGHT" "the machine row is emitted"
+has "$out" "warn=yes" "…flagging that this source carries a warning"
+has "$out" "ZB_PREFLIGHT_WARN" "…and naming it, so a caller (clean.sh) can relay it"
+found=$(find "$WORK" -name 'nope*' -o -name '*.part*' | head -1)
+[ -z "$found" ] && ok "--preflight-only wrote nothing" || no "--preflight-only left bytes: $found"
 
 echo
 echo "zero-base-paff-refusal: $pass passed, $fail failed"

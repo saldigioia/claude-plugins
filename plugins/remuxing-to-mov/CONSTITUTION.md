@@ -52,15 +52,81 @@ report-only; corrections write a new file.
 `bash tests/regression.d/68-zero-base.sh`.
 *Provenance: 1.15.0 source-clinic round.*
 
-### I.3 — Never build to a foregone refusal
-**Rule.** If a source cannot be blessed by the route's own mandatory checks,
-refuse at PRE-FLIGHT with nothing written. Never spend the build first.
-**Failure it prevents.** A 23.68 GB build that ran to completion and then
-hard-stopped, for a prize of 40 ms on a `start_time` players rebase away.
-**Test.** `bash tests/regression.d/75-zero-base-paff-refusal.sh` — asserts
-exit 2, nothing written, and that the refusal precedes the floor probe, the
-prediction pre-pass and the whole-file scan.
-*Provenance: 1.15.2 Item C.*
+### I.3 — Gate the assertion, not the attempt
+**Rule.** A pre-flight refusal is legal only when it is (a) a **cached
+deterministic attempt** — the tool's own refusal, measured and re-verifiable —
+or (b) a Tier-1 or resource condition. **A prediction about the QUALITY of the
+output is never either, and may not block a build.** Announce the prediction
+with its measurement, run the route, and let the output gates judge the
+artifact. Where the cost matters, announce the cost too; `--preflight-only`
+exists for an operator who wants the verdict without the build.
+
+**What this replaces.** Until 1.16.0 this article read "never build to a
+foregone refusal", and its own motivating measurement was real: a 23.68 GB
+build that ran to completion and then hard-stopped, for a prize of 40 ms on a
+`start_time` players rebase away. The rule generalised from it was not. "The
+outcome is foregone" is a claim about a run that has not happened, and this
+plugin made it wrongly, at scale.
+
+**Failure it prevents (measured).** Across three sessions the plugin refused a
+25.38 GB PAFF capture on the reasoning that the MOV muxer cannot write a packet
+with no PTS, so it invents one, so the confession gate refuses the output, so
+the write is a foregone waste. Every clause was plausible. All nine plain
+`-c copy` variants return rc=0 and write every packet
+(`scripts/attempt-battery.sh` measures it on demand); what ffmpeg silently
+produces is a wrong TIMELINE, which is Tier-2 work. In the same period the
+gates that DID run passed two builds that were bit-identical and unusable. The
+score for refusing-to-attempt is: zero broken files caught, one convertible
+capture refused three times, and no evidence produced that would have corrected
+the reasoning — because the run never happened.
+
+**The costs are not symmetric.** A doomed build wastes a pass. A refusal on a
+false prediction wastes the evidence.
+
+**Test.** `bash tests/regression.d/109-attempt-not-predicted.sh` (the ladder
+executes its copy rung and the tree carries no output-quality forecast that
+gates an attempt) and `bash tests/regression.d/75-zero-base-paff-refusal.sh`
+(the field-coded profile WARNS and builds; `--preflight-only` still answers
+without building).
+*Provenance: 1.15.2 Item C as the original; re-aimed 1.16.0 from the 2026-08-28
+feed.ts post-mortem. The classification of every refusal in the tree is
+`TIERS.md`, and `94-rot-sweep.sh` §11 fails the bench on a refusal site that
+carries no tier.*
+
+### I.4 — An essence hash is necessary and not sufficient
+**Rule.** Losslessness is proven at the essence level and is **not** a verdict
+on the artifact. What the container DECLARES must be verified against what it
+STORES, at the same standard.
+**Failure it prevents (measured 2026-08-29).** Two builds of the same source
+were bit-identical to it and unusable: one carried a MOV sample per coded
+FIELD, so the container claimed ~50/s over a ~25/s decode and stuttered in
+QuickTime and IINA; the other carried a `.mp3` sample entry over MPEG-1 Layer
+II payload. Gates (a)/(b) proved both lossless, gate (c) decoded both without
+an error, gate (g) passed the audio. Every check the plugin had was blind,
+because the defect was in the declaration. On the field-per-sample build the
+pre-1.16.0 verify printed `>> OK (lossless proven; timeline scrub-clean)`.
+**Test.** `bash tests/regression.d/105-declared-vs-stored.sh` (gate (h) FAILs a
+field-per-sample build whose gate (b) passes) and
+`bash tests/regression.d/106-codec-tag-payload.sh` (gate (i) FAILs a
+`.mp3`-over-Layer-II build whose gate (g) passes). Both counter-examples are
+minted by `tests/mint-counterexamples.py`.
+*Provenance: 1.16.0.*
+
+### I.5 — A verifier states what it could not prove
+**Rule.** Every gate files a verdict, **including the ones that could not
+run**. A gate that is skipped in silence is indistinguishable from a gate that
+passed. `unproven` (the gate was owed and could not be evaluated) downgrades a
+clean run to REVIEW; `n/a` (the gate does not apply to this input) does not —
+collapsing the two either makes every run REVIEW or lets an unreadable track
+pass as clean.
+**Failure it prevents.** "Verified" meaning "everything that ran was happy",
+with no way to learn what had not run. On 2026-08-28 everything that ran WAS
+happy about two unusable builds.
+**Test.** `bash tests/regression.d/107-verify-ledger.sh` — every gate files
+exactly one row; removing a gate's tool from PATH makes the ledger SAY the gate
+could not run (never omit it, never pass it); an unproven gate downgrades a
+PASS to REVIEW and an `n/a` one does not.
+*Provenance: 1.16.0.*
 
 ---
 

@@ -1159,26 +1159,69 @@ pf_trace_census () {
       ffmpeg -nostdin -hide_banner -nostats ${FF_INPUT_OPTS[@]+"${FF_INPUT_OPTS[@]}"} \
         -i "${1:?pf_trace_census needs INPUT}" -map 0:v:0 -c copy \
         -bsf:v trace_headers -f null - 2>&1; fi; } | \
-  awk -v pocf="${2:-}" -v spsf="${3:-}" '
+  awk -v pocf="${2:-}" -v spsf="${3:-}" -v strf="${4:-}" '
+    # PAIRING STATE (1.16.0, gate (h)). A picture is COMPLETE when the next one
+    # starts (or at END), because its field/bottom/frame_num tokens arrive after
+    # its first_mb_in_slice. ISO/IEC 14496-15: a top field immediately followed
+    # by a bottom field with the SAME frame_num is one complementary pair and
+    # belongs in ONE sample. Anything else is its own sample.
+    function complete_pic() {
+      if (!have) return
+      # one row per coded picture, in the SAME order as the POC rows, so a
+      # caller can align the two by line number. (No apostrophes in here: one
+      # inside a single-quoted awk program ends the shell string and the rest
+      # is parsed as shell — 94 rot-sweep section 1, hit twice while writing
+      # this very comment, which is why the guard exists.)
+      if (strf != "") printf "%d,%d,%d\n", cur_field, cur_bottom, cur_fnum > strf
+      if (cur_field == 0) {
+        if (pending_top) { singles++; pending_top = 0 }
+        framepics++
+      } else if (cur_bottom == 0) {
+        if (pending_top) singles++
+        pending_top = 1; top_fnum = cur_fnum
+      } else {
+        if (pending_top && cur_fnum == top_fnum) { pairs++; pending_top = 0 }
+        else { if (pending_top) { singles++; pending_top = 0 } singles++ }
+      }
+      have = 0
+    }
     { name=""
-      for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"||$i=="field_pic_flag"||$i=="pic_struct"||$i=="nal_unit_type"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
+      for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"||$i=="field_pic_flag"||$i=="pic_struct"||$i=="nal_unit_type"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"||$i=="frame_num"||$i=="bottom_field_flag"){ name=$i; break }
       if(name=="") next
       v=$NF+0
       if(name=="nal_unit_type"){ nal=v; next }
-      if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; next }
-      if(name=="first_mb_in_slice"){ if(v==0){ pics++; pend=1; pendp=1; idr=(nal==5)?1:0 }; next }
-      if(name=="field_pic_flag"){ if(pend){ pend=0; if(v==1) fields++ }; next }
+      if(name=="log2_max_pic_order_cnt_lsb_minus4"){ if(l2seen && v!=l2) l2vary=1; l2=v; l2seen=1; next }
+      if(name=="first_mb_in_slice"){ if(v==0){ complete_pic(); pics++; pend=1; pendp=1; idr=(nal==5)?1:0
+                                               have=1; cur_field=0; cur_bottom=0; cur_fnum=-1 }; next }
+      if(name=="frame_num"){ if(have && cur_fnum<0) cur_fnum=v; next }
+      if(name=="field_pic_flag"){ if(pend){ pend=0; if(v==1) fields++ }; if(have) cur_field=v; next }
+      if(name=="bottom_field_flag"){ if(have) cur_bottom=v; next }
       if(name=="pic_order_cnt_lsb"){ if(pendp){ pendp=0; if(pocf!="") printf "%d,%d\n", idr, v > pocf }; next }
+      # NOTE: the structure row is emitted from complete_pic(), not here — the
+      # field/bottom tokens of a picture arrive AFTER its pic_order_cnt_lsb.
       # pic_struct (exact token — pic_struct_present_flag never matches here)
       hist[v]++; nps++
       if(v==0||v==5||v==6||v==7||v==8) bad++
     }
     END{
+      complete_pic(); if (pending_top) singles++
       hs=""; for(k=0;k<=15;k++) if(hist[k]>0) hs=hs (hs==""?"":",") k ":" hist[k]
       if(nps+0==0) hs="none"
       if(spsf!="" && l2 != "") printf "%d\n", l2 > spsf
       printf "PC_PICS=%d\nPC_FIELDS=%d\nPC_FRAMES=%d\nPC_STRUCT_BAD=%d\nPC_STRUCT_HIST=%s\nPC_OK=%s\n", \
         pics+0, fields+0, pics-fields, bad+0, hs, (pics+0>0?"yes":"no")
+      # APPEND-ONLY (Ground Rule 4): the six rows above keep their name, order
+      # and meaning — test 78 pins them. The three below are the 14496-15 sample
+      # arithmetic gate (h) reads: how many MOV samples this coded picture
+      # stream SHOULD occupy. PC_SPS_L2_VARIES says whether
+      # log2_max_pic_order_cnt_lsb_minus4 CHANGES across the file: a broadcast
+      # capture spanning a program change carries more than one SPS, and one
+      # global MaxPicOrderCntLsb then unwraps part of the file wrongly. A
+      # caller judging display order must report UNPROVEN there, never FAIL
+      # (measured 2026-08-29: a correct 24 GB build read 215,949 of 216,631
+      # pictures off-lattice under a single wrong value).
+      printf "PC_PAIRS=%d\nPC_SINGLES=%d\nPC_EXPECT=%d\nPC_SPS_L2_VARIES=%s\n", \
+        pairs+0, singles+0, framepics+0 + pairs+0 + singles+0, (l2vary ? "yes" : "no")
     }'
 }
 
@@ -1217,6 +1260,56 @@ pf_poc_capability () {
       printf "PCAP_POC_TYPE=%d\nPCAP_MAXLSB=%d\nPCAP_LSB_ROWS=%d\nPCAP_PICS=%d\nPCAP_OK=%s\nPCAP_WHY=%s\n", \
         (tseen? ptype : -1), maxlsb, rows+0, pics+0, ok, why
     }' "${1:?pf_poc_capability needs HEAD_TRACE_LOG}"
+}
+
+# pf_poc_probe INPUT [HEAD_FRAMES] — the Rung 3-POC routing measurement, ONE
+# writer (Constitution IV.1). Emits eval-able:
+#   PCAP_* (pf_poc_capability over a HEAD trace: can this stream state its own
+#           display positions at all?)
+#   PP_PAIRS= PP_FIELDS= PP_PICS=  (ISO/IEC 14496-15 structure in that window)
+#
+# WHY IT IS ITS OWN FACT. diagnose.sh recommends the rung and auto.sh executes
+# it; if each measured the routing condition itself they would drift, and the
+# condition here is exactly the one three sessions got wrong — "the fields are
+# not paired" inferred from timestamps that are paired-but-offset. It is a HEAD
+# window (cheap, seconds) because it answers a routing question; the rung
+# itself re-reads every picture before writing a byte.
+pf_poc_probe () {
+  local in="${1:?pf_poc_probe needs INPUT}" frames="${2:-200}" log
+  log="$(mktemp)"
+  if [ -n "${PF_TRACE_FILE:-}" ]; then
+    cat "$PF_TRACE_FILE" > "$log"
+  else
+    ffmpeg -nostdin -hide_banner -nostats ${FF_INPUT_OPTS[@]+"${FF_INPUT_OPTS[@]}"} \
+      -i "$in" -map 0:v:0 -c copy -bsf:v trace_headers -frames:v "$frames" \
+      -f null - > "$log" 2>&1 || true
+  fi
+  pf_poc_capability "$log"
+  # the same log, read for STRUCTURE — the measurement that separates "no
+  # pairing here" from "paired, but not stamped one field apart"
+  PF_TRACE_FILE="$log" pf_trace_census x | awk -F= '
+    $1=="PC_PAIRS"  { printf "PP_PAIRS=%s\n",  $2 }
+    $1=="PC_FIELDS" { printf "PP_FIELDS=%s\n", $2 }
+    $1=="PC_PICS"   { printf "PP_PICS=%s\n",   $2 }'
+  rm -f "$log"
+}
+
+# pf_poc_routable — is Rung 3-POC the measured route for the profile in scope?
+# Requires the PF_* profile (pf_detect) and PP_*/PCAP_* (pf_poc_probe) to be
+# eval-ed already. THE CLASS: H.264, field-coded, reordered, NOT the
+# half-timestamped pair signature (pairfill owns that), the slice headers show
+# complementary field pairs, and pic_order_cnt is readable. That combination is
+# the 2024-VMA capture, and no rung before 1.16.0 fit it.
+pf_poc_routable () {
+  # the codec fact reaches this predicate under two different names: pf_detect
+  # sets PF_CODEC, probe.sh --kv gives a driver PR_VCODEC. Reading only one of
+  # them made this silently unroutable in auto.sh (measured 2026-08-29).
+  [ "${PF_CODEC:-${PR_VCODEC:-na}}" = h264 ] || return 1
+  [ "${PCAP_OK:-no}" = yes ] || return 1
+  [ "${PP_PAIRS:-0}" -gt 0 ] 2>/dev/null || return 1
+  [ "${PF_HALF_TS:-no}" != yes ] || return 1
+  [ "${PF_REORDER:-no}" = yes ] || return 1
+  return 0
 }
 
 # pf_poc_extract ARTIFACT POC_OUT SPS_OUT — the POC gate's direct-output
@@ -1271,9 +1364,14 @@ pf_poc_extract () {
 # each sequence's pre-first-wrap head, exactly the wrap arithmetic. The
 # unwrapped gate restores 451,071/451,071 on the same artifact and still
 # fails a genuinely off-slot picture (test 76's negative control).
+# TOLERANCE (1.16.0): a picture is on its slot when its PTS is within PL_TOL
+# ticks (default 1) of base + POC*half. The half interval is fitted as a
+# RATIONAL, because a 30000/1001 stream in a 15360 timescale has a 512.512-tick
+# frame and the muxer rounds every value — demanding an integer lattice
+# reported every picture of an ordinary 29.97 remux off-slot.
 # Emits eval-able:  PL_ON=n PL_TOTAL=n PL_OFF=n PL_SEQS=n
 pf_poc_lattice () {
-  awk -F, -v maxlsb="${2:-0}" '
+  awk -F, -v maxlsb="${2:-0}" -v tol="${PL_TOL:-1}" '
     function endseq(   i, half, dp, dt, h, lim, base, M, m, raw, prev, msb) {
       if (cnt == 0) return
       seqs++
@@ -1289,16 +1387,26 @@ pf_poc_lattice () {
         else if (raw > prev && raw - prev > M / 2) msb -= M
         prev = raw; poc[i] = raw + msb
       }
+      # THE HALF INTERVAL NEED NOT BE A WHOLE NUMBER OF TICKS. A 30000/1001
+      # stream in a 15360 timescale has a frame duration of 512.512, so the
+      # muxer ROUNDS every timestamp and no picture sits on an exact integer
+      # lattice. Requiring an integer h therefore made this gate report EVERY
+      # picture off-lattice on ordinary 29.97 material — a false accusation
+      # against correct files, measured 2026-08-29 (180 of 180 on a plain
+      # libx264 remux). Fit h as a rational and compare within the rounding
+      # the muxer itself had to do: PL_TOL ticks, default 1.
       half = 0; lim = (cnt < 16 ? cnt : 16)
       for (i = 2; i <= lim && !half; i++) {
         dp = poc[i] - poc[1]; dt = pts[i] - pts[1]
-        if (dp != 0) { h = dt / dp; if (h > 0 && h == int(h)) half = h }
+        if (dp != 0) { h = dt / dp; if (h > 0) half = h }
       }
       if (half == 0) { total += cnt; off += cnt; cnt = 0; return }
       base = pts[1] - poc[1] * half
       for (i = 1; i <= cnt; i++) {
         total++
-        if (pts[i] == base + poc[i] * half) on++; else off++
+        want = base + poc[i] * half
+        d = pts[i] - want; if (d < 0) d = -d
+        if (d <= tol) on++; else off++
       }
       cnt = 0
     }

@@ -659,11 +659,25 @@ else
   echo "  (skip: this ffmpeg mints the ms fixture without alternating PTS deltas — no source-baked alternation to preserve; the C68 class needs a real ms-quantized source here)"
 fi
 
-# (b) waiver round-trip (5-4c): FAIL -> record -> WAIVED/exit 0 -> mutate ->
-# VOID/FAIL. Artifact: stts entry-1 delta hex-patched 1->0 on a copy of the
-# ts8 rebuild — all 180 packets collapse onto DTS 0 (dup=179) while the
-# essence stays untouched (VCL MATCH), so the FAIL comes only from the
-# count-signature gate (d): waiver-eligible by construction.
+# (b) the waiver lane, REAIMED IN 1.16.0.
+#
+# It used to run a round-trip: FAIL -> record -> WAIVED/exit 0 -> mutate ->
+# VOID/FAIL, on an artifact built to be waiver-eligible BY CONSTRUCTION — a
+# copy of the ts8 rebuild with the stts entry-1 delta hex-patched to 0, so all
+# 180 packets collapse onto DTS 0 while the essence stays untouched. The claim
+# was that the FAIL then comes ONLY from the count-signature gate (d).
+#
+# That claim is no longer true, and finding out why is the point. Collapsing
+# every sample duration does not merely duplicate DTS: it collapses the
+# PRESENTATION order with it, and gate (k) now proves that independently
+# against the bitstream's own pic_order_cnt (measured: 46 of 50 pictures off
+# their lattice slot, source baseline 0). An artifact with a torn presentation
+# order is not a count signature an operator may attest away — so this lane now
+# asserts the REFUSAL, and the waiver machinery is exercised on the paths that
+# do not depend on verify granting one.
+#
+# This is the round working as intended: a gate that did not exist has found
+# real damage under an artifact the suite had labelled benign-by-construction.
 . "$SC/lib-attest.sh"
 BDUP="$WORK/brk_dup.mov"
 cp "$BK" "$BDUP"
@@ -678,23 +692,35 @@ fi
 if [ -n "$sfound" ]; then
   printf '\000\000\000\000' | dd of="$BDUP" bs=1 seek=$((sfound + 16)) conv=notrunc 2>/dev/null
   out=$(bash "$SC/verify.sh" "$S" "$BDUP" 2>&1); rc=$?
-  { [ "$rc" -eq 1 ] && case "$out" in *"VERIFY_SIGNATURE gate=d"*) true;; *) false;; esac; } \
-    && ok "patched dup-DTS artifact FAILs with a gate-(d) count signature" || no "no waiver-eligible signature (rc=$rc)"
+  [ "$rc" -eq 1 ] && ok "patched dup-DTS artifact FAILs" || no "patched artifact rc=$rc, want 1"
+  case "$out" in *"VERIFY_LEDGER gate=d verdict=fail"*) ok "gate (d) reports the duplicate-DTS count signature";; *) no "gate (d) did not report the count signature";; esac
+  # THE NEW FINDING: the same corruption tore the presentation order, and an
+  # independent proof says so. That is what makes it un-waivable.
+  case "$out" in *"VERIFY_LEDGER gate=k verdict=fail"*) ok "gate (k) independently proves the presentation order is torn";; *) no "gate (k) did not see the tear";; esac
+  case "$out" in *"VERIFY_SIGNATURE gate=d"*) no "a waiver signature was offered for an artifact whose presentation order is torn";; *) ok "NO waiver signature is offered — an independent proof failed";; esac
   bash "$SC/waiver.sh" "$S" "$BDUP" --attest "${RTM_WAIVER_ATTEST%.}" --coverage c --proof p >/dev/null 2>&1; rc=$?
   { [ "$rc" -eq 2 ] && [ ! -f "$BDUP.waiver.json" ]; } && ok "near-miss attestation refused, nothing written" || no "near-miss accepted (rc=$rc)"
+  # waiver.sh binds to a LIVE signature; with none on offer it must decline
+  # rather than mint a sidecar for a failure nobody may waive
   bash "$SC/waiver.sh" "$S" "$BDUP" --attest "$RTM_WAIVER_ATTEST" \
     --coverage "dup-DTS count on all 180 packets; VCL essence proven identical" \
     --proof "gate (b) VCL MATCH" >/dev/null 2>&1; rc=$?
-  { [ "$rc" -eq 0 ] && [ -f "$BDUP.waiver.json" ]; } && ok "waiver recorded from the live signature" || no "waiver.sh failed (rc=$rc)"
-  out=$(bash "$SC/verify.sh" "$S" "$BDUP" 2>&1); rc=$?
-  { [ "$rc" -eq 0 ] && case "$out" in *"WAIVED(d)"*) true;; *) false;; esac; } \
-    && ok "exact-match sidecar -> WAIVED(d), exit 0" || no "waived verify wrong (rc=$rc)"
-  has "$out" "VERIFY_SUMMARY verdict=WAIVED" "waived pass emits the machine-readable summary"
-  sed -i.bak 's/dup=179/dup=178/' "$BDUP.waiver.json"
-  out=$(bash "$SC/verify.sh" "$S" "$BDUP" 2>&1); rc=$?
-  { [ "$rc" -eq 1 ] && case "$out" in *VOID*) true;; *) false;; esac; } \
-    && ok "mutated signature -> waiver VOID, FAIL stands" || no "void path wrong (rc=$rc)"
-  cp "$BDUP.waiver.json" "$RE.waiver.json"
+  { [ "$rc" -ne 0 ] && [ ! -f "$BDUP.waiver.json" ]; } \
+    && ok "waiver.sh declines to record a sidecar with no waiver-eligible signature (rc=$rc)" \
+    || no "waiver.sh minted a sidecar for an un-waivable failure (rc=$rc)"
+  # An essence FAIL is never waivable, and that must hold no matter where the
+  # sidecar came from — so this arm SYNTHESIZES one rather than depending on
+  # waiver.sh minting it. (It no longer will: with an independent proof failing
+  # there is no live signature to bind to, which is the assertion above.)
+  cat > "$RE.waiver.json" <<'WVR'
+{
+  "file_size": 1,
+  "video_streamhash": "none",
+  "gate": "d",
+  "signature": "d:napts=0,nadts=0,back=0,dup=1,tiny=0",
+  "attestation": "synthetic — this arm proves an essence FAIL refuses a waiver"
+}
+WVR
   out=$(bash "$SC/verify.sh" "$S" "$RE" 2>&1); rc=$?
   { [ "$rc" -eq 1 ] && case "$out" in *"NOT waiver-eligible"*) true;; *) false;; esac; } \
     && ok "essence FAIL is never waivable (sidecar present but refused with notice)" || no "essence-FAIL waiver handling wrong (rc=$rc)"

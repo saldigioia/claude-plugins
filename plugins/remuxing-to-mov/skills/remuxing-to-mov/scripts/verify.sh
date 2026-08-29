@@ -73,7 +73,12 @@
 # house code 10 itself; ">> FAIL" exits 1; usage/env exits 2; an exact-match
 # waiver exits 0 with the WAIVED line. Callers MUST map the text verdict to
 # the house contract (mov.sh/auto.sh/resync.sh/qt-groups.sh all map
-# ">> REVIEW" -> their own exit 10). Coding a caller to this script's exit
+# ">> REVIEW" -> their own exit 10). BECAUSE CALLERS MATCH THOSE STRINGS
+# ANYWHERE IN THE OUTPUT, no GATE may print the exact tokens ">> OK",
+# ">> REVIEW" or ">> FAIL" — a gate that does silently re-grades the run
+# (measured 2026-08-29: gate (l) printing ">> REVIEW:" returned REVIEW for a
+# build whose gate (h) had FAILED). Gates say ">> gate (x) FAILS/FLAGS:".
+# Coding a caller to this script's exit
 # code alone reads REVIEW as green — the qt-groups.sh defect the 1.11 fix
 # round repaired; the contract is documented here so the next in-repo caller
 # cannot be misled again (references/verification-safety.md carries the same
@@ -117,6 +122,40 @@ note=""
 # failing gate IS the lossless proof, so "independent proofs pass" cannot hold.
 d_failed=0; e_failed=0; other_failed=0
 
+# --- the UNPROVEN ledger (gate (n), 1.16.0) ---------------------------------
+# Constitution: "a verifier states what it could not prove". Until now a gate
+# that could not run left NO TRACE in the report — the reader saw the gates
+# that spoke and had no way to know which ones had not. That is the quiet
+# assumption this whole round exists to close: on 2026-08-28 two builds passed
+# every check the plugin HAD, and the checks it did not have said nothing.
+#
+# Every gate files a row here, including the ones that could not run:
+#   pass        ran, judged, clean
+#   fail        ran, judged, defect
+#   unproven    OWED on this input and could not be evaluated -> forces REVIEW
+#   n/a         does not apply to this input (wrong codec/container) -> no effect
+#   flagged     ran, judged, raised a concern short of FAIL (it set REVIEW itself)
+#   superseded  a cheaper gate was inconclusive and a stronger one settled it
+# The distinction between `unproven` and `n/a` is the whole design: without it
+# every run reads REVIEW and the signal is worthless.
+# Deliberately a VARIABLE, not a temp file: lib-exit.sh records that a plain
+# cleanup EXIT trap makes an expansion death report 0 on bash 3.2, and this
+# script's whole contract is its printed verdict. No trap, no hazard.
+LEDGER=""
+led () {   # gate, verdict, why
+  LEDGER="${LEDGER}$1|$2|$3
+"
+}
+
+# Does the output carry a video stream at all? The distinction matters to
+# every video gate below and it is the difference between two honest words:
+# "n/a" (there is nothing here to judge) and "unproven" (there is, and I could
+# not read it). Collapsing them either cries wolf on an audio-only deliverable
+# or lets an unreadable video track pass as clean.
+set +e; o_vidx=$(ffp1 -v error -select_streams v:0 -show_entries stream=index -of default=nw=1:nk=1 "$OUT" 2>/dev/null); o_vidx_rc=$?; set -e
+O_HAS_VIDEO=0
+case "${o_vidx:-}" in ''|*[!0-9]*) ;; *) O_HAS_VIDEO=1;; esac
+
 echo "== verify: $OUT vs $SRC =="
 
 echo "-- (a) packet-hash identity (demux only, no decode) --"
@@ -133,10 +172,12 @@ sp=$(phash "$SRC"); op=$(phash "$OUT")
 if [ -n "$sp" ] && [ "$sp" = "$op" ]; then
   echo "   PASS: video packets bit-identical — lossless proven, no decode needed."
   bitproven=1
+  led a pass "video packet streamhash identical"
 else
   echo "   inconclusive (expected for TS sources / Rung-3 rebuilds: packets get"
   echo "   re-framed even when the video is identical) — checking the essence."
   bitproven=0
+  led a superseded "packet hash inconclusive by design on a re-framed copy — (b) settles it"
 fi
 
 if [ "$bitproven" -eq 0 ]; then
@@ -152,15 +193,19 @@ if [ "$bitproven" -eq 0 ]; then
       echo "   — no evidence either way: INCONCLUSIVE, not a mismatch. Settle with --full."
       [ "$verdict" = FAIL ] || verdict=REVIEW
       note="${note:+$note }VCL hash pass produced no output on one side (tool/decode failure) — losslessness UNPROVEN, not disproven; settle with --full."
+      led b unproven "the VCL hash pass produced no output on one side (tool failure, not slice data)"
     elif [ "$sv" = "$ov" ]; then
       echo "   VCL MATCH: coded picture data bit-identical — lossless proven"
       echo "   (survives TS->MOV and field-rate rebuilds; framemd5 would false-FAIL here)."
       bitproven=1
+      led b pass "VCL payload hash identical"
     else
       echo "   VCL MISMATCH — slice data differs; output is NOT a lossless copy."
       echo "     src=$sv"
       echo "     out=$ov"
       verdict=FAIL; other_failed=1
+      led b fail "VCL payload hashes differ (src=$sv out=$ov)"
+      VCL_MISMATCH=1
     fi
   elif [ "$SRC_IS_H264" -eq 1 ] && [ "$PF_PAFF" = yes ]; then
     # Degraded env (no filter_units) + field-coded: VCL is unavailable and decoded
@@ -170,6 +215,7 @@ if [ "$bitproven" -eq 0 ]; then
     echo "   framemd5 false-FAILs field-coded streams — cannot cheaply prove lossless."
     [ "$verdict" = FAIL ] || verdict=REVIEW
     note="${note:+$note }VCL check unavailable (upgrade ffmpeg, or run --full); field-coded source can't be cheaply proven lossless."
+    led b unproven "this ffmpeg has no filter_units/h264_mp4toannexb and framemd5 false-FAILs field-coded streams"
   else
     echo "-- (b) decoded spot-identity: first $N frames + packet-count parity --"
     fhead () { ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -frames:v "$N" -f framemd5 - 2>/dev/null \
@@ -202,6 +248,7 @@ if [ "$bitproven" -eq 0 ]; then
   fi
 fi
 
+if [ "$O_HAS_VIDEO" -eq 0 ]; then led c "n/a" "the output carries no video stream to spot-decode"; fi
 echo "-- (c) output decode spot-checks (${WIN}s windows) --"
 dur=$(ffp -v error -show_entries format=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null) || dur=0
 case "$dur" in ''|N/A) dur=0;; esac
@@ -240,6 +287,9 @@ fi
 # gate (d): an inherited-noise verdict requires the output timeline
 # independently proven clean, or the noise can mask a container-level defect.
 c_src=-1; c_delta=0
+if [ "${errs:-0}" -eq 0 ] && [ "$O_HAS_VIDEO" -eq 1 ]; then
+  led c pass "spot-window decode produced no error line"
+fi
 if [ "${errs:-0}" -gt 0 ]; then
   if [ "$c_short" -eq 1 ]; then c_src=$(confirm "$SRC")
   else c_src=$(( $(confirm "$SRC" "$mid") + $(confirm "$SRC" "$tailp") )); fi
@@ -255,24 +305,53 @@ echo "-- (d) output timeline integrity (whole file, demux only) --"
 # own timeline: zero N/A timestamps, strictly monotonic DTS, and a sane
 # sample-duration histogram (CFR broadcast: one or two adjacent values; a spray
 # of near-zero durations is the invented-timeline signature).
+# ONE PASS, three gates (Constitution IV.2 — never re-derive what is already
+# read). (d) takes the N/A counts, the DTS monotonicity and the duration
+# histogram; (j) takes PTS UNIQUENESS and DTS<=PTS from the same rows; (l)
+# takes the minimum PTS for the first-displayed-frame anchor.
 eval "$(ffp -v error -select_streams v:0 -show_entries packet=pts,dts,duration -of csv=p=0 "$OUT" 2>/dev/null | \
   awk -F, 'NF{
       n++
-      if($1=="N/A"||$1=="") nap++
-      if($2=="N/A"||$2==""){ nad++ } else { d=$2+0; if(hav){ if(d<pd) back++; else if(d==pd) dup++ } pd=d; hav=1 }
+      p=""; if($1!="N/A" && $1!=""){ p=$1+0
+        if(pc[$1]++ == 1) dupp++          # a SECOND holder of this rung
+        if(!hp || p<minp){ minp=p; hp=1 }
+        if(!hx || p>maxp){ maxp=p; hx=1 }
+      } else nap++
+      if($2=="N/A"||$2==""){ nad++ } else { d=$2+0
+        if(hav){ if(d<pd) back++; else if(d==pd) dup++ } pd=d; hav=1
+        if(p!="" && d>p) dgtp++
+      }
       if($3!="N/A" && $3!=""){ du=$3+0; h[du]++; if(h[du]>hm){hm=h[du]; modal=du} }
     }
     END{
-      tiny=0; top=""
+      tiny=0; top=""; dv=0
+      for(k in pc) if(pc[k]>1) dv++        # distinct COLLIDING pts values
       for(k in h){ if(modal>0 && (k+0)*10<modal) tiny+=h[k] }
       for(i=1;i<=3;i++){ bk=-1; bc=-1; for(k in h) if(h[k]>bc && !(k in used)){bc=h[k]; bk=k}
         if(bk<0) break; used[bk]=1; top=top sprintf("%sx%d ", h[bk], bk) }
-      printf "TL_N=%d TL_NAPTS=%d TL_NADTS=%d TL_BACK=%d TL_DUP=%d TL_TINY=%d TL_MODAL=%d TL_TOP=%c%s%c\n",
-        n+0, nap+0, nad+0, back+0, dup+0, tiny+0, modal+0, 39, top, 39
+      printf "TL_N=%d TL_NAPTS=%d TL_NADTS=%d TL_BACK=%d TL_DUP=%d TL_TINY=%d TL_MODAL=%d TL_TOP=%c%s%c TL_DUPPTS=%d TL_DUPVALS=%d TL_DTSGTPTS=%d TL_MINPTS=%d TL_MAXPTS=%d\n",
+        n+0, nap+0, nad+0, back+0, dup+0, tiny+0, modal+0, 39, top, 39, dupp+0, dv+0, dgtp+0, minp+0, maxp+0
     }')"
 echo "   packets=$TL_N  N/A-PTS=$TL_NAPTS  N/A-DTS=$TL_NADTS  backward-DTS=$TL_BACK  duplicate-DTS=$TL_DUP"
 echo "   sample-duration histogram (top): ${TL_TOP:-'?'}  near-zero durations: $TL_TINY (want 0)"
 DCLEAN=1   # (d) verdict feeds the (c)/(e) baseline classification (QTFF audit 5-4a/b)
+if [ "${TL_N:-0}" -eq 0 ] && [ "$O_HAS_VIDEO" -eq 0 ]; then
+  echo "   the output carries no video stream — these timeline gates have nothing to judge."
+  led d "n/a" "the output carries no video stream"
+  led j "n/a" "the output carries no video stream"
+  led l "n/a" "the output carries no video stream"
+elif [ "${TL_N:-0}" -eq 0 ]; then
+  # EMPTY is not ABSENT: a video track whose packet list will not read is not a
+  # clean timeline. DCLEAN=0 is load-bearing — gate (c) may only call decode
+  # noise "inherited" against a timeline PROVEN clean, never an unread one.
+  [ "$verdict" = FAIL ] || verdict=REVIEW; DCLEAN=0
+  echo "   >> the output HAS a video stream and no packet could be read from it — the"
+  echo "      timeline is UNPROVEN, not clean. Nothing below rests on this measurement."
+  note="${note:+$note }The output's video packet list could not be read, so gates (d)/(j)/(l) are UNPROVEN — not passed."
+  led d unproven "the output has a video stream but no packet could be read from it"
+  led j unproven "the output has a video stream but no packet could be read from it"
+  led l unproven "the output has a video stream but no packet could be read from it"
+fi
 if [ "${TL_NAPTS:-0}" -ne 0 ] || [ "${TL_NADTS:-0}" -ne 0 ]; then
   verdict=FAIL; DCLEAN=0; d_failed=1
   note="${note:+$note }Output has ${TL_NAPTS}/${TL_NADTS} packets with N/A PTS/DTS — the muxer invented the timeline (hard stop; see timeline-repair.md)."
@@ -310,12 +389,98 @@ if [ "${errs:-0}" -gt 0 ]; then
   [ "$verdict" = FAIL ] || verdict=REVIEW
   if [ "$c_src" -ge 0 ] && [ "$c_delta" -le 0 ] && [ "$DCLEAN" -eq 1 ]; then
     echo "   spot-check classification: source reproduces the counts and (d) is clean — inherited noise (REVIEW)."
+    [ "$O_HAS_VIDEO" -eq 1 ] && led c pass "decode errors reproduce identically on the source (source: $c_src / output: $errs) with a clean (d)"
     note="${note:+$note }Spot-window decode errors reproduce on the source under identical windows (source: $c_src / output: $errs / delta: $c_delta) with a clean (d) timeline — capture-inherited noise, not remux damage. Settle for archival sign-off with --full + MKV strict-mux."
   else
+    [ "$O_HAS_VIDEO" -eq 1 ] && led c fail "output decode errors not matched on the source (source: $c_src / output: $errs / delta: $c_delta; (d) clean=$DCLEAN)"
     note="${note:+$note }Output decode errors in spot windows (source: $c_src / output: $errs / delta: $c_delta; (d) clean=$DCLEAN). Claiming these are inherent to the source requires MATCHING counts on a linear decode of the same source window AND clean timeline gates (d)/(e) — the same error class can mask a second, container-level defect (post-mortem 2026-07-25)."
   fi
 fi
 
+if [ "${TL_N:-0}" -gt 0 ]; then
+  if [ "$DCLEAN" -eq 1 ]; then led d pass "$TL_N packets: no N/A stamps, DTS strictly monotonic, duration histogram sane"
+  elif [ "$d_failed" -eq 1 ]; then led d fail "N/A=$TL_NAPTS/$TL_NADTS backward-DTS=$TL_BACK duplicate-DTS=$TL_DUP near-zero-durations=$TL_TINY"
+  else led d unproven "the near-zero duration profile could not be classified against the source"; fi
+fi
+
+# --- (j) output PTS uniqueness + DTS <= PTS (1.16.0) ------------------------
+# WHY (measured 2026-08-29, feed.ts). Gate (d) has always checked N/A stamps,
+# DTS monotonicity and the duration histogram. It never checked that two
+# packets do not claim the SAME display slot. That is exactly what a plain
+# copy of a stream with unstamped packets produces: the MOV muxer gives an
+# unstamped packet pts=dts, which is both the wrong display slot AND a
+# collision with a rung another packet already holds. Ten of them survived
+# every gate this plugin had, because the essence was bit-identical.
+#
+# DTS <= PTS rides along: a picture decoded after it was displayed is not a
+# timeline, and the same single pass already has both columns.
+if [ "${TL_N:-0}" -gt 0 ]; then
+  echo "-- (j) output PTS uniqueness + DTS <= PTS (whole file, demux only) --"
+  echo "   packets=$TL_N  duplicate-PTS packets=$TL_DUPPTS across $TL_DUPVALS value(s)  DTS>PTS=$TL_DTSGTPTS"
+  if [ "${TL_DUPPTS:-0}" -ne 0 ] || [ "${TL_DTSGTPTS:-0}" -ne 0 ]; then
+    verdict=FAIL; d_failed=1; DCLEAN=0
+    j_why=""
+    [ "${TL_DUPPTS:-0}" -ne 0 ] && j_why="$TL_DUPPTS packet(s) share $TL_DUPVALS PTS value(s) — two pictures claiming one display slot"
+    [ "${TL_DTSGTPTS:-0}" -ne 0 ] && j_why="${j_why:+$j_why; }$TL_DTSGTPTS packet(s) carry DTS > PTS — decoded after they are displayed"
+    echo "   >> gate (j) FAILS: $j_why."
+    echo "      An essence hash cannot see this: the coded pictures can be bit-identical"
+    echo "      to the source while the container files two of them on one rung. Route by"
+    echo "      MEASURED profile — scripts/diagnose.sh names the rung (the POC rung"
+    echo "      adjudicates duplicates from the bitstream's own display positions)."
+    note="${note:+$note }Output timeline: $j_why (gate (j)) — the essence may be lossless and the display order is still wrong."
+    led j fail "$j_why"
+  else
+    echo "   PASS: every packet holds its own display slot, and nothing decodes after it displays."
+    led j pass "$TL_N packets, no duplicate PTS, DTS <= PTS everywhere"
+  fi
+fi
+
+# --- (l) first-displayed-frame anchor (1.16.0) ------------------------------
+# WHY. A MOV edit list starts at the first CODED packet. On a reordered stream
+# the earliest DISPLAYED frame is not the first coded one, so an output whose
+# minimum PTS is above the stream's declared start silently trims the opening
+# frame — invisible to every essence check, and visible to a viewer as a
+# clipped first moment.
+if [ "${TL_N:-0}" -gt 0 ]; then
+  echo "-- (l) edit-list / first-frame anchor --"
+  set +e; l_start=$(ffp1 -v error -select_streams v:0 -show_entries stream=start_pts -of default=nw=1:nk=1 "$OUT" 2>/dev/null); set -e
+  case "${l_start:-}" in ''|N/A|*[!0-9-]*) l_start=""; esac
+  echo "   min output PTS=$TL_MINPTS   stream start_pts=${l_start:-unreadable}"
+  if [ -z "$l_start" ]; then
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    echo "   >> the declared start_pts could not be read — the anchor is UNPROVEN, not clean."
+    note="${note:+$note }Gate (l): the output's declared start_pts could not be read, so it is unproven whether the edit list trims the first displayed frame."
+    led l unproven "the output's declared start_pts could not be read"
+  elif [ "$l_start" -gt "$TL_MINPTS" ]; then
+    # REVIEW, not FAIL, and the distinction is Constitution II.1/II.3. What is
+    # MEASURED is that the container declares presentation starting after its
+    # own earliest composition time — so those samples sit OUTSIDE the declared
+    # presentation. What is NOT measured is that any player drops them: the
+    # samples are in the file, and a player that ignores the edit list shows
+    # them. Calling that "trimmed" would be an accusation of loss this gate has
+    # not proven, which is the exact habit this round exists to break.
+    set +e
+    l_before=$(ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$OUT" 2>/dev/null | \
+      awk -F, -v s="$l_start" 'NF && $1!="N/A" && $1+0 < s+0 {n++} END{print n+0}')
+    set -e
+    case "${l_before:-}" in ''|*[!0-9]*) l_before="an unread number of";; esac
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    echo "   >> gate (l) FLAGS: the declared start is $l_start but the earliest DISPLAYED frame sits"
+    echo "      at $TL_MINPTS — $l_before sample(s) are present in the file yet fall outside"
+    echo "      the declared presentation. On a reordered stream the first CODED picture is"
+    echo "      not the first displayed one, so a container anchored on the coded head can"
+    echo "      declare a start above its own earliest composition time. Whether a given"
+    echo "      player honours that is not measured here; that it is inconsistent, is."
+    echo "      The remedy is to anchor on the earliest displayed frame (min PTS)."
+    note="${note:+$note }Gate (l): the output declares presentation starting at $l_start while its earliest displayed frame sits at $TL_MINPTS — $l_before sample(s) are outside the declared presentation (present in the file). Anchor on the earliest displayed frame."
+    led l flagged "declared start $l_start is above the earliest displayed frame $TL_MINPTS ($l_before sample(s) outside the declared presentation)"
+  else
+    echo "   PASS: the earliest displayed frame is inside the declared presentation."
+    led l pass "start_pts=$l_start <= earliest displayed frame $TL_MINPTS"
+  fi
+fi
+
+if [ "$O_HAS_VIDEO" -eq 0 ]; then led e "n/a" "the output carries no video stream to scrub"; fi
 echo "-- (e) scrub gate: player-style off-keyframe seeks + keyframe sanity --"
 # WHY: the demux/keyframe-accurate checks above (and an -ss-before-i spot decode)
 # snap to a keyframe and decode forward — they stayed clean on the corrupted PAFF
@@ -332,9 +497,14 @@ echo "   keyframes in output: $nkf"
 if [ "${nkf:-0}" -lt 2 ]; then
   echo "   only ${nkf:-0} keyframe(s) — no interior scrub target; a scrub must decode"
   echo "   from the previous keyframe (potentially the file start)."
-  if awk "BEGIN{exit !(${dur:-0} > 30)}"; then
+  if [ "$O_HAS_VIDEO" -eq 0 ]; then
+    : # already filed n/a above
+  elif awk "BEGIN{exit !(${dur:-0} > 30)}"; then
     [ "$verdict" = FAIL ] || verdict=REVIEW
     note="${note:+$note }Single-GOP/unseekable output (${nkf:-0} keyframe over ${dur}s)."
+    led e flagged "only ${nkf:-0} keyframe over ${dur}s — no interior scrub target"
+  else
+    led e pass "only ${nkf:-0} keyframe, but the output is ${dur}s — keyframe spacing is not a scrub concern here"
   fi
 else
   maxgap=$(printf '%s\n' "$kf" | awk 'NR>1{g=$1-p; if(g>m)m=g} {p=$1} END{printf "%.2f", m+0}')
@@ -359,6 +529,13 @@ else
 $samples
 EOF
   echo "   off-keyframe accurate seeks: $ntests point(s), $serr decode error(s) (want 0)"
+  if [ "${ntests:-0}" -eq 0 ]; then
+    led e unproven "no off-keyframe scrub target could be placed in this output"
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }Gate (e): no scrub target could be placed, so seek behaviour is UNPROVEN."
+  elif [ "${serr:-0}" -eq 0 ]; then
+    led e pass "$ntests off-keyframe accurate seeks, 0 decode errors"
+  fi
   if [ "${serr:-0}" -gt 0 ]; then
     # QTFF audit 5-4b: before scoring, (1) recount BOTH sides deterministically —
     # threaded decode jitters corruption-noise line counts (probe 2026-07-26:
@@ -388,12 +565,15 @@ EOF
     echo "     muxer-stage(null): source: $b_mux / output: $o_mux / delta: $d_mux"
     if [ "$o_tot" -eq 0 ]; then
       echo "   scrub classification: deterministic recount clean — fast-pass lines were load strays."
+      led e pass "deterministic recount at -threads 1 found 0 errors ($ntests seek points)"
     elif [ "${DCLEAN:-0}" -eq 1 ] && [ "$d_dec" -le 0 ] && [ "$d_mux" -le 0 ]; then
       [ "$verdict" = FAIL ] || verdict=REVIEW
       echo "   scrub classification: all lines reproduce on the source and (d) is clean — inherited/harness noise (REVIEW)."
+      led e flagged "scrub lines reproduce on the untouched source (decoder $b_dec/$o_dec, muxer-stage $b_mux/$o_mux) with a clean (d)"
       note="${note:+$note }Scrub-gate lines reproduce on the untouched source under identical accurate seeks (decoder source: $b_dec / output: $o_dec; muxer-stage source: $b_mux / output: $o_mux; deterministic -threads 1 counts) with a clean (d) timeline — capture-inherited decode noise / harness-stage artifacts, not a torn timeline. The timeline is independently proven by (d); complete the proof set (MKV strict-mux + --full presentation order) for archival sign-off."
     else
       verdict=FAIL; e_failed=1
+      led e fail "$o_tot deterministic decode error(s) on off-keyframe seeks (decoder delta $d_dec, muxer-stage delta $d_mux; (d) clean=${DCLEAN:-0})"
       note="${note:+$note }Scrub gate: $o_tot deterministic decode error(s) on off-keyframe seeks (decoder delta $d_dec, muxer-stage delta $d_mux vs source; (d) clean=${DCLEAN:-0}) — the timeline tears on scrub (silent-corruption signature). Route via diagnose.sh by MEASURED profile (pairfill-paff.sh for half-timestamped H.264 PAFF; derive-dts.sh for a PTS-complete reordered stream, any codec; rebuild-paff.sh for H.264 with no surviving reorder — pairfill/rebuild are H.264-only). NEVER explain this away by replicating the errors on the source alone: two independent defects share this symptom, and inherent decode noise MASKS a broken container timeline (post-mortem 2026-07-25). The timeline must be independently proven — gate (d) above, MKV strict-mux, framemd5 presentation order (--full)."
     fi
   fi
@@ -453,8 +633,10 @@ elif [ "${vdur_rc:-0}" -ne 0 ]; then
   echo "   video duration probe FAILED (ffprobe rc=$vdur_rc) — sync parity UNPROVEN, not N/A."
   [ "$verdict" = FAIL ] || verdict=REVIEW
   note="${note:+$note }Gate (f) could not read the output video duration (ffprobe rc=$vdur_rc) — A/V duration parity is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+  led f unproven "the output video duration probe failed (ffprobe rc=$vdur_rc)"
 elif [ "${naud:-0}" -eq 0 ] || [ -z "$vdur" ] || [ "$vdur" = N/A ]; then
   echo "   no audio or no stream durations — sync parity N/A."
+  led f "n/a" "the output carries no audio track, or no stream durations, to compare against"
 else
   worst=0; worst_dir=short; ai=0; trk_unproven=0
   while [ "$ai" -lt "$naud" ]; do
@@ -479,6 +661,7 @@ else
   if [ "$trk_unproven" -gt 0 ]; then
     [ "$verdict" = FAIL ] || verdict=REVIEW
     note="${note:+$note }Gate (f) could not read the duration of $trk_unproven output audio track(s) — their A/V parity is UNPROVEN (not disproven); re-run verify when the probe succeeds."
+    led f unproven "$trk_unproven audio track(s) had no readable duration"
   fi
   if awk "BEGIN{exit !(($worst) > ($SYNC_TOL))}"; then
     # over the base tolerance — resolve the measured budget LAZILY (the
@@ -523,6 +706,7 @@ else
       echo "   source's gap budget: tolerance ${SYNC_TOL}s + gap budget ${gap_budget}s (${gap_from})."
       echo "   residual Δ${worst}s explained by measured source loss — the capture dropped"
       echo "   this much real time; audio runs ${worst_dir} of video by it, not a remux defect."
+      led f pass "max delta ${worst}s within tolerance ${SYNC_TOL}s + measured source gap budget ${gap_budget}s"
       if [ "$worst_dir" = long ]; then
         echo "   note: audio runs LONG — the overfill direction. Collapsed source gaps read"
         echo "   SHORT; a LONG delta on a resync build is the aresample-overfill open"
@@ -533,16 +717,20 @@ else
       if awk "BEGIN{exit !(($gap_budget) > 0)}"; then
         note="${note:+$note }A/V duration mismatch up to ${worst}s (audio ${worst_dir}) exceeds even the source-loss widened tolerance (${SYNC_TOL}s + measured gap budget ${gap_budget}s = ${eff_tol}s) — beyond what measured source loss explains. If audio runs long off a resync build this is the aresample-overfill open question (BBC run moved Δ −2.2s -> +1.9s) — do not ship on the budget's back; diagnose.sh to confirm."
         echo "   >> mismatch ${worst}s exceeds tolerance ${SYNC_TOL}s + gap budget ${gap_budget}s — sync REVIEW."
+        led f flagged "A/V delta ${worst}s beyond tolerance ${SYNC_TOL}s + measured gap budget ${gap_budget}s"
       else
         note="${note:+$note }A/V duration mismatch up to ${worst}s (> ${SYNC_TOL}s tol; no measured source loss to explain it) — gap-collapse desync signature; diagnose.sh to confirm, resync.sh to fix."
         echo "   >> mismatch ${worst}s exceeds tolerance ${SYNC_TOL}s (no measured source loss) — sync REVIEW."
+        led f flagged "A/V delta ${worst}s beyond tolerance ${SYNC_TOL}s with no measured source loss to explain it"
       fi
     fi
   else
     echo "   max Δ ${worst}s within ${SYNC_TOL}s tolerance — A/V durations consistent."
+    led f pass "max A/V delta ${worst}s within the ${SYNC_TOL}s tolerance"
   fi
 fi
 
+g_gate_failed=0; g_gate_flagged=0
 echo "-- (g) audio playability (QTFF sample-entry allowlist + bounded decode) --"
 # WHY (WO 3.6): the dead-HDMV-track class was INVISIBLE to verification —
 # mov.sh 1.10.0 copy-muxed Blu-ray LPCM (pcm_bluray) into a MOV audio track
@@ -678,6 +866,7 @@ else
   else
     echo "   source audio census probe FAILED (ffprobe rc=$g_srccen_rc) — per-track baselines UNPROVEN, not absent."
     [ "$verdict" = FAIL ] || verdict=REVIEW
+    g_gate_flagged=1
     note="${note:+$note }Gate (g) could not census the SOURCE audio (ffprobe rc=$g_srccen_rc) — inherited-vs-introduced attribution is UNPROVEN (not disproven); re-run verify when the probe succeeds."
   fi
   g_dec1 () {  # $1 file, $2 track index -> one bounded head decode's error-line count
@@ -858,6 +1047,7 @@ else
     echo "   MP2/PCM classification census FAILED (src rc=$g_mp2cen_rc, out rc=$g_pcmcen_rc) —"
     echo "   the naked-MP2 finding is UNPROVEN: not withheld as 'clean', not asserted."
     [ "$verdict" = FAIL ] || verdict=REVIEW
+    g_gate_flagged=1
     note="${note:+$note }Gate (g) could not census the MP2/PCM layout (src rc=$g_mp2cen_rc, out rc=$g_pcmcen_rc) — the naked-MP2 finding is UNPROVEN (neither cleared nor asserted); re-run verify when the probe succeeds."
   fi
   g_mp2_naked=0
@@ -978,6 +1168,7 @@ else
       # track it was differencing against.
       if [ "${g_ambig:-0}" -eq 1 ] && [ "${g_err:-1}" -ne 0 ]; then
         [ "$verdict" = FAIL ] || verdict=REVIEW
+        g_gate_flagged=1
         echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}): NOT on the QTFF audio"
         echo "        allowlist, and its $g_err decode line(s) could not be ATTRIBUTED — this gate"
         echo "        did not identify a source track to difference against (see above). Advisory,"
@@ -990,6 +1181,7 @@ else
         # (that class is defined by lines the SOURCE does not have), so it takes
         # the same advisory REVIEW the clean-decode arm takes — with the delta.
         [ "$verdict" = FAIL ] || verdict=REVIEW
+        g_gate_flagged=1
         echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}): NOT on the QTFF audio"
         echo "        allowlist, and its $g_err decode line(s) are FULLY REPRODUCED on the source"
         echo "        (delta $g_net) — inherited/open-time noise, not a dead sample entry."
@@ -1001,6 +1193,7 @@ else
         # unknown for OTHER players, but it is not a dead track and it is not
         # an unwaivable essence FAIL.
         [ "$verdict" = FAIL ] || verdict=REVIEW
+        g_gate_flagged=1
         echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}): NOT on the QTFF audio"
         echo "        allowlist, but the bounded head decode is CLEAN — so it is not the"
         echo "        dead-sample-entry class. Advisory, not a FAIL (D3, 1.13): unbenched"
@@ -1009,6 +1202,7 @@ else
         note="${note:+$note }Audio track a:$gi carries the unbenched sample-entry tag '${g_tag:-none}' (codec ${g_cod:-unknown}); it decodes cleanly, so this is an advisory, not the dead-track class — prove QuickTime playback before shipping."
       else
         verdict=FAIL; other_failed=1
+        g_gate_failed=1
         echo "   a:$gi tag='${g_tag:-none}' (codec ${g_cod:-unknown}) — NOT on the QTFF audio allowlist"
         echo "        AND it does not decode ($g_err error line(s) in the first ${WIN}s, $g_net $g_beyond):"
         echo "        a sample entry no decoder claims (the dead-HDMV-track class, entry 1)."
@@ -1025,6 +1219,7 @@ else
         # the inherited arm for the same reason as above — "the source
         # reproduces them" is a claim about a specific source track.
         [ "$verdict" = FAIL ] || verdict=REVIEW
+        g_gate_flagged=1
         echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_tagword; $g_err decode line(s) in the"
         echo "        first ${WIN}s that this gate could NOT attribute — no unambiguous source track to"
         echo "        difference against (see above). REVIEW on unproven attribution, not FAIL."
@@ -1037,12 +1232,14 @@ else
         # carrying the evidence, and NOT other_failed: a remux cannot fix
         # source damage, and this is exactly how (c)/(e) classify the shape.
         [ "$verdict" = FAIL ] || verdict=REVIEW
+        g_gate_flagged=1
         echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_tagword; $g_err decode line(s) in the"
         echo "        first ${WIN}s, but the IDENTICAL decode of the source reproduces them (delta"
         echo "        $g_net) — inherited/open-time noise, not a remux defect. REVIEW, not FAIL."
         note="${note:+$note }Audio track a:$gi shows $g_err decode line(s) in the first ${WIN}s that the source reproduces under the identical bounded decode (source: $g_base / output: $g_err / delta: $g_net) — capture-inherited damage or open-time parse noise, not remux damage; a remux cannot fix source damage. Listen before archiving."
       else
         verdict=FAIL; other_failed=1
+        g_gate_failed=1
         echo "   a:$gi tag='${g_tag:-n/a}' (codec $g_cod): $g_err decode error line(s) in the first ${WIN}s (want 0); $g_net $g_beyond."
         note="${note:+$note }Audio track a:$gi does not decode cleanly ($g_err error line(s) in the first ${WIN}s, $g_beyond_note) — no playable-audio guarantee; do not ship."
       fi
@@ -1058,6 +1255,7 @@ else
   done
   if [ "$g_mp2_naked" -eq 1 ] && [ "${g_has_pcm:-0}" -eq 0 ] && [ "${g_cls_rc:-0}" -eq 0 ]; then
     [ "$verdict" = FAIL ] || verdict=REVIEW
+    g_gate_flagged=1
     echo "   >> MP2 audio with NO PCM access track — the configuration this gate used to"
     echo "      PASS while failing the ones that work (D3, 1.13). AVFoundation has no"
     echo "      MPEG Layer II path for mp4a/.mp2 tracks: no positive report of Layer II"
@@ -1068,6 +1266,415 @@ else
     echo "      or scripts/remux.sh --audio pcm."
     note="${note:+$note }Output carries MP2 audio with no PCM access track — AVFoundation has no Layer II path, so this file has no playable audio in QuickTime (D3, 1.13); rebuild via mov.sh (dual-track) or remux.sh --audio pcm."
   fi
+fi
+
+
+# gate (g)'s ledger row, filed from the gate's own evidence rather than from a
+# second reading of it (IV.1): the two counters above are set at the branches
+# that move the verdict, so the row cannot drift from what the gate decided.
+if [ "${g_cen_rc:-0}" -ne 0 ]; then
+  led g unproven "the output audio census probe failed (ffprobe rc=$g_cen_rc)"
+elif [ "${g_naud:-0}" -eq 0 ]; then
+  led g "n/a" "the output carries no audio track to judge"
+elif [ "$g_gate_failed" -eq 1 ]; then
+  led g fail "an output audio track is not playable (see the gate's own lines above)"
+elif [ "$g_gate_flagged" -eq 1 ]; then
+  led g flagged "an output audio track raised a playability question short of FAIL"
+else
+  led g pass "${g_naud} output audio track(s): sample entry on the allowlist and head-decode clean"
+fi
+
+# ============================================================================
+# Gates (h), (i), (k), (m) — 1.16.0. THE CONTAINER-LEVEL TIER.
+#
+# WHY THIS BLOCK EXISTS, measured 2026-08-29. Two builds of the same source
+# were bit-identical to it and unusable: one carried a MOV sample per coded
+# FIELD (the container claiming ~50/s over a ~25/s decode — stutter in
+# QuickTime and IINA), the other a '.mp3' sample entry over MPEG-1 Layer II
+# payload. Gates (a)/(b) proved both lossless, gate (c) decoded both without
+# an error, gate (g) passed the audio. Every check the plugin had was blind,
+# because the defect is in what the container DECLARES, not what it stores.
+#
+# An essence hash is necessary and it is nowhere near sufficient.
+# ============================================================================
+
+# --- (h) declared-vs-stored structure + (k) presentation order vs POC -------
+# Both read the SAME whole-file header pass (Constitution IV.2: never
+# re-derive). It is the expensive one — a trace_headers parse of the output —
+# so it is BUDGETED: under RTM_STRUCT_MAX_BYTES it runs, above it the gates
+# report UNPROVEN and name the standalone command. Unproven is a REVIEW, never
+# a silent pass (II.1).
+# RTM_STRUCT_MAX_BYTES=0 means NO BUDGET (always run), which is what
+# references/knobs.md promises — an earlier draft compared against it as a
+# plain threshold, so 0 declined every output instead of admitting it.
+H_MAXB="${RTM_STRUCT_MAX_BYTES:-4294967296}"
+case "$H_MAXB" in ''|*[!0-9]*) H_MAXB=4294967296;; esac
+# ASSIGNMENT POSITION under `set -e` is this file's own documented trap (the
+# C4 / WO-1.15.4 shape): a failing probe on the right of `VAR=$(...)` kills the
+# script mid-report, and "I could not measure" then ships as "this file FAILED
+# verification". Every probe below captures its status instead, and an
+# unreadable answer becomes UNPROVEN — never n/a, which would read as "there
+# was nothing here to check".
+set +e
+o_bytes=$(wc -c < "$OUT" 2>/dev/null | tr -d ' ')
+o_vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null); o_vcodec_rc=$?
+o_fmt=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$OUT" 2>/dev/null); o_fmt_rc=$?
+set -e
+case "$o_bytes" in ''|*[!0-9]*) o_bytes=0;; esac
+H_RUN=0
+H_ISO=0
+case "$o_fmt" in *mov*|*mp4*|*m4a*) H_ISO=1;; esac
+if [ "$o_fmt_rc" -ne 0 ] || [ -z "${o_fmt:-}" ]; then
+  [ "$verdict" = FAIL ] || verdict=REVIEW
+  note="${note:+$note }Gates (h)/(k): the output's container format could not be read (ffprobe rc=$o_fmt_rc), so the sample structure and presentation order are UNPROVEN."
+  led h unproven "the output container format could not be read (ffprobe rc=$o_fmt_rc)"
+  led k unproven "the output container format could not be read (ffprobe rc=$o_fmt_rc)"
+elif [ "$H_ISO" -eq 0 ]; then
+  led h "n/a" "the output is not an ISO/QuickTime container ($o_fmt) — it has no sample table to compare against"
+  led k "n/a" "no ISO sample timeline to judge on this container ($o_fmt)"
+elif [ "$O_HAS_VIDEO" -eq 1 ] && { [ "$o_vcodec_rc" -ne 0 ] || [ -z "${o_vcodec:-}" ]; }; then
+  [ "$verdict" = FAIL ] || verdict=REVIEW
+  note="${note:+$note }Gates (h)/(k): the output HAS a video stream whose codec could not be read (ffprobe rc=$o_vcodec_rc) — UNPROVEN, not inapplicable."
+  led h unproven "the output has a video stream whose codec could not be read (ffprobe rc=$o_vcodec_rc)"
+  led k unproven "the output has a video stream whose codec could not be read (ffprobe rc=$o_vcodec_rc)"
+elif [ "$O_HAS_VIDEO" -eq 0 ]; then
+  led h "n/a" "the output carries no video stream"
+  led k "n/a" "the output carries no video stream"
+elif [ "${o_vcodec:-}" != h264 ]; then
+  # the census and the POC lattice are both H.264 slice-header facts
+  led h "n/a" "output video is ${o_vcodec:-unreadable}, not H.264 — this census reads H.264 slice headers"
+  led k "n/a" "output video is ${o_vcodec:-unreadable}, not H.264 — pic_order_cnt is an H.264 fact"
+elif [ "${TL_N:-0}" -eq 0 ]; then
+  led h unproven "the output's packet list could not be read, so there is no declared sample count to compare"
+  led k unproven "the output's packet list could not be read"
+elif [ "$FULL" -ne 1 ] && [ "$H_MAXB" -gt 0 ] && [ "$o_bytes" -gt "$H_MAXB" ]; then
+  echo "-- (h)/(k) structure + presentation order: DECLINED ON BUDGET --"
+  echo "   the output is $o_bytes bytes, above RTM_STRUCT_MAX_BYTES=$H_MAXB. These two"
+  echo "   gates cost one whole-file header parse. They were NOT run, so nothing below"
+  echo "   claims the sample structure or the display order is correct."
+  echo "   Settle either one: scripts/verify.sh SRC OUT --full   (or RTM_STRUCT_MAX_BYTES=0)"
+  echo "   Presentation order alone: scripts/poc-gate.sh \"$OUT\""
+  [ "$verdict" = FAIL ] || verdict=REVIEW
+  note="${note:+$note }Gates (h)/(k) declined on budget (output $o_bytes bytes > RTM_STRUCT_MAX_BYTES=$H_MAXB) — the declared sample structure and the presentation order are UNPROVEN; re-run with --full."
+  led h unproven "declined on budget: output $o_bytes bytes > RTM_STRUCT_MAX_BYTES=$H_MAXB"
+  led k unproven "declined on budget: output $o_bytes bytes > RTM_STRUCT_MAX_BYTES=$H_MAXB"
+else
+  H_RUN=1
+fi
+
+if [ "$H_RUN" -eq 1 ]; then
+  HTD="$(mktemp -d)"    # only our own scratch (III.3)
+  echo "-- (h) declared-vs-stored structure (ISO/IEC 14496-15 sample arithmetic) --"
+  # ONE pass: the census AND the POC table gate (k) reads. The table is
+  # copy-by-construction consistent here because both halves are measured from
+  # the SAME file — the output itself (the reuse license test 78 pins).
+  h_crc=0
+  eval "$(pf_trace_census "$OUT" "$HTD/poc.csv" "$HTD/sps" "$HTD/str.csv" 2>/dev/null)" || h_crc=$?
+  if [ "${PC_OK:-no}" != yes ]; then
+    echo "   trace_headers parsed no coded picture from this output (rc=$h_crc) — the"
+    echo "   structure is UNPROVEN, not clean. EMPTY is not ABSENT."
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }Gate (h): the output's coded-picture census parsed nothing, so the declared sample count is unproven."
+    led h unproven "trace_headers parsed no coded picture from the output (rc=$h_crc)"
+    led k unproven "no coded picture parsed, so no POC column exists"
+  else
+    echo "   coded pictures=$PC_PICS  field=$PC_FIELDS frame=$PC_FRAMES"
+    echo "   14496-15 sample arithmetic: complementary pairs=$PC_PAIRS + unpaired fields=$PC_SINGLES + frame pictures=$PC_FRAMES"
+    echo "   samples the structure implies=$PC_EXPECT   samples the container declares=$TL_N"
+    if [ "$PC_EXPECT" -ne "$TL_N" ]; then
+      verdict=FAIL; other_failed=1
+      h_ratio=$(awk -v a="$TL_N" -v b="$PC_EXPECT" 'BEGIN{ if(b>0) printf "%.3f", a/b; else printf "?" }')
+      echo "   >> gate (h) FAILS: the container files $TL_N samples for a structure that is $PC_EXPECT"
+      echo "      (ratio ${h_ratio}x). ISO/IEC 14496-15 requires BOTH fields of a"
+      echo "      complementary field pair to live in ONE sample; players time playback"
+      echo "      off samples, so one sample per FIELD makes the container claim roughly"
+      echo "      twice the rate the decoder emits. The essence can be bit-perfect and"
+      echo "      the file still stutters everywhere (measured 2026-08-29)."
+      note="${note:+$note }Gate (h): the output declares $TL_N samples for a coded structure of $PC_EXPECT (pairs=$PC_PAIRS singles=$PC_SINGLES frames=$PC_FRAMES) — the container misdescribes what it stores; an essence hash cannot see this."
+      led h fail "declared $TL_N samples vs $PC_EXPECT implied by the structure (pairs=$PC_PAIRS singles=$PC_SINGLES frames=$PC_FRAMES)"
+    else
+      echo "   PASS: the sample count the container declares is the one its coded structure implies."
+      led h pass "$TL_N samples == $PC_EXPECT implied (pairs=$PC_PAIRS singles=$PC_SINGLES frames=$PC_FRAMES)"
+    fi
+    # the declared RATE, from the same numbers: samples / duration must agree
+    # with avg_frame_rate. A right sample count with a wrong declared rate is
+    # the same defect one storey up.
+    set +e; h_afr=$(ffp1 -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$OUT" 2>/dev/null); set -e
+    # the VIDEO stream's own duration, not the container's: format duration
+    # includes the audio tail and any edit offset, which on a short output is a
+    # few percent of nothing and would make this cry wolf.
+    set +e
+    h_dur=$(ffp1 -v error -select_streams v:0 -show_entries stream=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null)
+    case "${h_dur:-}" in ''|N/A) h_dur=$(ffp1 -v error -show_entries format=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null);; esac
+    set -e
+    case "${h_dur:-}" in ''|N/A) h_dur="";; esac
+    if [ -n "${h_afr:-}" ] && [ -n "$h_dur" ] && [ "${h_afr}" != "0/0" ]; then
+      # THE BAND IS A RELATIONSHIP, not a taste. The defect this catches is a
+      # container declaring one sample per FIELD: a 2x error. Container rounding,
+      # a trailing partial sample and capture jitter live within a few percent.
+      # 1.10 is the empty middle — nothing legitimate reaches it and the defect
+      # is nowhere near it (RTM_RATE_DEV_MAX overrides).
+      h_devmax="${RTM_RATE_DEV_MAX:-1.10}"
+      set +e; h_msg=$(awk -v afr="$h_afr" -v n="$TL_N" -v d="$h_dur" -v lim="$h_devmax" '
+        BEGIN{ split(afr,p,"/"); r=(p[2]+0>0)? p[1]/p[2] : 0
+               m=(d+0>0)? n/d : 0
+               if(r<=0 || m<=0){ print "unreadable"; exit }
+               dev=(r>m? r/m : m/r)
+               printf "%s %.4f %.4f", (dev>lim+0 ? "MISMATCH" : "ok"), r, m }'); set -e
+      case "$h_msg" in
+        MISMATCH*)
+          set -- $h_msg
+          echo "   >> declared avg_frame_rate=$2/s but $TL_N samples over ${h_dur}s of video is $3/s —"
+          echo "      the container's declared rate is not the rate it stores (band ${h_devmax}x)."
+          [ "$verdict" = FAIL ] || verdict=REVIEW
+          note="${note:+$note }Gate (h): declared avg_frame_rate ($2/s) disagrees with samples/duration ($3/s)."
+          ;;
+        ok*) : ;;
+      esac
+    fi
+
+    # --- (k) presentation order vs the bitstream's own POC ------------------
+    echo "-- (k) presentation order vs pic_order_cnt (H.264 §8.2.1.1) --"
+    k_maxlsb=0
+    k_l2=$(head -1 "$HTD/sps" 2>/dev/null || true)
+    case "${k_l2:-}" in ''|*[!0-9]*) ;; *) [ "$k_l2" -le 12 ] && k_maxlsb=$((1 << (k_l2 + 4)));; esac
+    k_prc=0
+    ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$OUT" 2>/dev/null | \
+      awk -F, 'NF && $1!="N/A"{ print $1+0 }' > "$HTD/pts.csv" || k_prc=$?
+    k_na=$(grep -c . "$HTD/poc.csv" 2>/dev/null || true); k_na=${k_na:-0}
+    k_nb=$(grep -c . "$HTD/pts.csv" 2>/dev/null || true); k_nb=${k_nb:-0}
+    # A CORRECTLY PAIRED OUTPUT HAS FEWER SAMPLES THAN CODED PICTURES, and that
+    # is not a count mismatch — it is ISO/IEC 14496-15 working. One POC row per
+    # PICTURE, one packet per SAMPLE: on a field-paired MOV the two differ by
+    # exactly the pair count, and a gate that reads that as "cannot judge"
+    # declines to judge precisely the artifact this plugin builds. So when the
+    # census found pairs, keep the row that STARTS each sample (the top field)
+    # and drop the continuation rows.
+    if [ "$k_na" -ne "$k_nb" ] && [ "${PC_PAIRS:-0}" -gt 0 ] && [ -s "$HTD/str.csv" ]; then
+      k_sn=$(grep -c . "$HTD/str.csv" 2>/dev/null || true); k_sn=${k_sn:-0}
+      if [ "$k_sn" -eq "$k_na" ]; then
+        paste -d, "$HTD/poc.csv" "$HTD/str.csv" | awk -F, '
+          # drop a bottom field that continues the pair its predecessor opened
+          { fld=$3+0; bot=$4+0; fn=$5+0
+            cont = (prev_open && fld==1 && bot==1 && fn==prev_fn)
+            if (!cont) printf "%s,%s\n", $1, $2
+            prev_open = (fld==1 && bot==0); prev_fn = fn }' > "$HTD/poc_samples.csv"
+        k_pa=$(grep -c . "$HTD/poc_samples.csv" 2>/dev/null || true); k_pa=${k_pa:-0}
+        if [ "$k_pa" -eq "$k_nb" ]; then
+          echo "   field-paired output: $k_na coded picture(s) -> $k_pa sample(s) (ISO/IEC"
+          echo "   14496-15 pairing), which is what the container carries. Judging samples."
+          mv -f "$HTD/poc_samples.csv" "$HTD/poc.csv"
+          k_na=$k_pa
+        fi
+      fi
+    fi
+    if [ "${PC_SPS_L2_VARIES:-no}" = yes ]; then
+      # A SINGLE GLOBAL MaxPicOrderCntLsb CANNOT UNWRAP A MULTI-SPS FILE. A
+      # broadcast capture spanning a program change carries more than one SPS,
+      # and the lattice check would judge most of the file with the wrong
+      # modulus. Measured 2026-08-29: a build every other gate proved correct
+      # read 215,949 of 216,631 pictures off-lattice under one wrong value.
+      # Saying "cannot judge" is the honest answer; saying "torn" is not.
+      echo "   UNPROVEN: this stream carries more than one SPS with a different"
+      echo "   log2_max_pic_order_cnt_lsb, so no single MaxPicOrderCntLsb unwraps the"
+      echo "   whole file. The presentation order is NOT judged here — and it is not"
+      echo "   accused either."
+      [ "$verdict" = FAIL ] || verdict=REVIEW
+      note="${note:+$note }Gate (k): the output carries more than one SPS with differing log2_max_pic_order_cnt_lsb, so a single-modulus POC unwrap cannot judge it — UNPROVEN, not failed."
+      led k unproven "more than one SPS with a differing log2_max_pic_order_cnt_lsb — no single MaxPicOrderCntLsb unwraps the whole file"
+    elif [ "$k_prc" -ne 0 ] || [ "$k_na" -eq 0 ] || [ "$k_na" -ne "$k_nb" ]; then
+      k_why=count
+      [ "$k_na" -eq 0 ] && k_why="pic_order_cnt_type != 0 (the stream carries no pic_order_cnt_lsb)"
+      [ "$k_prc" -ne 0 ] && k_why="the PTS probe failed (rc=$k_prc)"
+      echo "   UNPROVEN: POC rows=$k_na, timestamped packets=$k_nb — $k_why."
+      echo "   This is not a verdict on the artifact; it is this gate saying it could not judge."
+      [ "$verdict" = FAIL ] || verdict=REVIEW
+      note="${note:+$note }Gate (k): presentation order could not be checked against POC ($k_why) — UNPROVEN, not passed."
+      led k unproven "$k_why (POC rows=$k_na, timestamped packets=$k_nb)"
+    else
+      paste -d, "$HTD/poc.csv" "$HTD/pts.csv" > "$HTD/table.csv"
+      eval "$(pf_poc_lattice "$HTD/table.csv" "$k_maxlsb")"
+      echo "   MaxPicOrderCntLsb=${k_maxlsb:-inferred}  on_slot=$PL_ON/$PL_TOTAL  off_lattice=$PL_OFF  (IDR sequences=$PL_SEQS)"
+      echo "VERIFY_POC_LATTICE on_slot=$PL_ON total=$PL_TOTAL off=$PL_OFF seqs=$PL_SEQS"
+      if [ "${PL_OFF:-1}" -ne 0 ]; then
+        # SOURCE-BASELINE BEFORE INDICTING (the doctrine gates (c) and (e)
+        # already run on). A remux is judged against its source: if the SOURCE's
+        # own timeline already contradicts its bitstream — a synthetically
+        # re-stamped file, a capture whose timestamps were rewritten downstream —
+        # then an output that contradicts it by the same amount is FIDELITY, and
+        # calling that damage re-reports a source property as a remux defect.
+        # Paid LAZILY: this second whole-file pass only ever runs on a nonzero
+        # count, so a clean verify never pays for it.
+        echo "   $PL_OFF picture(s) off-lattice in the output — baselining against the source"
+        echo "   before indicting the remux (identical extraction, same checker)."
+        k_soff=-1
+        if [ "$SRC_IS_H264" -eq 1 ]; then
+          k_scrc=0
+          eval "$(PC_PICS= pf_trace_census "$SRC" "$HTD/spoc.csv" "$HTD/ssps" 2>/dev/null)" || k_scrc=$?
+          k_sna=$(grep -c . "$HTD/spoc.csv" 2>/dev/null || true); k_sna=${k_sna:-0}
+          # KEEP THE N/A ROWS while pairing, then drop the pairs whose PTS is
+          # absent. Filtering first mis-aligns POC row i against packet i+k the
+          # moment the source has an unstamped packet — which is the whole class
+          # of source this gate is most likely to be asked about.
+          ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$SRC" 2>/dev/null | \
+            awk -F, 'NF{ print ($1=="N/A" || $1=="") ? "N/A" : $1+0 }' > "$HTD/spts_all.csv" || true
+          k_snb=$(grep -c . "$HTD/spts_all.csv" 2>/dev/null || true); k_snb=${k_snb:-0}
+          if [ "$k_sna" -gt 0 ] && [ "$k_sna" -eq "$k_snb" ]; then
+            k_smax=0; k_sl2=$(head -1 "$HTD/ssps" 2>/dev/null || true)
+            case "${k_sl2:-}" in ''|*[!0-9]*) ;; *) [ "$k_sl2" -le 12 ] && k_smax=$((1 << (k_sl2 + 4)));; esac
+            paste -d, "$HTD/spoc.csv" "$HTD/spts_all.csv" | awk -F, '$3!="N/A"' > "$HTD/stable.csv"
+            eval "$(pf_poc_lattice "$HTD/stable.csv" "$k_smax" | sed 's/^PL_/SPL_/')"
+            k_soff=${SPL_OFF:-0}
+          fi
+        fi
+        k_sshow="$k_soff"; [ "$k_soff" -lt 0 ] && k_sshow="unmeasurable"
+        echo "   source-baseline (identical extraction): source: $k_sshow off of ${SPL_TOTAL:-0} / output: $PL_OFF off of $PL_TOTAL"
+        # THE COMPARISON HAS TO BE LIKE FOR LIKE. The source table carries only
+        # the pictures the source actually STAMPED; a repair rung that filled
+        # holes hands the output more rows than the source ever had, and those
+        # extra rows can only add to the output count. So the budget is the
+        # source own off-lattice count PLUS the packets the source never placed
+        # at all: the remux may not move a picture the source HAD placed, and a
+        # reconstructed stamp answers to the rung evidence rules and gates
+        # (d)/(j) rather than being indicted here a second time.
+        k_extra=$((PL_TOTAL - ${SPL_TOTAL:-0})); [ "$k_extra" -lt 0 ] && k_extra=0
+        k_budget=$((k_soff + k_extra))
+        if [ "$k_extra" -gt 0 ]; then
+          echo "   (the source stamped $k_extra fewer picture(s) than the output carries — those"
+          echo "    reconstructed stamps are the repair rung own evidence to answer for)"
+        fi
+        if [ "$k_soff" -ge 0 ] && [ "$PL_OFF" -le "$k_budget" ]; then
+          [ "$verdict" = FAIL ] || verdict=REVIEW
+          echo "   >> INHERITED: the SOURCE own timeline contradicts its bitstream by at"
+          echo "      least as much ($k_soff off-lattice; budget $k_budget with the $k_extra"
+          echo "      reconstructed stamp(s)). The remux moved no picture the source had"
+          echo "      placed; that is fidelity, not damage. The SOURCE is the review item."
+          note="${note:+$note }Gate (k): $PL_OFF of $PL_TOTAL output pictures are off their POC lattice slot, within the budget $k_budget (the source own $k_soff plus $k_extra reconstructed stamp(s)) — inherited, not remux damage. The source timeline contradicts its own bitstream."
+          led k flagged "off-lattice $PL_OFF within budget $k_budget (source $k_soff + $k_extra reconstructed stamps) — inherited"
+        elif [ "$k_soff" -lt 0 ]; then
+          # EMPTY is not ABSENT (III.1), applied to an accusation: a baseline
+          # that could not be measured is not a baseline of zero, and an
+          # unmeasured comparison may not convict the remux.
+          [ "$verdict" = FAIL ] || verdict=REVIEW
+          echo "   >> UNPROVEN: $PL_OFF picture(s) are off-lattice in the output, and the"
+          echo "      source baseline could NOT be measured — so it is not established"
+          echo "      whether this came from the remux or was already in the source."
+          echo "      Settle it: scripts/poc-gate.sh \"$SRC\" and scripts/poc-gate.sh \"$OUT\""
+          note="${note:+$note }Gate (k): $PL_OFF of $PL_TOTAL output pictures are off their POC lattice slot, and the source baseline could not be measured — UNPROVEN whether the remux caused it."
+          led k unproven "$PL_OFF off-lattice in the output, source baseline unmeasurable"
+        else
+          verdict=FAIL; other_failed=1
+          echo "   >> gate (k) FAILS: $PL_OFF picture(s) sit off their presentation slot, beyond the"
+          echo "      $k_budget the source explains (its own $k_soff plus $k_extra reconstructed"
+          echo "      stamp(s)) — a picture the source HAD placed was moved. The written timeline"
+          echo "      CONTRADICTS the display order the bitstream itself states. A"
+          echo "      constant-rate restamp of a reordered stream reads exactly like this."
+          note="${note:+$note }Gate (k): $PL_OFF of $PL_TOTAL pictures are off the presentation lattice their own pic_order_cnt declares (source baseline: $k_soff) — the container's display order contradicts the bitstream."
+          led k fail "$PL_OFF of $PL_TOTAL pictures off their POC lattice slot (source baseline $k_soff)"
+        fi
+      else
+        echo "   PASS: every picture sits where its own pic_order_cnt says it should."
+        led k pass "$PL_ON/$PL_TOTAL pictures on their POC lattice slot across $PL_SEQS sequence(s)"
+      fi
+    fi
+  fi
+  rm -rf "$HTD"
+fi
+
+# --- (i) codec-tag-vs-payload identity --------------------------------------
+# The sample entry must describe the payload underneath it. Two halves:
+# tag<->codec (every stream, cheap) and tag<->payload frame headers (MPEG audio
+# layer bits, AC-3 bsid). What cannot be proven from the payload is reported
+# UNPROVEN by name, never passed quietly.
+echo "-- (i) sample entry vs payload identity --"
+# The condition is python3's availability, full stop. An earlier draft also
+# tested the script's executable bit, which made the && false whenever the
+# script WAS present — so a missing interpreter fell through to a generic
+# "rc=127" row that never named the tool. A ledger row that cannot say what is
+# missing is most of the way back to saying nothing.
+if ! command -v python3 >/dev/null 2>&1 || [ ! -f "$SELF_DIR/codec-id.py" ]; then
+  [ "$verdict" = FAIL ] || verdict=REVIEW
+  i_miss="python3"; [ -f "$SELF_DIR/codec-id.py" ] || i_miss="scripts/codec-id.py"
+  echo "   $i_miss is not available — this gate could not run."
+  note="${note:+$note }Gate (i): $i_miss absent, so sample-entry-vs-payload identity is UNPROVEN."
+  led i unproven "$i_miss is not available on this host"
+else
+  i_rc=0
+  set +e; i_out=$(python3 "$SELF_DIR/codec-id.py" "$OUT" 2>&1); i_rc=$?; set -e
+  printf '%s\n' "$i_out" | sed -n 's/^CI_ROW /   /p'
+  i_mis=$(printf '%s\n' "$i_out" | sed -n 's/^CI_MISMATCH=//p' | head -1)
+  i_unp=$(printf '%s\n' "$i_out" | sed -n 's/^CI_UNPROVEN=//p' | head -1)
+  i_read=$(printf '%s\n' "$i_out" | sed -n 's/^CI_READ=//p' | head -1)
+  case "${i_mis:-}" in ''|*[!0-9]*) i_mis=-1;; esac
+  case "${i_unp:-}" in ''|*[!0-9]*) i_unp=0;; esac
+  if [ "${i_read:-no}" != yes ] || [ "$i_mis" -lt 0 ]; then
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    i_why=$(printf '%s\n' "$i_out" | sed -n 's/^CI_WHY=//p' | head -1)
+    echo "   the identity pass could not read this output (${i_why:-rc=$i_rc}) — UNPROVEN."
+    note="${note:+$note }Gate (i): sample-entry-vs-payload identity could not be evaluated (${i_why:-rc=$i_rc})."
+    led i unproven "${i_why:-the identity pass failed, rc=$i_rc}"
+  elif [ "$i_mis" -gt 0 ]; then
+    verdict=FAIL; other_failed=1
+    echo "   >> gate (i) FAILS: $i_mis stream(s) carry a sample entry that does not describe their"
+    echo "      payload. A decoder that accepts both hides this completely — ffmpeg's"
+    echo "      mp3float decodes Layer II happily under a '.mp3' entry, so the decode"
+    echo "      probe and the essence hash both pass a mislabelled file (2026-08-29)."
+    note="${note:+$note }Gate (i): $i_mis output stream(s) carry a sample entry that misdescribes their payload (see the CI_ROW lines) — lossless and still wrong."
+    led i fail "$i_mis stream(s) declare a sample entry their payload contradicts"
+  elif [ "$i_unp" -gt 0 ]; then
+    echo "   PASS on what is provable; $i_unp stream(s) carry no readable frame header"
+    echo "   (AAC in esds, raw PCM) — their tag agrees with the container's own codec name,"
+    echo "   and the payload half is not provable from here."
+    led i pass "tag<->codec agrees on every stream; payload half unprovable on $i_unp stream(s) (no readable frame header)"
+  else
+    echo "   PASS: every sample entry agrees with the payload underneath it."
+    led i pass "every stream's sample entry agrees with its payload"
+  fi
+fi
+
+# --- (m) the essence ARBITER: NAL-payload hash ------------------------------
+# Only ever paid to adjudicate a (b) MISMATCH. Merging two field access units
+# into one sample legitimately turns a 4-byte start code into a 3-byte one, so
+# a byte hash false-mismatches a PROVABLY CORRECT build by exactly one byte per
+# merged pair. This compares NAL payloads, which no framing choice can change.
+if [ "${VCL_MISMATCH:-0}" -eq 1 ]; then
+  echo "-- (m) essence arbiter: NAL-payload hash (start-code-length agnostic) --"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "   python3 is not available — the arbiter could not run, so gate (b)'s MISMATCH stands."
+    led m unproven "python3 is not available, so (b)'s byte-level mismatch could not be arbitrated"
+  else
+    m_sb=""; m_ob=""
+    [ "$(ffp1 -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$SRC" 2>/dev/null || true)" = true ] && m_sb="h264_mp4toannexb,"
+    [ "$(ffp1 -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$OUT" 2>/dev/null || true)" = true ] && m_ob="h264_mp4toannexb,"
+    set +e
+    m_s=$(python3 "$SELF_DIR/nalhash.py" "$SRC" --bsf "${m_sb}filter_units=pass_types=1-5" --kv 2>/dev/null | sed -n 's/^NH_MD5=//p' | head -1)
+    m_o=$(python3 "$SELF_DIR/nalhash.py" "$OUT" --bsf "${m_ob}filter_units=pass_types=1-5" --kv 2>/dev/null | sed -n 's/^NH_MD5=//p' | head -1)
+    set -e
+    echo "   src NAL payload md5=${m_s:-EMPTY}"
+    echo "   out NAL payload md5=${m_o:-EMPTY}"
+    if [ -z "$m_s" ] || [ -z "$m_o" ]; then
+      echo "   the arbiter produced no hash on one side — (b)'s MISMATCH stands, unarbitrated."
+      led m unproven "the NAL-payload pass produced no hash on one side"
+    elif [ "$m_s" = "$m_o" ]; then
+      # a genuine correction of gate (b): the coded pictures ARE identical and
+      # only the Annex-B framing changed. This is the one place a FAIL is lifted,
+      # and it is lifted by a STRONGER measurement, never by a tolerance.
+      echo "   >> ARBITRATED: the coded picture data is IDENTICAL; only the Annex-B start-code"
+      echo "      framing differs (merging a field pair into one sample costs exactly one byte"
+      echo "      per pair). Gate (b)'s byte-level mismatch was a framing artefact, not loss."
+      bitproven=1
+      if [ "$other_failed" -eq 1 ] && [ "$verdict" = FAIL ]; then
+        verdict=REVIEW; other_failed=0
+        note="${note:+$note }Gate (b) mismatched at the byte level and gate (m) arbitrated it: the NAL payloads are identical, so the essence is lossless — the difference is Annex-B framing. Review the rest of the report."
+      fi
+      led m pass "NAL payloads identical (md5=$m_s) — (b)'s byte mismatch was start-code framing"
+    else
+      echo "   >> the NAL payloads differ too — gate (b)'s MISMATCH is real essence loss."
+      led m fail "NAL payloads differ (src=$m_s out=$m_o) — real essence loss, not framing"
+    fi
+  fi
+else
+  led m "n/a" "gate (b) proved the essence at the byte level; the arbiter is only paid on a mismatch"
 fi
 
 if [ "$SILP" -eq 1 ]; then
@@ -1458,6 +2065,40 @@ if [ "$AUD" -eq 1 ]; then
   fi
 fi
 
+# ============================================================================
+# Gate (n) — THE UNPROVEN LEDGER. "A verifier states what it could not prove."
+#
+# Every gate above files a row, INCLUDING the ones that could not run. Before
+# 1.16.0 a gate that did not run left no trace: the reader saw the gates that
+# spoke and had no way to know which had stayed silent. That is the quiet
+# assumption this whole round is about — on 2026-08-28 two broken builds passed
+# every check the plugin HAD, and the checks it lacked said nothing at all.
+#
+# Callers print this block verbatim. "Built; these checks could not run; here
+# is what that leaves unproven" is a GOOD outcome and it reads REVIEW, which
+# every caller maps to its own exit 10.
+# ============================================================================
+n_unproven=0
+if [ -n "$LEDGER" ]; then
+  n_unproven=$(printf '%s' "$LEDGER" | awk -F'|' '$2=="unproven"{n++} END{print n+0}')
+fi
+# An UNPROVEN gate that was OWED downgrades a clean run to REVIEW. It never
+# upgrades a FAIL, and `n/a` (the gate does not apply to this input) and
+# `superseded` (a stronger gate settled it) never move the verdict at all —
+# without that split every run would read REVIEW and the signal would be worth
+# nothing.
+if [ "$n_unproven" -gt 0 ] && [ "$verdict" = PASS ]; then
+  verdict=REVIEW
+  note="${note:+$note }$n_unproven gate(s) could not be evaluated on this input — see the VERIFY_LEDGER block for which, and what each leaves unproven."
+fi
+
+echo
+echo "-- (n) ledger: every gate, including the ones that could not run --"
+printf '%s' "$LEDGER" | awk -F'|' 'NF>=2{ printf "VERIFY_LEDGER gate=%s verdict=%s why=%s\n", $1, $2, $3 }'
+printf '%s' "$LEDGER" | awk -F'|' '$2=="unproven"{ printf "   UNPROVEN (%s): %s — nothing in this report claims otherwise.\n", $1, $3 }'
+[ "$n_unproven" -eq 0 ] && echo "   every gate above reached a verdict; nothing is left unproven."
+echo "VERIFY_LEDGER_SUMMARY gates=$(printf '%s' "$LEDGER" | grep -c . || true) unproven=$n_unproven verdict=$verdict"
+
 case "$verdict" in
   PASS)
     if [ "$bitproven" -eq 1 ] || [ "$FULL" -eq 1 ]; then echo ">> OK (lossless proven; timeline scrub-clean)"
@@ -1471,7 +2112,19 @@ case "$verdict" in
     # loud WAIVED line; any drift voids the waiver and the FAIL stands.
     WVR="$OUT.waiver.json"
     wgate=""; wsig=""
-    if [ "$other_failed" -eq 0 ]; then
+    # A WAIVER NEVER COVERS WHAT WAS NOT CHECKED (1.16.0). Eligibility already
+    # required that no gate outside the (d)/(e) count signature FAILED; it now
+    # also requires that none was left UNPROVEN. Waiving a count signature while
+    # a gate that could contradict it has not run is exactly the quiet
+    # assumption this round exists to close — and on a large output the two
+    # container gates decline on budget by default, so this is the common case,
+    # not a corner. `--full` runs them and the waiver becomes available again.
+    if [ "$other_failed" -eq 0 ] && [ "${n_unproven:-0}" -gt 0 ]; then
+      echo ">> NOT waiver-eligible: $n_unproven gate(s) could not be evaluated on this"
+      echo "   run (see the ledger above). A waiver covers a signature that independent"
+      echo "   proofs have CLEARED; it cannot cover one they were never asked about."
+      echo "   Re-run with --full (or raise RTM_STRUCT_MAX_BYTES) and try again."
+    elif [ "$other_failed" -eq 0 ]; then
       if   [ "$d_failed" -eq 1 ] && [ "$e_failed" -eq 1 ]; then wgate="d+e"
       elif [ "$d_failed" -eq 1 ]; then wgate="d"
       elif [ "$e_failed" -eq 1 ]; then wgate="e"; fi

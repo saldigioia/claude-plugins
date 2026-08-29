@@ -120,12 +120,12 @@ mp4_swap_route () {
 if [ "$(uname -s)" != Darwin ]; then
   echo "playable-check: SKIP — not macOS; AVFoundation/QuickTime unavailable. Confirm on the target Mac."
   if [ "$FIDELITY" -eq 1 ]; then fid_note not-macos "the AVFoundation render half needs macOS too."; fi
-  exit 3
+  exit 3   # TIER 2 UNPROVEN: not this platform (II.1), never an accusation
 fi
 command -v qlmanage >/dev/null 2>&1 || {
   echo "playable-check: SKIP — qlmanage not found."
   if [ "$FIDELITY" -eq 1 ]; then fid_note no-qlmanage "qlmanage missing implies no usable AVFoundation toolchain here."; fi
-  exit 3
+  exit 3   # TIER 2 UNPROVEN: toolchain absent (II.1)
 }
 # QTFF audit 5-1c (C63): the verdict is a property of the OS it ran on — decode
 # support drifts across macOS versions (Tahoe 26.4 dropped MJPEG variants/AIC),
@@ -231,12 +231,12 @@ if [ "$THUMB" = fail ]; then
   fid_note thumbnail-fail "the thumbnail floor already failed; there is no render to compare."
   exit 1
 fi
-command -v avconvert >/dev/null 2>&1 || { fid_note no-avconvert "avconvert not found — the AVFoundation render half cannot run. Prove on a Mac that has it."; exit 3; }
-command -v ffmpeg    >/dev/null 2>&1 || { fid_note no-ffmpeg "ffmpeg not found — the reference-decode half cannot run."; exit 3; }
-command -v ffprobe   >/dev/null 2>&1 || { fid_note no-ffprobe "ffprobe not found — cannot place the sample windows."; exit 3; }
+command -v avconvert >/dev/null 2>&1 || { fid_note no-avconvert "avconvert not found — the AVFoundation render half cannot run. Prove on a Mac that has it."; exit 3; }   # TIER 2 UNPROVEN: toolchain absent (II.1)
+command -v ffmpeg    >/dev/null 2>&1 || { fid_note no-ffmpeg "ffmpeg not found — the reference-decode half cannot run."; exit 3; }   # TIER 2 UNPROVEN: toolchain absent (II.1)
+command -v ffprobe   >/dev/null 2>&1 || { fid_note no-ffprobe "ffprobe not found — cannot place the sample windows."; exit 3; }   # TIER 2 UNPROVEN: toolchain absent (II.1)
 RW=$(ffprobe -v error -select_streams v:0 -show_entries stream=width  -of default=nw=1:nk=1 "$OUT" 2>/dev/null | awk 'NR==1')
 RH=$(ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=nw=1:nk=1 "$OUT" 2>/dev/null | awk 'NR==1')
-if [ -z "$RW" ] || [ -z "$RH" ]; then fid_note probe-blind "ffprobe could not read the video geometry; nothing to compare against."; exit 3; fi
+if [ -z "$RW" ] || [ -z "$RH" ]; then fid_note probe-blind "ffprobe could not read the video geometry; nothing to compare against."; exit 3; fi   # TIER 2 UNPROVEN: the probe could not measure (II.1)
 DUR=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$OUT" 2>/dev/null | awk 'NR==1')
 case "$DUR" in ''|N/A) DUR=0;; esac
 # --- scan-aware threshold (D1, 1.13) -----------------------------------------
@@ -359,7 +359,7 @@ if [ "$FIDFAIL" -eq 1 ]; then
 fi
 if [ -z "$MINSSIM" ]; then
   fid_note no-reference "no sample yielded a reference frame; nothing was compared."
-  exit 3
+  exit 3   # TIER 2 UNPROVEN: nothing was compared (II.1)
 fi
 if awk -v s="$MINSSIM" -v t="$THRESH" 'BEGIN{exit !(s>=t)}'; then
   echo "playable-check: FIDELITY OK on macOS $OSV — worst sampled SSIM $MINSSIM >= $THRESH ($SCAN):"

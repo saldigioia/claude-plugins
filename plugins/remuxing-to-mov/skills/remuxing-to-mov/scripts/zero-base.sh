@@ -21,17 +21,13 @@
 # prediction — a surprise on either side is a verdict, not a shrug.
 #
 # WHAT IT REFUSES (pre-flight, nothing written — the dual-track exit-2
-# precedent for impossible contracts):
+# precedent for CONTRACTS THIS SCRIPT CANNOT EXPRESS. A prediction about the
+# QUALITY of the output is not one of those, and since 1.16.0 the field-coded
+# arms WARN and build instead — TIERS.md T3.3):
 #   * non-mpegts sources (matroska/MP4 start at zero by construction or are
 #     the remux ladder's business);
 #   * multi-program TS (the muxer cannot reconstruct that layout from -map 0;
 #     isolate one program first — known-limits.md);
-#   * pair-timestamped PAFF (pf_detect half_ts/paff=yes): measured on the
-#     2022-08-28 field source (1.15.2 Item C), the TS->TS copy makes the
-#     mpegts muxer confess 'Timestamps are unset' — the invented-timing
-#     hard-stop class — AFTER building 23.68 GB, for a prize of 40 ms on a
-#     start_time every player rebases away. Refuse before building; the .mov
-#     route is pairfill-paff.sh and the .ts source is already the master;
 #   * timeline rot (whole-file backward/duplicate DTS > 0): zero-base is NOT
 #     a timeline repair — diagnose.sh routes those (derive-dts.sh et al.).
 #
@@ -78,11 +74,10 @@ else
 fi
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ -z "$SRC_TSH" ] || [ -f "$SRC_TSH" ] || { echo "no such --src-tsh file: $SRC_TSH" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # pf_detect: the pair-timestamped-PAFF pre-flight
 . "$SELF_DIR/lib-mux.sh"    # rtm_part: extension-keeping atomic part files
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 . "$SELF_DIR/lib-rewrap.sh" # layout preservation + the prediction contract
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never the source
 
@@ -113,42 +108,62 @@ fi
 # 1.15.2 Item-C shape on a new axis; measured on an MP2-only TS).
 zb_vidx=$(ffp1 -v error -select_streams v:0 -show_entries stream=index -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
 case "${zb_vidx:-}" in ''|*[!0-9]*)
-  echo "no video stream in the source: refusing at pre-flight — verify-source's" >&2
-  echo "identity battery requires video, so an audio-only re-wrap could never be" >&2
-  echo "blessed (never build to a foregone refusal). Nothing was written. An" >&2
-  echo "audio-only deliverable extracts directly: ffmpeg -i IN -map 0:a -c copy OUT" >&2
-  exit 2;;
+  echo "no video stream in the source: refusing at pre-flight. This is a CACHED" >&2
+  echo "DETERMINISTIC ATTEMPT (TIERS.md Tier 3), not a forecast about quality —" >&2
+  echo "verify-source.sh, this rung's mandatory identity battery, refuses a" >&2
+  echo "video-less re-wrap outright, and attempting one reproduces that identical" >&2
+  echo "refusal with a worse message. Re-verify the cache yourself if you doubt it:" >&2
+  echo "  scripts/verify-source.sh \"$IN\" <any-rewrap>" >&2
+  echo "Nothing was written. An audio-only deliverable extracts directly:" >&2
+  echo "  ffmpeg -i IN -map 0:a -c copy OUT" >&2
+  exit 2;;   # TIER 3 cached deterministic: verify-source cannot bless a video-less re-wrap
 esac
-# pair-timestamped-PAFF check (1.15.2 Item C) — windowed and cheap, so it runs
-# BEFORE the whole-file scan: on the field source the old order burned a 54 s
-# scan plus a 23.68 GB build to reach a foregone hard-stop. pf_detect's
-# PF_PKT_FILE hook keeps this pinnable without mintable PAFF media.
+# PAFF profile check (1.15.2 Item C) — windowed and cheap, so it runs BEFORE
+# the whole-file scan and the operator hears the warning early rather than
+# after a 54 s scan. Since 1.16.0 it WARNS rather than refuses (T3.3), so the
+# ordering is about how soon you are told, not about what is prevented.
+# pf_detect's PF_PKT_FILE hook keeps this pinnable without mintable PAFF media.
 # F1 (WO-1.15.7): the two PAFF shapes are now DIAGNOSED separately — the old
 # single arm labeled a fully-timestamped PAFF source "pair-timestamped",
 # claimed untimestamped mates it does not have, and routed it to
 # pairfill-paff.sh, which exits 3 on exactly that file. The refusal POLICY
 # stands for both shapes; the diagnosis and the route now match the profile.
 eval "$(pf_detect "$IN")"
+# TIERS.md T3.3 — CONVERTED in 1.16.0. Both arms below used to REFUSE at
+# pre-flight. Neither refusal was about something zero-base cannot do; both
+# were predictions about the QUALITY of the output it would produce, and the
+# second one said so in its own words ("POLICY, not measurement"). Under
+# "gate the assertion, not the attempt" that is Tier 3: the prediction is
+# announced with its measurement, the build is attempted, and the mux-confession
+# stop plus verify-source.sh judge the artifact that exists.
+#
+# NOTHING DOWNSTREAM IS LOOSENED. The confession stop still refuses to bless an
+# invented timeline, verify-source still proves every kept byte, and the
+# prediction contract still requires predicted == observed. What changed is
+# that the operator now gets an artifact and a measured verdict instead of a
+# forecast — and when the forecast was right, the verdict says so with counts.
+ZB_PAFF_WARN=""
 if [ "${PF_HALF_TS:-no}" = yes ]; then
-  echo "pair-timestamped PAFF source (paff=$PF_PAFF half_ts=$PF_HALF_TS): refusing at pre-flight." >&2
-  echo "A TS->TS copy of this shape makes the mpegts muxer invent timing for the" >&2
-  echo "untimestamped mates ('Timestamps are unset' — the hard-stop class, measured" >&2
-  echo "2026-08-27 on a 23.68 GB field source AFTER the full build), and the prize is" >&2
-  echo "cosmetic: format.start_time lands at the reorder-delay floor either way and" >&2
-  echo "players rebase it — the player clock already reads 0. The source IS the master." >&2
-  echo "For the QuickTime deliverable route: scripts/pairfill-paff.sh IN OUT.mov" >&2
-  exit 2
+  ZB_PAFF_WARN="pair-timestamped PAFF (paff=$PF_PAFF half_ts=$PF_HALF_TS)"
+  echo "** WARNING (not a refusal): $ZB_PAFF_WARN."
+  echo "**   A TS->TS copy of this shape has been measured making the mpegts muxer invent"
+  echo "**   timing for the untimestamped mates ('Timestamps are unset' — the hard-stop"
+  echo "**   class, 2026-08-27, a 23.68 GB field source). If that happens here the build"
+  echo "**   is kept as a .part and NOT blessed, and this run will say so with the count."
+  echo "**   The prize either way is cosmetic: format.start_time lands at the reorder-delay"
+  echo "**   floor and players rebase it. The source IS the master, and for a QuickTime"
+  echo "**   deliverable the route is scripts/pairfill-paff.sh IN OUT.mov."
+  echo "**   To get this verdict WITHOUT the build: --preflight-only."
 elif [ "${PF_PAFF:-no}" = yes ]; then
-  echo "field-coded (PAFF) source with a COMPLETE timestamp column (paff=$PF_PAFF half_ts=no):" >&2
-  echo "refusing at pre-flight — POLICY, not measurement (WO-1.15.7 F1): the 'TS->TS" >&2
-  echo "copy preserves PAFF' claim is scoped to its 1.15.2 case file and unproven for" >&2
-  echo "this shape, and the prize is cosmetic (players rebase start_time — the clock" >&2
-  echo "already reads 0). This is NOT the pair-timestamped class: every packet is" >&2
-  echo "stamped, and pairfill-paff.sh would refuse this very file (exit 3, half_ts=no)." >&2
-  echo "For a QuickTime deliverable: scripts/mov.sh (the copy ladder keeps the true" >&2
-  echo "reorder pyramid; scrub-gated); if ITS verify names timestamp work, scripts/" >&2
-  echo "diagnose.sh routes by measured profile. The source IS the master." >&2
-  exit 2
+  ZB_PAFF_WARN="field-coded PAFF, complete timestamp column (paff=$PF_PAFF half_ts=no)"
+  echo "** WARNING (not a refusal): $ZB_PAFF_WARN."
+  echo "**   The 'TS->TS copy preserves PAFF' claim is scoped to its 1.15.2 case file and"
+  echo "**   is unproven for this shape — so this build is an EXPERIMENT whose result the"
+  echo "**   gates below will settle, not a route with a promise attached. Every packet"
+  echo "**   here is stamped, so this is NOT the pair-timestamped class (pairfill-paff.sh"
+  echo "**   would refuse this very file, exit 3). The prize is cosmetic either way."
+  echo "**   For a QuickTime deliverable: scripts/mov.sh; scripts/diagnose.sh routes by"
+  echo "**   measured profile. To get this verdict WITHOUT the build: --preflight-only."
 fi
 # whole-file rot check — zero-base is not a timeline repair. Saved for reuse:
 # verify-source consumes the same scan via --src-tsh (one scanner, one truth).
@@ -194,7 +209,14 @@ fi
 # prediction dry run, none of which are refusals and all of which cost.
 if [ "$PREFLIGHT_ONLY" -eq 1 ]; then
   echo ">> ELIGIBLE: no pre-flight refusal applies to this source."
-  echo "ZB_PREFLIGHT verdict=eligible container=$CONT programs=${NPROG:-1} paff=${PF_PAFF:-no} half_ts=${PF_HALF_TS:-no} back=${S_BACK:-0} dup=${S_DUP:-0} prekey=${S_PREKEY:-0}"
+  # verdict=eligible still means "this script will attempt it". The PAFF arms
+  # are no longer refusals, so a caller asking (clean.sh, IV.2) is told the
+  # warning rather than a route that does not exist — extend-only field.
+  echo "ZB_PREFLIGHT verdict=eligible container=$CONT programs=${NPROG:-1} paff=${PF_PAFF:-no} half_ts=${PF_HALF_TS:-no} back=${S_BACK:-0} dup=${S_DUP:-0} prekey=${S_PREKEY:-0} warn=${ZB_PAFF_WARN:+yes}"
+  # to STDERR as well: clean.sh reads this pre-flight on stderr ONLY (its
+  # stdout names a temp dir that is gone by the time the operator reads the
+  # report), and a caveat only the caller cannot see is not a caveat.
+  [ -z "${ZB_PAFF_WARN:-}" ] || { echo "ZB_PREFLIGHT_WARN $ZB_PAFF_WARN"; echo "ZB_PREFLIGHT_WARN $ZB_PAFF_WARN" >&2; }
   echo "   (eligibility is about the SOURCE SHAPE. The writer lock and disk"
   echo "    headroom are build-time conditions and are checked then.)"
   exit 0

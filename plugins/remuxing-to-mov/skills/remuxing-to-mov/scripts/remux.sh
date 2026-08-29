@@ -90,11 +90,10 @@ esac; done
 case "$DRCOPT" in auto|off|on) ;; *) echo "bad --drc: $DRCOPT" >&2; exit 2;; esac
 case "$FMT" in mov|mp4) ;; *) echo "bad --container: $FMT (mov|mp4)" >&2; exit 2;; esac
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # mux_confessions, backhaul_gate
 . "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 
 # backhaul gate (1.11: advises + warns, refuses nothing — 4:2:2 announces the
 # contribution profile and defers to the post-build proof, WO 4.1; timeline rot
@@ -116,10 +115,10 @@ vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of d
 # not be refused. VC-1 has no sample entry in either family and still refuses.
 if [ "$FMT" = mov ] && unroutable_v "$vcodec"; then
   unroutable_v_refuse "$vcodec"
-  exit 11
+  exit 11   # TIER 3 T3.8 cached deterministic attempt
 elif [ "$FMT" = mp4 ] && [ "$vcodec" = vc1 ]; then
   unroutable_v_refuse "$vcodec"
-  exit 11
+  exit 11   # TIER 3 T3.8 cached deterministic attempt
 fi
 
 # --- per-track audio manifest -> KEEP/DROP plan (QTFF audit 5-2b) ---
@@ -153,7 +152,7 @@ if [ "$plan_rc" -ne 0 ]; then
   tail -4 "$PLANERR" | sed 's/^/   probe: /' >&2
   rm -f "$PLANERR"
   echo "   Nothing written. Source untouched." >&2
-  exit 2
+  exit 2   # TIER 1 instrumentation: a failed probe is not a measurement (III.1)
 fi
 rm -f "$PLANERR"
 PLAN=$(printf '%s\n' "$PLANRAW" | \
@@ -315,7 +314,7 @@ if [ -n "$KEPT" ]; then
     # track already WARNed the drop above and never reaches this arm.
     if unroutable_a "$codec"; then
       unroutable_a_refuse "$ord"
-      exit 11
+      exit 11   # TIER 3 T3.8 cached deterministic attempt
     fi
     AARGS=(${AARGS[@]+"${AARGS[@]}"} -map "0:a:$ord")
     if [ "$(track_disp "$codec")" = copy ]; then
@@ -445,7 +444,16 @@ if [ "${conf:-0}" -gt 0 ]; then
   # whose verdict was already decided by the confession counter.
   grep -iE "$RTM_CONFESSION_RE" "$MUXLOG" | sort | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /' || true
   echo "   The muxer invented timing for packets the source never timestamped."
-  echo "   NOT blessing the output (kept at $PART; log: $MUXLOG)."
+  # 1.16.0: the run HAPPENED, and this log is a measurement of it — that is why
+  # this stop survives the "gate the assertion, not the attempt" re-aim intact.
+  # What it must never be is a bare job-FAIL: the build exists, it is kept, and
+  # the honest verdict is that its TIMELINE is unproven, with the gates that
+  # would settle it named and runnable against the .part right now.
+  echo "   BUILT, and kept at $PART — the artifact exists; what is unproven is its TIMELINE."
+  echo "   NOT blessed to $OUT. Gates still owed on it: (d) N/A stamps, (j) duplicate display"
+  echo "   slots + DTS<=PTS, (k) presentation order vs POC. Run them on the kept part:"
+  echo "     scripts/verify.sh \"$IN\" \"$PART\""
+  echo "   (log: $MUXLOG)"
   echo "   Run scripts/diagnose.sh \"$IN\" — it routes by MEASURED profile:"
   echo "   half-timestamped PAFF -> scripts/pairfill-paff.sh; PTS-complete reordered"
   echo "   (any codec — DTS absent/reconstructed/rotten alike) -> scripts/derive-dts.sh;"

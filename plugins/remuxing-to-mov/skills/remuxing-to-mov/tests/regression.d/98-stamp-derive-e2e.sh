@@ -116,7 +116,16 @@ ORPH=$(nopts_of "$FIX/sparse-orphan.ts")
 o=$(bash "$SC/derive-dts.sh" "$FIX/sparse-orphan.ts" "$WORK/orph.mov" 2>&1); rc=$?
 [ "$rc" -eq 3 ] && ok "an orphaned hole refuses with exit 3" || no "orphan rc=$rc, want 3"
 ls "$WORK"/orph.mov* >/dev/null 2>&1 && no "the refusal still wrote something" || ok "nothing written, under any name"
-has "$o" "no timestamped pair-mate" "the refusal says what was missing"
+# WO-1.15.21 A1 (1.16.0): the refusal DISTINGUISHES its three shapes
+# instead of listing them. On this fixture the pairing IS provable and
+# these particular holes have no mate, so that is what it must say —
+# the old message offered three possibilities and left the operator to
+# hunt for a per-packet cause that may not exist.
+has "$o" "cannot be reconstructed" "the refusal says what was missing"
+has "$o" "WHY:" "…and states WHICH of the shapes this is"
+has "$o" "no timestamped mate" "…naming the mate-less holes specifically"
+has "$o" "POC evidence, for the record" "…and reporting the POC evidence whether it fired or not (III.2)"
+hasnt "$o" "Three shapes land here" "the undifferentiated list is gone"
 has "$o" "Coded positions:" "…and names the positions"
 has "$o" "360, 361" "…which are the adjacent pair the fixture minted"
 hasnt "$o" "stamped=" "no census is emitted for a file that was never built"

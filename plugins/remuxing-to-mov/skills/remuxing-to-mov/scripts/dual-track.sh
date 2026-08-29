@@ -48,11 +48,10 @@ while [ $# -gt 0 ]; do case "$1" in
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # mux_confessions, backhaul_gate
 . "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 
 # backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
 # defers to the post-build proof, rot WARNs and builds; lib-paff.sh) — this

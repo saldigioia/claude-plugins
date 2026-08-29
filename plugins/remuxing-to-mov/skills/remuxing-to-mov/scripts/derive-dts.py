@@ -151,6 +151,206 @@ PAIR_PARITY_MAX_LOSER = 0.5
 REFUSAL_POSITIONS_SHOWN = 12
 
 
+# --- the POC evidence path (TIERS.md T3.4/T3.5, 1.16.0) ---------------------
+# WHAT CHANGED AND WHY (field-measured 2026-08-28, root-caused 2026-08-29).
+# The rule below this one, _pair_parity, asks whether two ADJACENT coded
+# pictures' TIMESTAMPS differ by exactly one field duration, and infers field
+# pairing from that. On the 2024 VMA capture it measured 0 of 424,596 — both
+# parities zero — and refused the whole file. The measurement is true. The
+# inference is false: those fields ARE coded-adjacent and DO share frame_num;
+# the source simply stamps each bottom field a constant three rungs BELOW its
+# own top field, which is the -5400 delta dominating that file's histogram.
+#
+# So the rule was reading a PROXY for structure while the structure itself sat
+# unread in every slice header — and, worse, while each picture's DISPLAY
+# POSITION sat unread there too, stated outright as pic_order_cnt_lsb.
+#
+# This is the direct evidence, and where it is available it is PREFERRED:
+#   pairing   field_pic_flag=1, bottom_field_flag 0->1, same frame_num,
+#             coded-adjacent (ISO/IEC 14496-15's own definition of a
+#             complementary field pair) — a structural fact, not an arithmetic
+#             coincidence a reorder anchor can imitate.
+#   value     k = POC + C, with C constant per (IDR epoch, bottom_field_flag).
+#             THE PER-PARITY SPLIT IS MANDATORY: bottoms sit a constant offset
+#             below their tops, so a single global C looks non-unanimous and
+#             the class gets thrown away as unproven — which is precisely how
+#             the naive version fails on a stream where it is provable to four
+#             nines.
+#
+# THE BAR IS NOT LOWERED. A class is trusted only at >= POC_MIN_AGREE over
+# >= POC_MIN_SAMPLES votes; an untrusted class yields nothing at all and never
+# falls back to the most popular guess. _pair_parity survives underneath for
+# the class it provably fits (simply-paired PAFF, where the delta rule IS the
+# structure) and for streams this engine cannot read at all.
+POC_MIN_SAMPLES, POC_MIN_AGREE = 100, 0.999
+
+
+def poc_classes(coded, structure, min_samples=POC_MIN_SAMPLES,
+                min_agree=POC_MIN_AGREE):
+    """Solve C per (epoch, bottom_field_flag) from the packets that DO carry a
+    timestamp, on the rung lattice `coded` is expressed in.
+
+    coded      the PTS column in coded order, None at each hole, ALREADY
+               divided into rungs by the caller (see rung_lattice).
+    structure  per coded index: (field_pic, bottom, frame_num, poc, epoch), or
+               None where the slice header did not parse.
+
+    Returns (C, trusted, report) — report is one line per class, trusted or
+    not, because a rule that never fires must say so and on what evidence
+    (Constitution III.2).
+    """
+    votes = {}
+    for i, s in enumerate(structure):
+        if s is None or coded[i] is None or s[3] is None:
+            continue
+        key = (s[4], s[1])
+        votes.setdefault(key, {})
+        d = coded[i] - s[3]
+        votes[key][d] = votes[key].get(d, 0) + 1
+    C, trusted, report = {}, set(), []
+    for key in sorted(votes):
+        v = votes[key]
+        best = max(v, key=lambda k: v[k])
+        cnt, total = v[best], sum(v.values())
+        C[key] = best
+        share = float(cnt) / total if total else 0.0
+        okc = total >= min_samples and share >= min_agree
+        if okc:
+            trusted.add(key)
+        report.append("epoch=%d parity=%s C=%d unanimity=%d/%d (%.5f) %s"
+                      % (key[0], "bottom" if key[1] else "top", best, cnt,
+                         total, share, "TRUSTED" if okc else "untrusted"))
+    return C, trusted, report
+
+
+
+def _evidence_digest(report, shown=4):
+    """A per-class evidence report, capped. The whole roster on a long capture
+    is twenty-plus lines inside one refusal, which buries the sentence that
+    matters; the operator needs the SHAPE (do any clear the bar? by how far?)
+    and the count, not every row."""
+    if not report:
+        return "none"
+    head = "; ".join(report[:shown])
+    if len(report) > shown:
+        head += "; ... (%d more class(es), same shape)" % (len(report) - shown)
+    return head
+
+def poc_rung(i, coded, structure, C, trusted):
+    """The rung POC says coded picture i belongs on, or None when its class is
+    not trusted (never a guess)."""
+    s = structure[i] if structure else None
+    if s is None or s[3] is None:
+        return None
+    key = (s[4], s[1])
+    if key not in trusted:
+        return None
+    return s[3] + C[key]
+
+
+def structural_pairs(structure):
+    """Coded index -> the index of its complementary field mate, by ISO/IEC
+    14496-15 structure alone. Timestamps are not consulted."""
+    mate = {}
+    n = len(structure)
+    i = 0
+    while i < n - 1:
+        a, b = structure[i], structure[i + 1]
+        if (a is not None and b is not None
+                and a[0] == 1 and b[0] == 1 and a[1] == 0 and b[1] == 1
+                and a[2] == b[2]):
+            mate[i] = i + 1
+            mate[i + 1] = i
+            i += 2
+        else:
+            i += 1
+    return mate
+
+
+def adjudicate_duplicates(coded, structure, step):
+    """Move packets carrying a STALE timestamp off a rung another packet holds
+    (TIERS.md T3.5).
+
+    THE MEASURED SHAPE (2024 VMA capture, 2026-08-29): all ten duplicate rungs
+    were a packet that carried a timestamp ACROSS a transport discontinuity.
+    The earlier holder always fits its local POC lattice; the later one never
+    does. That asymmetry is what makes them adjudicable at all — and it is
+    read from the bitstream's own declared display positions, not guessed from
+    neighbouring arithmetic.
+
+    Returns (column, moves, unresolved):
+      moves       (index, old, new) per packet relocated, in coded order
+      unresolved  indices POC could not adjudicate — the caller REFUSES on
+                  these, naming them. A duplicate this cannot settle is not
+                  quietly kept: two pictures on one display slot is exactly
+                  the defect verify.sh gate (j) exists to catch.
+
+    Nothing is moved without evidence, and nothing is moved onto an occupied
+    rung: a "fix" that creates a fresh collision is not a fix.
+    """
+    n = len(coded)
+    if structure is None or len(structure) != n or step <= 0:
+        return list(coded), [], [i for i in _dup_indices(coded)]
+    lat = [None if v is None else v // step for v in coded]
+    C, trusted, _report = poc_classes(lat, structure)
+    out = list(coded)
+    moves, unresolved = [], []
+    where = {}
+    for i, v in enumerate(out):
+        if v is not None:
+            where.setdefault(v, []).append(i)
+    occupied = set(v for v in out if v is not None)
+    for v in sorted(k for k, ix in where.items() if len(ix) > 1):
+        holders = where[v]
+        fits = [i for i in holders if poc_rung(i, lat, structure, C, trusted) == v // step]
+        if len(fits) != 1:
+            # nobody fits, or several do: POC does not settle this one
+            unresolved.extend(holders[1:] if not fits else
+                              [i for i in holders if i not in fits])
+            continue
+        keep = fits[0]
+        for i in holders:
+            if i == keep:
+                continue
+            r = poc_rung(i, lat, structure, C, trusted)
+            if r is None:
+                unresolved.append(i)
+                continue
+            nv = r * step
+            if nv in occupied:
+                unresolved.append(i)   # moving it would only relocate the collision
+                continue
+            occupied.discard(out[i])
+            out[i] = nv
+            occupied.add(nv)
+            moves.append((i, v, nv))
+    return out, moves, sorted(set(unresolved))
+
+
+
+def _dup_values_large(coded):
+    """Duplicated PTS values, in one pass. `list.count` per value is O(n^2) and
+    this column is routinely hundreds of thousands of packets long."""
+    seen, dup = set(), set()
+    for v in coded:
+        if v is None:
+            continue
+        if v in seen:
+            dup.add(v)
+        else:
+            seen.add(v)
+    return sorted(dup)
+
+def _dup_indices(coded):
+    seen = {}
+    for i, v in enumerate(coded):
+        if v is None:
+            continue
+        if v in seen:
+            yield i
+        else:
+            seen[v] = i
+
 def _pair_parity(coded, step):
     """Which coded-index parity BEGINS a PAFF field pair, proven over the whole
     file — or None when the evidence does not settle it.
@@ -190,7 +390,7 @@ def _pair_parity(coded, step):
     return None
 
 
-def fill_sparse(coded, max_frac=RTM_SPARSE_NOPTS_MAX):
+def fill_sparse(coded, max_frac=RTM_SPARSE_NOPTS_MAX, structure=None):
     """coded: the video PTS column in CODED order over the WHOLE file, with
     None at every packet that carries data but no PTS.
 
@@ -198,6 +398,11 @@ def fill_sparse(coded, max_frac=RTM_SPARSE_NOPTS_MAX):
     of (index, mate_index, value, rule) — one row per reconstruction, in coded
     order — so every invented-from-evidence timestamp can be announced and
     recorded. With no holes at all this is the identity and stamps is empty.
+
+    `structure` (optional): per coded index, (field_pic, bottom, frame_num,
+    poc, epoch) from the slice headers, or None where they did not parse. When
+    it is given, the POC evidence above is used and PREFERRED; when it is not,
+    the delta rule below is all there is, and the refusal says so by name.
 
     Raises Refuse rather than fill any hole whose value is not FORCED by
     measured evidence, and the refusal covers the whole file: a partial fill
@@ -250,11 +455,30 @@ def fill_sparse(coded, max_frac=RTM_SPARSE_NOPTS_MAX):
             "real PTS and fills each pair-mate)"
             % (len(holes), n, frac, max_frac))
     step = modal_step(sorted(known))
+
+    # THE DIRECT EVIDENCE FIRST (T3.4). When the caller could read slice
+    # headers, each picture's display position is stated outright and the
+    # pairing is structural — both facts the delta rule below can only proxy
+    # for. `poc_ev` is filled in only when a class clears the unforgiving bar.
+    poc_ev = {}
+    poc_report = []
+    if structure is not None and len(structure) == n:
+        lat = [None if v is None else v // step for v in coded]
+        C, trusted, poc_report = poc_classes(lat, structure)
+        if trusted:
+            for j in holes:
+                r = poc_rung(j, lat, structure, C, trusted)
+                if r is not None:
+                    poc_ev[j] = r * step
+
     parity = _pair_parity(coded, step)
 
     proposals = {}                 # index -> (value, rule, mate)
     orphans = []                   # no evidence at all
     for j in holes:
+        if j in poc_ev:
+            proposals[j] = (poc_ev[j], "poc", j)
+            continue
         if parity is None:
             orphans.append(j)             # no provable pairing: no mate to read
             continue
@@ -268,17 +492,53 @@ def fill_sparse(coded, max_frac=RTM_SPARSE_NOPTS_MAX):
         proposals[j] = (coded[mate] + sign * step, "pair-mate", mate)
 
     if orphans:
+        # WO-1.15.21 A1: DISTINGUISH THE SHAPES instead of listing them. The
+        # old message offered three possibilities and let the operator hunt;
+        # on the capture that motivated this round every hole orphaned for the
+        # SAME whole-file reason, and saying so is the difference between a
+        # session and a sentence.
+        # ATTRIBUTE THE REASON THE HOLES ACTUALLY ORPHANED FOR, in that order.
+        # An earlier draft led with the POC class report, which read as the
+        # cause even where the pairing was provable and it was a missing mate
+        # all along — a refusal that names the wrong reason sends the operator
+        # somewhere there is nothing to find, which is the whole complaint this
+        # round started from.
+        poc_note = ""
+        if structure is not None and len(structure) == n:
+            poc_note = ("  POC evidence, for the record: %s"
+                        % (_evidence_digest(poc_report) if poc_report
+                           else "no class had any votes"))
+        if parity is not None:
+            why = ("the pairing IS provable on this stream, and these "
+                   "particular holes still have no timestamped mate: either two "
+                   "unstamped packets sit side by side (each is the other's "
+                   "mate) or a hole's mate falls off the end of the file." + poc_note)
+        elif structure is not None and len(structure) == n and not poc_ev:
+            why = ("neither rule has evidence here. The slice headers WERE read "
+                   "and no POC class cleared the bar (>=%d votes, >=%.4g "
+                   "unanimity), so no picture's display position can be stated; "
+                   "and no coded-index parity has adjacent pairs one field "
+                   "duration apart either.%s"
+                   % (POC_MIN_SAMPLES, POC_MIN_AGREE, poc_note))
+        elif parity is None:
+            why = ("the field pairing is not provable on this stream: no coded-"
+                   "index parity has adjacent pairs one field duration apart at "
+                   "the %.4g bar, so no hole has a readable mate. This is a "
+                   "WHOLE-FILE property — every hole orphans for it, and no "
+                   "per-packet cause will be found by looking. A stream whose "
+                   "fields are coded-adjacent but stamped at a constant offset "
+                   "reads exactly like this to a timestamp-delta rule; its "
+                   "direct evidence is the slice headers, which Rung 3-POC "
+                   "(scripts/poc-remux.sh) reads"
+                   % PAIR_PARITY_MIN_AGREE)
+        else:
+            why = ("no reconstruction rule had evidence for these holes." + poc_note)
         raise Refuse(
-            "%d of %d unstamped video packet(s) have no timestamped pair-mate "
-            "to reconstruct from — the whole file is refused rather than "
-            "partly filled (a partial fill is invented timing with better "
-            "manners). Coded positions: %s. Three shapes land here: two "
-            "unstamped packets side by side (each is the other's mate), a "
-            "hole whose mate falls off the end of the file, and a stream "
-            "whose field pairing this file does not prove at all — a "
-            "frame-coded stream has no pair-mate to read, and its neighbours' "
-            "arithmetic is not evidence (a reorder anchor imitates it)"
-            % (len(orphans), len(holes), _positions(orphans)))
+            "%d of %d unstamped video packet(s) cannot be reconstructed — the "
+            "whole file is refused rather than partly filled (a partial fill "
+            "is invented timing with better manners). Coded positions: %s. "
+            "WHY: %s"
+            % (len(orphans), len(holes), _positions(orphans), why))
     # collisions are checked over the WHOLE proposal set at once, so a pair of
     # reconstructions that agree with each other is caught as surely as one
     # that lands on a carried PTS. The duplicate-PTS refusal in derive_dts()
@@ -392,16 +652,44 @@ def main():
     inp = av.open(src, options=rtm_open_options())   # probe-window floor (C8)
     vin = inp.streams.video[0]
     column = []
+    structure = []
     n_empty = 0
+    # THE DIRECT EVIDENCE COSTS NOTHING EXTRA (Constitution IV.2: never
+    # re-derive what is already being read). This pass already demuxes every
+    # video packet; for H.264 it now also parses the first slice header of each
+    # one, which is where the field pairing and the display position have been
+    # stated all along. A packet whose header will not parse contributes None
+    # and is simply not evidence — never a guess.
+    hp = None
+    if str(getattr(vin.codec_context, "name", "")) == "h264":
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import h264poc
+            hp = (h264poc.Parser(), h264poc.PocUnwrapper())
+        except Exception:
+            hp = None
     for pkt in inp.demux(vin):
         if pkt.size == 0:
             n_empty += 1          # flush/padding packets: not coded pictures
             continue
         column.append(pkt.pts)    # None here IS the hole
+        if hp is not None:
+            try:
+                sh = hp[0].parse_slice(bytes(pkt))
+            except Exception:
+                sh = None
+            if sh is None:
+                structure.append(None)
+            else:
+                poc, ep = hp[1].feed(sh)
+                structure.append((sh["field_pic"], sh["bottom"],
+                                  sh["frame_num"], poc, ep))
         if limit and len(column) >= limit:
             break
     v_tb = vin.time_base
     inp.close()
+    if hp is None or len(structure) != len(column):
+        structure = None
 
     n_nopts = sum(1 for v in column if v is None)
     # The whole-file census is the AUTHORITATIVE one. Every routing decision
@@ -420,8 +708,24 @@ def main():
         except ValueError:
             print("   note: RTM_SPARSE_NOPTS_MAX=%r is not a number — using the "
                   "default %g" % (raw, RTM_SPARSE_NOPTS_MAX), file=sys.stderr)
+    # Evidence is announced whether it fires or not (Constitution III.2 — a
+    # rule that never fired must say so, and on what): the 2026-08-28 field run
+    # spent a session discovering that a rule had silently found nothing.
+    if structure is not None:
+        parsed = sum(1 for x in structure if x is not None)
+        fields = sum(1 for x in structure if x is not None and x[0] == 1)
+        mates = structural_pairs(structure)
+        print("-- slice-header evidence (H.264): %d of %d picture(s) parsed; "
+              "%d field picture(s); %d complementary pair(s) by ISO/IEC "
+              "14496-15 structure --" % (parsed, len(structure), fields,
+                                         len(mates) // 2), file=sys.stderr)
+    else:
+        print("-- slice-header evidence: UNAVAILABLE on this stream (not H.264, "
+              "or the headers did not parse) — the pairing rule below can only "
+              "read timestamp deltas, which are a proxy for the structure --",
+              file=sys.stderr)
     try:
-        coded, stamps = fill_sparse(column, max_frac)
+        coded, stamps = fill_sparse(column, max_frac, structure)
     except Refuse as e:
         print(">> REFUSED: %s" % e, file=sys.stderr)
         sys.exit(3)
@@ -438,11 +742,45 @@ def main():
             # ones rather than be loosened to tolerate any.
             print("   DERIVE_STAMP idx=%d pts=%d mate=%d rule=%s"
                   % (j, value, mate, rule))
+    # --- T3.5: adjudicate duplicate display slots BEFORE deriving ---------
+    # derive_dts refuses on the first duplicate PTS, and that refusal stands
+    # for any duplicate this cannot settle. What changed in 1.16.0 is that a
+    # duplicate is no longer AUTOMATICALLY unsettleable: where the bitstream
+    # states each picture's display position, the stale holder can be
+    # identified and moved from evidence — measured 10 of 10 on the capture
+    # that motivated this round, every one a timestamp carried across a
+    # transport discontinuity.
+    dup_before = _dup_values_large(coded)
+    if dup_before:
+        step_hint = modal_step(sorted(v for v in coded if v is not None))
+        coded, moves, unresolved = adjudicate_duplicates(coded, structure, step_hint)
+        print("-- duplicate display slots: %d value(s) held by more than one "
+              "packet --" % len(dup_before), file=sys.stderr)
+        for i, ov, nv in moves:
+            print("   DERIVE_ADJUDICATE idx=%d pts=%d -> %d rule=poc "
+                  "(the stale holder; the earlier one fits its own lattice)"
+                  % (i, ov, nv))
+        if unresolved:
+            print(">> REFUSED: %d duplicate PTS could not be adjudicated from the "
+                  "bitstream's own display positions — coded positions: %s. A "
+                  "duplicate that POC cannot settle is two pictures on one "
+                  "display slot, which is exactly the defect verify.sh gate (j) "
+                  "exists to catch; it is not quietly kept. %s"
+                  % (len(unresolved), _positions(unresolved),
+                     "The slice headers were unreadable on this stream, so there "
+                     "was no evidence to adjudicate with."
+                     if structure is None else
+                     "The evidence was read and did not settle these."),
+                  file=sys.stderr)
+            sys.exit(3)   # TIER 3 T3.5 duplicate the evidence could not settle
+        print("   %d packet(s) moved off a rung another packet holds; %d "
+              "value(s) were adjudicated" % (len(moves), len(dup_before)),
+              file=sys.stderr)
     try:
         dts, depth, step = derive_dts(coded)
     except Refuse as e:
         print(">> REFUSED: %s" % e, file=sys.stderr)
-        sys.exit(3)
+        sys.exit(3)   # TIER 3 T3.5 the derivation's own uniqueness precondition
     n = len(coded)
 
     shift_ticks = max(0, -dts[0])

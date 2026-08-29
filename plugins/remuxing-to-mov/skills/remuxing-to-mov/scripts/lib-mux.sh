@@ -179,8 +179,148 @@ rtm_disk_preflight () {
 # its first write: the writer lock, then the disk check. Callers install
 # `trap 'rtm_unlock' EXIT` first (extending an existing cleanup trap where
 # one exists), then `rtm_writer_preflight "$OUT" "$IN" || exit 2`.
+# --- T1.11: a writer writes BESIDE the source, never onto it (1.16.0) -------
+#
+# Constitution I.2 says the source is never modified. Until 1.16.0 that was
+# enforced by TWELVE byte-identical copies of one string comparison — the IV.1
+# shape, and the copies nobody wrote are the ones that mattered. The comparison
+# also does not answer the question: `/d/./x.ts`, a symlink into the source and
+# a hard link to it all name the source while comparing unequal, and NONE of
+# the twelve looked at the sidecar names a builder derives from OUT.
+#
+# MEASURED 2026-08-29, and this is why the row is Tier 1. Given a source named
+# `x.autobest.mov`, `auto.sh IN OUT` computes its park file as that same name,
+# and the ladder's opening `rm -f "$BEST_SAVE"` DELETED THE SOURCE — after
+# which the run printed ">> FAIL … Source untouched." A quiet irreversible act
+# and a false assertion about it, in one run.
+#
+# rtm_fileid F -> "dev:inode" for F (symlinks followed), empty when unmeasurable.
+# BSD and GNU stat disagree on the flag; both are tried, and an unreadable
+# answer falls through to canonical-path comparison rather than to a guess
+# (EMPTY is not ABSENT — an unmeasurable id never reads as "different file").
+rtm_fileid () {
+  local f="${1:?rtm_fileid needs a path}" id=""
+  id=$(stat -Lf '%d:%i' "$f" 2>/dev/null) || id=""
+  [ -n "$id" ] || { id=$(stat -Lc '%d:%i' "$f" 2>/dev/null) || id=""; }
+  printf '%s' "$id"
+}
+
+# rtm_canon P -> P with its directory resolved physically (symlinked dirs and
+# ./.. collapsed). The basename is NOT resolved: a not-yet-existing OUT has no
+# target, and comparing what will be created is the point.
+rtm_canon () {
+  local p="${1:?rtm_canon needs a path}" d
+  d="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || d="$(dirname "$p")"
+  printf '%s/%s' "$d" "$(basename "$p")"
+}
+
+# rtm_same_file A B -> 0 when A and B name the same file on disk.
+rtm_same_file () {
+  local a="${1:?}" b="${2:?}" ai bi
+  if [ -e "$a" ] && [ -e "$b" ]; then
+    ai=$(rtm_fileid "$a"); bi=$(rtm_fileid "$b")
+    if [ -n "$ai" ] && [ -n "$bi" ]; then [ "$ai" = "$bi" ] && return 0 || return 1; fi
+  fi
+  [ "$(rtm_canon "$a")" = "$(rtm_canon "$b")" ]
+}
+
+# rtm_sibling_guard IN OUT — every path this builder may write must be a
+# SIBLING of the source, never the source. Covers OUT itself, the deterministic
+# sidecars derived from OUT (autobest / premeta / derive), and the atomic part
+# NAME SHAPE (`<stem>.part-<pid>-<epoch>.<ext>`, matched as a pattern because
+# the pid is not knowable in advance). Returns 1 and announces; callers exit 2.
+RTM_SIDECAR_TAGS="autobest premeta derive"
+rtm_sibling_guard () {
+  local in="${1:?rtm_sibling_guard needs IN}" out="${2:?rtm_sibling_guard needs OUT}"
+  local tag cand what="" stem ext inbase
+  if rtm_same_file "$in" "$out"; then what="the output itself"; cand="$out"; fi
+  if [ -z "$what" ]; then
+    for tag in $RTM_SIDECAR_TAGS; do
+      cand="$(rtm_sidecar "$out" "$tag")"
+      if rtm_same_file "$in" "$cand"; then what="this builder's '$tag' sidecar"; break; fi
+    done
+  fi
+  if [ -z "$what" ]; then
+    # the atomic part name shape, by pattern
+    case "$(basename "$out")" in
+      *.*) stem="${out%.*}"; ext=".${out##*.}" ;;
+      *)   stem="$out"; ext=".mov" ;;
+    esac
+    inbase="$(rtm_canon "$in")"
+    case "$inbase" in
+      "$(rtm_canon "$stem")".part-*"$ext") what="this builder's atomic .part name"; cand="$inbase" ;;
+    esac
+  fi
+  [ -n "$what" ] || return 0
+  echo ">> REFUSED (pre-flight): the source is never modified (Constitution I.2), and" >&2
+  echo "   $what would land on it." >&2
+  echo "     source: $(rtm_canon "$in")" >&2
+  echo "     path:   $(rtm_canon "$cand")" >&2
+  echo "   These name the SAME file (identity is by inode, not by spelling: a dot-path," >&2
+  echo "   a symlink and a hard link all pass a string compare). Measured 2026-08-29: a" >&2
+  echo "   source named like the ladder's own park file was DELETED by it, under a run" >&2
+  echo "   that then reported 'Source untouched'. Nothing was written. Choose an output" >&2
+  echo "   name that is not the source and not derived onto it." >&2
+  echo "RTM_SIBLING verdict=refused collides=$what out=$(rtm_canon "$out")"
+  return 1
+}
+
+# rtm_claim_out OUT — the FINAL-OUT no-clobber (TIERS.md T1.10, 1.16.0).
+#
+# The writer lock closed CONCURRENT writers. Nothing closed the SEQUENTIAL
+# one: a run into an OUT that already holds a verified deliverable replaced it
+# without a word. That is Tier 1 — irreversible and quiet — and refusing it
+# costs nothing, because it blocks no legitimate attempt: an operator who
+# meant to replace the file says so, and one who did not is glad to be told.
+#
+# THE DISCRIMINATOR IS THE LOCK. A ladder replaces its OWN artifact across
+# rungs constantly (auto.sh's Rung 2 over Rung 0's build), so the claim is
+# made exactly ONCE, by the process that ACQUIRED the lock, before any work.
+# A child builder re-entering under the driver's lock is writing the driver's
+# artifact and is never re-asked — which is why this is called from
+# rtm_writer_preflight only when RTM_LOCKDIR is set (owner) and from the three
+# drivers that take rtm_lock directly.
+#
+# RTM_OVERWRITE=1 is the operator's override and is ANNOUNCED, never silent.
+# A directory at OUT is refused outright: `mv -f PART DIR` silently files the
+# artifact INSIDE it, which is neither a delivery nor an error (measured
+# 2026-08-29 — remux.sh exited 0 with the build hidden one level down).
+rtm_claim_out () {
+  local out="${1:?rtm_claim_out needs OUT}" sz
+  if [ -d "$out" ]; then
+    echo ">> REFUSED (pre-flight): $out is a DIRECTORY, not an output file." >&2
+    echo "   Blessing into it would file the artifact INSIDE the directory and report" >&2
+    echo "   success. Name the .mov you actually want. Nothing was written." >&2
+    echo "RTM_CLOBBER verdict=refused reason=directory out=$out"
+    return 1
+  fi
+  [ -e "$out" ] || return 0
+  sz=$(wc -c < "$out" 2>/dev/null | tr -d ' ')
+  case "$sz" in ''|*[!0-9]*) sz=unknown;; esac
+  if [ "${RTM_OVERWRITE:-0}" = 1 ]; then
+    echo "** --overwrite: $out already exists ($sz bytes) and will be REPLACED by this"
+    echo "**   build. The previous deliverable is not recoverable from here."
+    echo "RTM_CLOBBER verdict=overwrite bytes=$sz out=$out"
+    return 0
+  fi
+  echo ">> REFUSED (pre-flight): $out already exists ($sz bytes)." >&2
+  echo "   The writer lock stops two builds racing; it does not stop TODAY's build" >&2
+  echo "   from quietly replacing YESTERDAY's verified deliverable. Nothing was" >&2
+  echo "   written and the existing file is untouched." >&2
+  echo "   Pick another OUT, move the existing one aside, or say so:" >&2
+  echo "     RTM_OVERWRITE=1 <the same command>" >&2
+  echo "RTM_CLOBBER verdict=refused bytes=$sz out=$out"
+  return 1
+}
+
 rtm_writer_preflight () {
-  rtm_lock "${1:?rtm_writer_preflight needs OUT}" || return 1
+  # T1.11 first: a refusal here must not even take the lock.
+  rtm_sibling_guard "${2:?rtm_writer_preflight needs SRC}" "${1:?rtm_writer_preflight needs OUT}" || return 1
+  rtm_lock "$1" || return 1
+  # T1.10: only the process that OWNS the lock claims OUT. RTM_LOCKDIR is set
+  # by rtm_lock in the acquirer alone — a child re-entering under the driver's
+  # RTM_LOCK_HELD leaves it empty, and is writing the driver's own artifact.
+  if [ -n "${RTM_LOCKDIR:-}" ]; then rtm_claim_out "$1" || return 1; fi
   rtm_disk_preflight "$1" "${2:?rtm_writer_preflight needs SRC}" "${3:-}" || return 1
   return 0
 }

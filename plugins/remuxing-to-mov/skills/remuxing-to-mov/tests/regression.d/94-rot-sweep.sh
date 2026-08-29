@@ -293,5 +293,101 @@ done
   || no "early-exit readers over source (the 1.15.2 SIGPIPE class):$sig_bad"
 
 echo
+echo "== 11. every refusal site carries its TIER classification (1.16.0) =="
+# The 2026-08-29 re-aim: refusing to DO something and refusing to CLAIM
+# success without proof are different acts that come out of the mouth as the
+# same word. TIERS.md classifies every refusal in the tree; this guard makes
+# the classification PERMANENT rather than a one-time cleanup — a new refusal
+# site with no `# TIER n` comment fails the bench, so the next author has to
+# answer the classification test instead of inheriting an unclassified "no".
+#
+# NARROW AND TRUE (V.3). A refusal site is an `exit` COMMAND — the word inside
+# a quoted message is prose, and probe.sh/ts-health.sh describe other scripts'
+# refusals in exactly that way — whose code is 3 or 11 (this plugin's two
+# refusal codes), or an `exit 2` reached through this file's OWN printed
+# REFUSED announcement in the twelve lines above it. A FAIL (exit 1) is not a
+# refusal and is never demanded a tier.
+refusal_bad=""
+refusal_n=0
+for f in "$SC"/*.sh; do
+  [ -f "$f" ] || continue
+  out=$(awk '
+    { raw[FNR] = $0
+      code = $0
+      sub(/[[:space:]]#.*$/, "", code)
+      if (code ~ /^[[:space:]]*#/) code = ""
+      gsub(/"[^"]*"/, "", code)            # quoted prose is not code
+      gsub(/'"'"'[^'"'"']*'"'"'/, "", code)
+      line[FNR] = code }
+    END{
+      for (i = 1; i <= FNR; i++) {
+        if (line[i] !~ /(^|[^[:alnum:]_])exit[[:space:]]+[0-9]+/) continue
+        m = line[i]; sub(/.*(^|[^[:alnum:]_])exit[[:space:]]+/, "", m); sub(/[^0-9].*/, "", m)
+        refusal = (m == "3" || m == "11")
+        if (m == "2")
+          for (j = i - 12; j <= i; j++)
+            if (j >= 1 && raw[j] ~ /(echo|printf)/ && \
+                (raw[j] ~ /REFUSED/ || raw[j] ~ /REFUSING/ || raw[j] ~ /refusing at pre-flight/)) refusal = 1
+        if (!refusal) continue
+        total++
+        if (raw[i] ~ /# TIER [0-9]/) continue
+        if (i > 1 && raw[i-1] ~ /# TIER [0-9]/) continue
+        bad = bad " " i
+      }
+      printf "%d|%s\n", total+0, bad
+    }' "$f")
+  refusal_n=$((refusal_n + ${out%%|*}))
+  miss="${out#*|}"
+  [ -z "$miss" ] || refusal_bad="$refusal_bad $(basename "$f"):$(echo $miss | tr ' ' ',')"
+done
+if [ "$refusal_n" -lt 20 ]; then
+  # a detector that stops finding the tree's own refusals is broken, and a
+  # broken detector reports PASS forever (the vacuous-guard class, 1.15.17)
+  no "the refusal-site detector found only $refusal_n sites — it has stopped detecting"
+elif [ -z "$refusal_bad" ]; then
+  ok "all $refusal_n refusal sites carry a # TIER classification (TIERS.md)"
+else
+  no "refusal sites with no # TIER classification (see TIERS.md):$refusal_bad"
+fi
+
+echo
+echo "== 12. \"beside the source, never onto it\" has ONE writer (1.16.0) =="
+# Until 1.16.0 this fact had TWELVE byte-identical copies — a `cd dirname &&
+# pwd` string compare in every builder that took IN and OUT. That is the IV.1
+# shape, and the copies nobody wrote are the ones that mattered: none of them
+# looked at the sidecar names derived from OUT, and a source named like the
+# ladder's own park file was DELETED by it (measured 2026-08-29, pinned by
+# test 104 §6). The fact now lives in rtm_sibling_guard; a re-grown private
+# copy is what this section catches.
+sib_dup=""
+for f in "$SC"/*.sh; do
+  [ -f "$f" ] || continue
+  case "$(basename "$f")" in lib-mux.sh) continue;; esac   # the one writer
+  # the precise shape: a dirname/basename identity test over BOTH IN and OUT in
+  # one expression. Comments stripped first — this section and lib-mux.sh's own
+  # header describe the idiom in prose (V.3).
+  n=$(rtm_strip_comments "$f" \
+      | grep -cE 'dirname "\$IN".*dirname "\$OUT"|dirname "\$OUT".*dirname "\$IN"')
+  [ "${n:-0}" -eq 0 ] || sib_dup="$sib_dup $(basename "$f"):$n"
+done
+[ -z "$sib_dup" ] && ok "no builder carries a private copy of the source-vs-output identity test" \
+  || no "private copies of the sibling test (call rtm_sibling_guard instead):$sib_dup"
+
+# and the other half: every builder that takes IN and OUT must actually REACH
+# the guard — a single writer nobody calls guards nothing (the vacuous-guard
+# class, 1.15.17). rtm_writer_preflight calls it; the three drivers that take
+# rtm_lock directly call it themselves.
+sib_uncalled=""
+for f in "$SC"/*.sh; do
+  [ -f "$f" ] || continue
+  code=$(rtm_strip_comments "$f")
+  printf '%s\n' "$code" | grepq 'mv -f "\$PART" "\$OUT"' || continue
+  printf '%s\n' "$code" | grepqe 'rtm_writer_preflight|rtm_sibling_guard' \
+    || sib_uncalled="$sib_uncalled $(basename "$f")"
+done
+[ -z "$sib_uncalled" ] && ok "every builder that blesses a PART reaches the shared sibling guard" \
+  || no "builders that bless without reaching rtm_sibling_guard:$sib_uncalled"
+
+echo
 echo "rot-sweep: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

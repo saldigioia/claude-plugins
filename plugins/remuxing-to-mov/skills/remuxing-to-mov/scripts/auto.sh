@@ -32,11 +32,14 @@
 #       verify judge (WO 4.2). auto.sh itself refuses only the UNROUTABLE
 #       codecs pre-flight (VC-1/VP9/AV1 video, Dolby E audio — the shared
 #       WO 5.2 gate, added here in the 1.11 fix round so a direct run can
-#       never die in a raw muxer error). A child's own refusal — e.g.
-#       resync.sh's mid-stream layout guard (11) — does NOT propagate as 11
-#       today: attempt_resync/attempt flatten it to RESULT=FAIL
-#       (CHECKUP-2026-08-27 C5 records the gap; the old claim here that a
-#       child 11 propagates was false).
+#       never die in a raw muxer error). SINCE 1.16.0 a child's own refusal
+#       propagates too: a rung exiting 3 or 11 wrote nothing and found nothing
+#       wrong with any artifact, so the ladder reports result=REFUSED
+#       best_rung=none and exits 11 — never ">> FAIL", which sent the operator
+#       hunting for damage that does not exist (WO-1.15.21 C1, field-confirmed
+#       2026-08-28; TIERS.md T3.12; pinned by test 102). The discriminator is
+#       whether an ARTIFACT EXISTS: a rung that built something and failed its
+#       gates is still FAIL.
 # WO 2.3: the final verdict is the grade of the BEST verified artifact at OUT —
 # a failed escalation is reported separately and never condemns a prior rung —
 # and a REVIEW that is solely gate (f)'s gap-collapse escalates to resync.sh
@@ -59,10 +62,9 @@ while [ $# -gt 0 ]; do case "$1" in
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to write onto the source" >&2; exit 2; }
 . "$SELF_DIR/lib-paff.sh"
 . "$SELF_DIR/lib-mux.sh"    # rtm_sidecar: extension-keeping intermediates (D6)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 
 # eval only well-formed PR_/PF_ KEY=VAL lines. probe emits controlled ffprobe
 # tokens (never the path) — the filter is defense-in-depth so a stray line can't
@@ -75,7 +77,7 @@ set +e; PKV=$(bash "$SELF_DIR/probe.sh" "$IN" --kv); pkv_rc=$?; set -e
 if [ "$pkv_rc" -ne 0 ] || ! printf '%s\n' "$PKV" | grep -q '^PR_AUD_COUNT='; then
   echo ">> REFUSED (pre-flight): probe.sh --kv failed (rc=$pkv_rc) or returned no audio" >&2
   echo "   manifest — cannot route this source (EMPTY is not ABSENT). Nothing written." >&2
-  exit 2
+  exit 2   # TIER 1 instrumentation: a failed probe is not a measurement (III.1)
 fi
 eval "$(printf '%s\n' "$PKV" | grep -E '^(PR|PF)_[A-Z0-9_]+=')"   # PR_* + PF_*
 echo "== auto: $IN -> $OUT =="
@@ -92,14 +94,14 @@ echo "   probe: vcodec=$PR_VCODEC audio=$PR_ACODEC($PR_AUDIO_ACTION) paff=$PF_PA
 # in the refusal itself.
 if unroutable_v "$PR_VCODEC"; then
   unroutable_v_refuse "$PR_VCODEC"
-  exit 11
+  exit 11   # TIER 3 T3.8 cached deterministic attempt (the muxer's own rejection)
 fi
 ua_i=0
 while [ "$ua_i" -lt "${PR_AUD_COUNT:-0}" ]; do
   eval "ua_c=\${PR_AUD_${ua_i}_CODEC:-}"
   if unroutable_a "$ua_c"; then
     unroutable_a_refuse "$ua_i"
-    exit 11
+    exit 11   # TIER 3 T3.8 cached deterministic attempt (the muxer's own rejection)
   fi
   ua_i=$((ua_i+1))
 done
@@ -126,6 +128,7 @@ RB_RATE="$PF_FIELD_RATE"; RB_TS="$PF_TIMESCALE"
 if [ "$RB_RATE" = unknown ]; then sg=$(pf_suggest_field_rate "$PF_CODED_RATE"); RB_RATE=${sg%% *}; RB_TS=${sg##* }; fi
 
 rung_desc () { case "$1" in
+  3-poc) echo "Rung 3-POC (poc-remux.sh — fields paired per ISO/IEC 14496-15, every frame timed from its own pic_order_cnt)";;
   0) echo "Rung 0 (pure copy)";; 1) echo "Rung 1 (copy video + PCM audio)";;
   2) echo "Rung 2 (copy + genpts)";; 3) echo "Rung 3 (field-rate rebuild @ $RB_RATE)";;
   P) echo "Rung 3-PAIR (pair-mate PTS fill — keeps every real PTS)";;
@@ -184,6 +187,18 @@ BEST_RESULT=FAIL; BEST_RUNG=none        # grade + rung of the artifact at OUT
 BEST_SAVE="$(rtm_sidecar "$OUT" autobest)"   # parks the best artifact during a riskier attempt
 GATE_F_ONLY=0
 rank () { case "$1" in OK) echo 2;; REVIEW) echo 1;; *) echo 0;; esac; }
+# WO-1.15.21 C1 / TIERS.md T3.12: REFUSED is not FAIL. A refusal means a gate
+# did its job — nothing written, source unchanged, a named reason — while FAIL
+# means an artifact exists and did not verify. They rank the same (neither is
+# an artifact) and they are REPORTED differently, because the operator's next
+# move differs: a FAIL sends you looking for damage, a REFUSED sends you to
+# the named route. ANY_REFUSED records that at least one rung refused, so the
+# terminal verdict can tell "nothing built because gates refused" from
+# "nothing built because everything failed".
+ANY_REFUSED=0; REFUSED_RUNGS=""
+note_refusal () {   # $1 = rung, $2 = child rc
+  ANY_REFUSED=1; REFUSED_RUNGS="${REFUSED_RUNGS:+$REFUSED_RUNGS,}$1(exit $2)"
+}
 save_best () {  # park a REVIEW-or-better artifact before the next attempt overwrites OUT
   [ -f "$OUT" ] && [ "$(rank "$BEST_RESULT")" -ge 1 ] && mv -f "$OUT" "$BEST_SAVE"
   return 0
@@ -204,19 +219,52 @@ attempt () {  # $1 = rung; sets RESULT to OK|REVIEW|FAIL (+ GATE_F_ONLY on the g
   USED_RUNG="$1"; GATE_F_ONLY=0
   echo "-- attempting $(rung_desc "$1") --"
   save_best
-  if ! run_rung "$1"; then echo "   (rung $1 command failed to produce output)"; RESULT=FAIL; settle_best "$1"; return 0; fi
+  local rrc=0
+  run_rung "$1" || rrc=$?
+  if [ "$rrc" -ne 0 ]; then
+    case "$rrc" in
+      3|11) echo "   (rung $1 REFUSED, exit $rrc — nothing built; its reason is above)"
+            note_refusal "$1" "$rrc"; RESULT=REFUSED ;;
+      *)    echo "   (rung $1 command failed to produce output)"; RESULT=FAIL ;;
+    esac
+    settle_best "$1"; return 0
+  fi
   local o
   o=$(bash "$SELF_DIR/verify.sh" "$IN" "$OUT" $FULL 2>&1) || true
   echo "$o" | sed 's/^/   verify: /'
   case "$o" in *">> OK"*) RESULT=OK;; *">> REVIEW"*) RESULT=REVIEW;; *) RESULT=FAIL;; esac
-  # gate-(f)-ONLY detection: the whole REVIEW note must BE the (f) gap-collapse
-  # sentence — any other gate's text breaks the anchors, because "only gate (f)"
-  # is the claim. A verify.sh wording change degrades this to the generic
-  # escalation (harmless), never to a wrong route.
+  # gate-(f)-ONLY detection. It used to anchor on the whole REVIEW NOTE being
+  # the (f) gap-collapse sentence — which meant any other gate adding a note,
+  # however benign, silently changed the route. Since 1.16.0 verify.sh emits a
+  # LEDGER with one row per gate, so the claim "only gate (f)" can be READ
+  # rather than inferred from prose: every gate is pass/n-a/superseded except
+  # (f), which is flagged. The note match stays as the confirming half.
+  local f_row others
+  f_row=$(printf '%s\n' "$o" | sed -n 's/^ *VERIFY_LEDGER gate=f verdict=\([a-z\/]*\) .*/\1/p' | head -1)
+  others=$(printf '%s\n' "$o" | sed -n 's/^ *VERIFY_LEDGER gate=\([a-z]*\) verdict=\([a-z\/]*\) .*/\1 \2/p' \
+           | awk '$1!="f" && $2!="pass" && $2!="n/a" && $2!="superseded"{n++} END{print n+0}')
+  if [ "${f_row:-}" = flagged ] && [ "${others:-1}" -eq 0 ]; then GATE_F_ONLY=1; fi
   case "$(printf '%s\n' "$o" | sed -n 's/^>> REVIEW: //p' | head -1)" in
     "A/V duration mismatch up to "*"gap-collapse desync signature"*"resync.sh to fix.") GATE_F_ONLY=1;;
   esac
   settle_best "$1"
+}
+POC_BOOT=0; POC_TRIED=0
+attempt_pocmux () {   # Rung 3-POC — same dependency shape as 3-DERIVE
+  USED_RUNG=3-poc; GATE_F_ONLY=0; POC_TRIED=1
+  echo "-- attempting $(rung_desc 3-poc) --"
+  save_best
+  local rc=0 o
+  o=$(bash "$SELF_DIR/poc-remux.sh" "$IN" "$OUT" 2>&1) || rc=$?
+  printf '%s\n' "$o" | sed 's/^/   /'
+  case "$rc" in
+    0)  RESULT=OK ;;
+    10) if [ -f "$OUT" ]; then RESULT=REVIEW
+        else POC_BOOT=1; RESULT=FAIL; fi ;;   # venv absent: nothing written
+    3|11) note_refusal 3-poc "$rc"; RESULT=REFUSED ;;
+    *)  RESULT=FAIL ;;
+  esac
+  settle_best 3-poc
 }
 DERIVE_BOOT=0; DERIVE_TRIED=0
 attempt_derive () {  # Rung 3-DERIVE — special-cased for its exit-10 dependency REVIEW
@@ -236,8 +284,13 @@ attempt_derive () {  # Rung 3-DERIVE — special-cased for its exit-10 dependenc
     # above): a missing OPTIONAL dependency is a human item — the ladder's
     # verdict surfaces it as REVIEW below, never a crash and never a bare FAIL.
     DERIVE_BOOT=1; RESULT=FAIL
+  elif [ "$rc" -eq 3 ] || [ "$rc" -eq 11 ]; then
+    # WO-1.15.21 C1: THE site. A signature refusal wrote nothing and found
+    # nothing wrong with any artifact; reporting it as FAIL sent the operator
+    # hunting for damage that does not exist.
+    note_refusal 3-derive "$rc"; RESULT=REFUSED
   else
-    RESULT=FAIL      # signature refusal (exit 3) or a failed gate: settled below
+    RESULT=FAIL      # a failed gate on a build that DID happen
   fi
   settle_best 3-derive
 }
@@ -251,7 +304,8 @@ attempt_resync () {  # gate-(f)-only escalation: the remedy verify itself named
   bash "$SELF_DIR/resync.sh" "$IN" "$OUT" $ALLAUD | sed 's/^/   /' || rc=$?
   case "$rc" in
     0|10) RESULT=REVIEW ;;  # honest cap: video lossless, audio RE-TIMED (not a bit-exact copy)
-    *)    RESULT=FAIL ;;    # 11 REFUSED / 1 FAIL: no resync artifact to bless
+    11)   note_refusal S 11; RESULT=REFUSED ;;   # resync's own layout guard: nothing built
+    *)    RESULT=FAIL ;;    # 1 FAIL: no resync artifact to bless
   esac
   settle_best S
 }
@@ -263,6 +317,12 @@ attempt_resync () {  # gate-(f)-only escalation: the remedy verify itself named
 # and auto NEVER falls back from pairfill to the flattening rebuild when a
 # pyramid is present.
 BASE_RUNG="$PR_REC_RUNG"; [ "$PF_PAFF" = yes ] && { BASE_RUNG=0; [ "$PR_AUDIO_ACTION" = pcm ] && BASE_RUNG=1; }
+# The Rung 3-POC routing measurement, from the SHARED writer (lib-paff.sh) —
+# diagnose.sh recommends this rung off the same predicate, and a driver that
+# re-derived it would drift from the tool it is driving (IV.2).
+if [ "$PF_PAFF" = yes ] && [ "${PF_CODEC:-${PR_VCODEC:-na}}" = h264 ]; then
+  eval "$(pf_poc_probe "$IN")" || true
+fi
 
 if [ "$DRY" -eq 1 ]; then
   echo ">> DRY-RUN — no files written."
@@ -321,6 +381,10 @@ fi
 # themselves. Acquired after --dry-run (which writes nothing) has exited.
 trap 'rtm_unlock' EXIT
 rtm_lock "$OUT" || exit 2
+# T1.10 final-OUT no-clobber: the ladder claims OUT ONCE, here, before any
+# rung runs. Every child then re-enters under this lock and is never asked
+# again, so escalation still replaces the ladder's own artifact freely.
+rtm_claim_out "$OUT" || exit 2   # TIER 1 T1.10 final-OUT no-clobber
 
 rm -f "$BEST_SAVE"   # a stale park from a killed earlier run must never be "restored"
 
@@ -348,20 +412,30 @@ if [ "$PF_PAFF" = yes ]; then
       fi
     fi
   elif [ "${PF_REORDER:-no}" = yes ]; then
-    # F9 (2026-08-28): a COPY rung cannot survive unstamped packets. The MOV
-    # muxer has no way to write a packet carrying data but no PTS, so it
-    # invents one — and the mux-confession hard stop then refuses the output
-    # by design. Attempting it anyway is a FULL-LENGTH write for a refusal
-    # that is knowable from the probe (2024-VMA: 27.2 GB and ~2 min, twice,
-    # to rediscover nopts_frac=0.004). Decide from the measurement instead.
-    if pf_pts_complete; then
-      attempt "$BASE_RUNG"                     # full-TS pyramid: copy keeps the truth; scrub-gated
-    else
-      echo "-- skipping Rung $BASE_RUNG (copy): nopts_frac=${PF_NOPTS_FRAC:-?} — packets with data"
-      echo "   but no PTS force the muxer to invent timing, which the confession gate then"
-      echo "   refuses. The write would be full-length and the refusal is predetermined."
-      RESULT=FAIL; USED_RUNG="$BASE_RUNG"; GATE_F_ONLY=0
+    # TIERS.md T3.1 — CUT in 1.16.0, and this is the exemplar case for the
+    # whole re-aim. F9 (2026-08-28) skipped this rung whenever the source had
+    # unstamped packets, reasoning: the muxer cannot write a packet with no
+    # PTS, so it invents one, so the confession gate refuses the output, so
+    # the write is a foregone waste. Every clause was plausible and the
+    # conclusion was false. MEASURED 2026-08-29 on the capture that motivated
+    # the skip: all nine plain `-c copy` variants return rc=0 and write every
+    # packet (scripts/attempt-battery.sh reproduces it on demand). What ffmpeg
+    # silently produces instead is a wrong TIMELINE — which is gates
+    # (d)/(j)/(k)'s job, not a reason to refuse the attempt.
+    #
+    # The prediction is not deleted, it is demoted to what it always was: a
+    # warning with its measurement attached, ahead of an attempt that settles
+    # the question. The costs are asymmetric — a doomed build wastes a pass;
+    # a refusal on a false prediction cost three sessions and never produced
+    # the evidence that would have corrected it, because it never ran.
+    if ! pf_pts_complete; then
+      echo "-- Rung $BASE_RUNG (copy) — WARNING, not a refusal: nopts_frac=${PF_NOPTS_FRAC:-?} (head window)."
+      echo "   Packets carrying data but no PTS make the muxer invent timing for them, so"
+      echo "   this build may fail its timeline gates ((d) N/A stamps, (j) duplicate display"
+      echo "   slots, (k) presentation order vs POC). Attempting anyway: the artifact and its"
+      echo "   gate counts are evidence, and a prediction about them is not."
     fi
+    attempt "$BASE_RUNG"                       # full-TS pyramid: copy keeps the truth; scrub-gated
     if [ "$RESULT" = REVIEW ] && [ "$GATE_F_ONLY" -eq 1 ]; then
       # the measured BBC cascade: gate (f) alone is a SYNC defect — pair-fill is a
       # timestamp-profile repair for a problem this file just proved it does not
@@ -370,7 +444,20 @@ if [ "$PF_PAFF" = yes ]; then
       echo "-- verify failed ONLY gate (f) (gap-collapse) -> resync.sh, not pair-fill --"
       attempt_resync
     elif [ "$RESULT" != OK ]; then
-      if derive_sig_esc; then
+      if pf_poc_routable; then
+        # 1.16.0: the class no rung before this one fitted — fields coded
+        # adjacently and sharing frame_num (so the STRUCTURE is paired) while
+        # their timestamps are not one field duration apart (so every delta
+        # heuristic reads "no pairing here" and refuses). Rung 3-POC reads the
+        # pairing and the display positions from the slice headers directly.
+        echo "-- verdict $RESULT; the slice headers show ${PP_PAIRS:-0} complementary field pair(s)"
+        echo "   with pic_order_cnt readable (poc_type=${PCAP_POC_TYPE:--1}) -> Rung 3-POC --"
+        attempt_pocmux
+        if [ "$RESULT" != OK ] && [ "$POC_BOOT" -eq 0 ] && derive_sig_esc; then
+          echo "-- verdict $RESULT -> Rung 3-DERIVE --"
+          attempt_derive
+        fi
+      elif derive_sig_esc; then
         # WO 1.14 Phase 4: the pairfill SIGNATURE is absent here (half_ts=no —
         # pairfill's own precondition names derive for exactly this shape) and
         # the derive signature is measured, so the ladder goes straight to it.
@@ -456,6 +543,18 @@ RESULT="$BEST_RESULT"
 if [ "$DERIVE_BOOT" -eq 1 ] && [ "$RESULT" = FAIL ] && [ ! -f "$OUT" ]; then
   RESULT=REVIEW
 fi
+if [ "$POC_BOOT" -eq 1 ] && [ "$RESULT" = FAIL ] && [ ! -f "$OUT" ]; then
+  # same shape as the derive rung: a missing OPTIONAL dependency is a human
+  # item with a printed bootstrap, never a bare FAIL and never a crash.
+  RESULT=REVIEW
+fi
+# WO-1.15.21 C1: nothing verified, nothing at OUT, and at least one rung
+# REFUSED -> the ladder's outcome is REFUSED, with no rung claimed. A rung that
+# BUILT something and failed its gates keeps FAIL: the discriminator is whether
+# an artifact exists, never how loud the child was.
+if [ "$RESULT" = FAIL ] && [ ! -f "$OUT" ] && [ "$ANY_REFUSED" -eq 1 ]; then
+  RESULT=REFUSED; BEST_RUNG=none; BEST_RESULT=REFUSED
+fi
 
 # --- post-build playability (WO 4.1): prove, don't guess -------------------
 # Runs when the source is the 4:2:2 contribution class (the demoted gate's
@@ -519,6 +618,13 @@ echo
 echo "AUTO_SUMMARY result=$RESULT best_rung=$BEST_RUNG best_result=$BEST_RESULT rung=${USED_RUNG:-none}"
 case "$RESULT" in
   OK)     echo ">> DONE: $OUT — verified lossless + timeline-clean."; exit 0;;
+  REFUSED)
+    echo ">> REFUSED: every route this ladder had refused this source at its own"
+    echo "   pre-flight — nothing was built and nothing is wrong with any artifact."
+    echo "   Refused rung(s): $REFUSED_RUNGS. Each refusal above names its measurement"
+    echo "   and its route; that is where to go next, not to a damage hunt."
+    echo "   Source untouched. Diagnose: scripts/diagnose.sh \"$IN\""
+    exit 11;;   # TIER 3 T3.12 the ladder relays its children's refusals as REFUSED
   REVIEW)
     if [ "$DERIVE_BOOT" -eq 1 ] && [ ! -f "$OUT" ]; then
       echo ">> REVIEW: Rung 3-DERIVE is the measured route for this stream (PTS-complete +"

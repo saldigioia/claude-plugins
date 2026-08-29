@@ -276,6 +276,37 @@ mut_phash_swallow () {  # derive-dts swallows its hash-pass rc again (1.15.19)
     "$1/scripts/derive-dts.sh"
 }
 pro_phash_swallow () { printf '\n# never: phash() { ffmpeg … -f streamhash -hash md5 - 2>/dev/null || true; }\n' >> "$1/scripts/derive-dts.sh"; }
+mut_untiered_refusal () {  # a refusal site loses its TIER classification (1.16.0)
+  # The exact shape the 2026-08-29 re-aim exists to prevent: a "no" in the tree
+  # that nobody has answered the classification test for. TIERS.md is the
+  # ledger; this strips one site's pointer into it.
+  perl -pi -e 's/   # TIER 3 T3\.11 injected-silence default \(announced --force overrides\)//' \
+    "$1/scripts/resync.sh"
+}
+pro_untiered_refusal () {  # prose that merely NAMES an untiered refusal stays CLEAN
+  printf '\n# never: a bare `exit 3` with no # TIER row in TIERS.md — see 94 §11\n' >> "$1/scripts/clock.sh"
+}
+mut_private_sibling_test () {  # a builder re-grows its own copy of "beside, never onto" (1.16.0)
+  # The exact IV.1 shape this class is about: twelve byte-identical copies of
+  # one string comparison, none of which looked at the sidecar names, and a
+  # source named like the ladder park file was DELETED by it. Appended as CODE,
+  # not a comment — the prose lane below proves the guard tells them apart.
+  cat >> "$1/scripts/metadata.sh" <<'MUT'
+[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
+  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
+MUT
+}
+pro_private_sibling_test () {  # prose quoting the banned shape stays CLEAN
+  printf '\n# never: [ "$(cd "$(dirname "$IN")" && pwd)" != "$(cd "$(dirname "$OUT")" && pwd)" ] — call rtm_sibling_guard\n' \
+    >> "$1/scripts/metadata.sh"
+}
+mut_output_forecast_gate () {  # a refusal on a forecast about the OUTPUT grows back (1.16.0)
+  perl -0pi -e 's/(\necho "== auto: )/\nif [ "\${PF_PAFF:-no}" = yes ]; then echo "the write would be full-length and the refusal is predetermined" >\&2; exit 3; fi\n$1/' \
+    "$1/scripts/auto.sh"
+}
+pro_output_forecast_gate () {  # prose describing the retired reasoning stays CLEAN
+  printf '\n# never: refuse because "the write would be full-length" — that is a forecast,\n# not a cached deterministic attempt (TIERS.md Tier 3)\n' >> "$1/scripts/auto.sh"
+}
 mut_unask_trim () {   # the trim-to-idr CALL stops asking (clean.sh's prose still says --preflight-only)
   perl -pi -e 's/--preflight-only/--dry-run-only/ if /trim-to-idr\.sh"/' "$1/scripts/clean.sh"
 }
@@ -372,6 +403,12 @@ G34|defect|95-empty-ne-absent-optin-gates.sh|-counted audio census left in verif
 P34|prose|95-empty-ne-absent-optin-gates.sh|-counted audio census left in verify.sh|pro_optin_census
 G35|defect|95-empty-ne-absent-optin-gates.sh|no longer swallows its rc|mut_phash_swallow
 P35|prose|95-empty-ne-absent-optin-gates.sh|no longer swallows its rc|pro_phash_swallow
+G40|defect|94-rot-sweep.sh|refusal sites carry a # TIER classification|mut_untiered_refusal|refusal sites with no # TIER classification
+P40|prose|94-rot-sweep.sh|refusal sites carry a # TIER classification|pro_untiered_refusal
+G41|defect|94-rot-sweep.sh|no builder carries a private copy of the source-vs-output identity test|mut_private_sibling_test|private copies of the sibling test
+P41|prose|94-rot-sweep.sh|no builder carries a private copy of the source-vs-output identity test|pro_private_sibling_test
+G42|defect|109-attempt-not-predicted.sh|no script refuses on a forecast about its own output|mut_output_forecast_gate|output-quality forecasts still gate an attempt
+P42|prose|109-attempt-not-predicted.sh|no script refuses on a forecast about its own output|pro_output_forecast_gate
 '
 
 # --------------------------------------------------------------------- runner

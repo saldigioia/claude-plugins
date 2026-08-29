@@ -23,7 +23,15 @@ frames are reordered (k <-> k^1) so the opposite parity is decisively wrong.
 That is what makes the pairing PROVABLE, which is the only evidence the
 pre-pass will reconstruct a hole from.
 
-Usage: sparse-mint.py IN.ts OUT.ts PTS_BASE STEP_TICKS HOLES_CSV
+  * stale     (--dups) a packet re-encoded with the PTS an EARLIER packet
+              already holds. This is the duplicate-display-slot class as it
+              actually arises: a packet carries a timestamp across a transport
+              discontinuity, so two pictures claim one rung. Length-preserving
+              like the rest; the payload is untouched.
+
+Usage: sparse-mint.py IN.ts OUT.ts PTS_BASE STEP_TICKS HOLES_CSV [--dups A:B,...]
+       --dups A:B  make coded packet B carry the PTS coded packet A holds.
+                   Positions are coded-order indices, as HOLES_CSV are.
 """
 import sys
 
@@ -65,10 +73,20 @@ def video_pes_sites(data):
 
 
 def main():
-    if len(sys.argv) != 6:
+    argv = sys.argv[1:]
+    dups = {}
+    if "--dups" in argv:
+        i = argv.index("--dups")
+        for pair in argv[i + 1].split(","):
+            if not pair.strip():
+                continue
+            a, b = pair.split(":")
+            dups[int(b)] = int(a)          # victim -> the packet whose value it steals
+        del argv[i:i + 2]
+    if len(argv) != 5:
         sys.exit(__doc__.strip().splitlines()[-1])
-    src, dst, base, step = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
-    holes = set(int(x) for x in sys.argv[5].split(",") if x.strip())
+    src, dst, base, step = argv[0], argv[1], int(argv[2]), int(argv[3])
+    holes = set(int(x) for x in argv[4].split(",") if x.strip())
     data = bytearray(open(src, "rb").read())
     if len(data) % 188 or not data or data[0] != 0x47:
         sys.exit("input is not a bare 188-byte transport stream")
@@ -93,14 +111,25 @@ def main():
             for q in range(10 if flags == 3 else 5):
                 data[p + 9 + q] = 0xFF                       # legal PES stuffing
             continue
-        enc(base + (2 * f + side) * step, 0x3 if flags == 3 else 0x2, data, p + 9)
+        if i in dups:
+            # the stale-timestamp class: this packet carries the value the
+            # packet at dups[i] holds, so two pictures claim one display slot.
+            j = dups[i]
+            jk, jside = j // 2, j % 2
+            jf = jk ^ 1
+            if jf >= pairs:
+                jf = jk
+            enc(base + (2 * jf + jside) * step, 0x3 if flags == 3 else 0x2, data, p + 9)
+        else:
+            enc(base + (2 * f + side) * step, 0x3 if flags == 3 else 0x2, data, p + 9)
         if flags == 3:
             # a coded-order DTS ramp two fields behind presentation: monotonic
             # by construction, and <= PTS for both members of every pair.
             enc(base + (i - 2) * step, 0x1, data, p + 14)
     open(dst, "wb").write(data)
-    print("shaped %d video PES on pid %d (%d pairs, step %d), holes: %s"
-          % (n, vpid, pairs, step, sorted(holes) or "none"))
+    print("shaped %d video PES on pid %d (%d pairs, step %d), holes: %s, stale: %s"
+          % (n, vpid, pairs, step, sorted(holes) or "none",
+             sorted("%d<-%d" % (v, k) for k, v in dups.items()) or "none"))
 
 
 if __name__ == "__main__":

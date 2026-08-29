@@ -66,16 +66,22 @@ if [ "$(uname -s)" = Darwin ] && command -v qlmanage >/dev/null 2>&1; then BENCH
 echo "== 1. every F5 fixture builds + gets the empirical verdict (bench: $BENCH) =="
 
 run_f5 () { # run_f5 FIXTURE EXPECTED_VC/PIX
-  local name="$1" prof="$2" o rc
-  o=$(bash "$SC/mov.sh" "$FIX/$name" "$WORK/${name%.*}.out.mov" 2>&1); rc=$?
+  local name="$1" prof="$2" o rc out
+  # KEEP THE FIXTURE'S OWN EXTENSION in the output name. Stripping it collided
+  # m2v422.mov and m2v422.ts onto one OUT, so the second run silently replaced
+  # the first run's deliverable and this suite asserted against whichever build
+  # happened to survive. Invisible until 1.16.0's final-OUT no-clobber (T1.10)
+  # refused the overwrite and turned it into a red line.
+  out="$WORK/$(printf '%s' "$name" | tr '.' '_').out.mov"
+  o=$(bash "$SC/mov.sh" "$FIX/$name" "$out" 2>&1); rc=$?
   if [ "$BENCH" = mac ]; then
-    { [ "$rc" -eq 0 ] && [ -f "$WORK/${name%.*}.out.mov" ]; } \
+    { [ "$rc" -eq 0 ] && [ -f "$out" ]; } \
       && ok "$name: builds DONE (rc=0) on this bench" \
       || { no "$name: rc=$rc, want 0 (bench decodes 4:2:2 — falsified refusal must not resurface)"
            printf '%s\n' "$o" | grep -E '^>>|MOV_PLAYABILITY|MOV_REFUSED' | sed 's/^/   /'; }
     has "$o" "verdict=ok" "$name: MOV_PLAYABILITY verdict=ok on this bench"
   else
-    { [ "$rc" -eq 10 ] && [ -f "$WORK/${name%.*}.out.mov" ]; } \
+    { [ "$rc" -eq 10 ] && [ -f "$out" ]; } \
       && ok "$name: builds + honest REVIEW (rc=10) off-macOS" \
       || no "$name: rc=$rc, want 10 (artifact + announced unverified-platform REVIEW)"
     has "$o" "verdict=skip" "$name: MOV_PLAYABILITY verdict=skip off-macOS"

@@ -74,6 +74,7 @@ fi
 # disk pre-flight) and this driver's own verify/playability reads of OUT.
 trap 'rtm_unlock' EXIT
 rtm_lock "$OUT" || exit 2
+rtm_claim_out "$OUT" || exit 2   # TIER 1 T1.10 final-OUT no-clobber
 
 VC=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 PIX=$(ffp1 -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$IN" 2>/dev/null)
@@ -114,7 +115,7 @@ if [ "$rc" -ne 0 ]; then
   esac
   echo "MP4_SWAP out=$OUT verdict=fail stage=build fidelity=na"   # machine-readable (additive, D2 1.13)
   case "$rc" in
-    11) echo ">> REFUSED: this source cannot be carried in an ISO container either (above)."; exit 11;;
+    11) echo ">> REFUSED: this source cannot be carried in an ISO container either (above)."; exit 11;;   # TIER 3 T3.8 propagated cached deterministic attempt
     *)  echo ">> FAIL: the container swap did not build (above). Source untouched."; exit 1;;
   esac
 fi

@@ -69,21 +69,29 @@ has "$c0" "$READY" "non-PAFF source still gets the ready-to-run zero-base comman
 case "$(routes_of "$c0")" in *zero-base*) ok "routes= names zero-base";; *) no "routes= lost zero-base on a legit file [$(routes_of "$c0")]";; esac
 
 echo
-echo "== 2. pair-timestamped PAFF: no ready-to-run command, refusal named =="
+echo "== 2. pair-timestamped PAFF: the route is offered WITH the warning attached =="
+# WHAT CHANGED IN 1.16.0 (TIERS.md T3.3). zero-base used to REFUSE this shape at
+# pre-flight, so the clinic's job was to print no command and relay the refusal.
+# The refusal was a prediction about the QUALITY of the output, not something
+# zero-base cannot do, so it is now a warning and the build is attempted. The
+# clinic's job is correspondingly different and NOT weaker: relay the warning,
+# in zero-base's own words, attached to the command. A route printed without the
+# caveat its own tool attached is the 1.15.11 defect from the other side.
 c1=$(PF_PKT_FILE="$WORK/pair.csv" bash "$SC/clean.sh" "$S" 2>&1)
-hasnt "$c1" "$READY" "pair-timestamped PAFF gets NO ready-to-run zero-base command"
-case "$(routes_of "$c1")" in *zero-base*) no "routes= still advertises zero-base [$(routes_of "$c1")]";; *) ok "routes= does not advertise zero-base";; esac
-# pinned on zero-base's OWN refusal text, relayed: the bare substring `paff` is
+has "$c1" "WITH A WARNING zero-base attached to it" "the zero-base route carries zero-base's own warning"
+case "$(routes_of "$c1")" in *zero-base*) ok "routes= advertises zero-base — it attempts this shape now";; *) no "routes= dropped zero-base [$(routes_of "$c1")]";; esac
+# pinned on zero-base's OWN words, relayed: the bare substring `paff` is
 # printed by clean.sh's step-1 identity line on every run and pinned nothing
-has "$c1" "pair-timestamped PAFF source" "the finding relays the pair-timestamped refusal in zero-base's words"
-has "$c1" "pairfill-paff.sh" "…and names the route that actually accepts this file"
+has "$c1" "pair-timestamped PAFF" "the finding relays the measured profile in zero-base's words"
+has "$c1" "diagnose.sh" "…and names where the repair rung is chosen by measured profile"
+has "$c1" "--preflight-only" "…and how to get the verdict without paying for the build"
 
 echo
-echo "== 3. full-timestamp PAFF (the F1 policy arm) is gated too =="
+echo "== 3. full-timestamp PAFF (the old F1 policy arm) is warned about too =="
 c2=$(PF_PKT_FILE="$WORK/full2x.csv" bash "$SC/clean.sh" "$S" 2>&1)
-hasnt "$c2" "$READY" "full-TS PAFF gets NO ready-to-run zero-base command"
-has "$c2" "COMPLETE timestamp column" "the finding relays the F1 policy refusal in zero-base's words"
-case "$(routes_of "$c2")" in *zero-base*) no "routes= still advertises zero-base [$(routes_of "$c2")]";; *) ok "routes= does not advertise zero-base";; esac
+has "$c2" "WITH A WARNING zero-base attached to it" "the full-TS PAFF route carries the warning too"
+has "$c2" "field-coded PAFF" "the finding relays the measured profile in zero-base's words"
+case "$(routes_of "$c2")" in *zero-base*) ok "routes= advertises zero-base";; *) no "routes= dropped zero-base [$(routes_of "$c2")]";; esac
 
 echo
 echo "== 4. THE INVARIANT: EVERY printed Tier-1 command must not refuse at pre-flight =="

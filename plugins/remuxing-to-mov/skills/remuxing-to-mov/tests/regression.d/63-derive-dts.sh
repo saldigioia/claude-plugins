@@ -106,7 +106,17 @@ awk 'BEGIN{for(i=0;i<50;i++)printf "%d,%d\n", (i==20?573:i*33), i*33}' > "$WORK/
 printf '573,660\n' >> "$WORK/dup.csv"   # a second 573: one duplicated display instant
 o=$(CLAUDE_PLUGIN_DATA="$WORK/shimdata" PF_PKT_TICKS_FILE="$WORK/dup.csv" \
     bash "$SC/derive-dts.sh" "$ANYIN" "$WORK/dp.mov" 2>&1); rc=$?
-[ "$rc" -eq 3 ] && ok "duplicate PTS -> SIGNATURE REFUSED, exit 3" || no "dup-PTS rc=$rc, want 3"
+# CONVERTED IN 1.16.0 (TIERS.md T3.5). The WINDOWED duplicate count no longer
+# refuses: where the bitstream states each picture's display position the stale
+# holder of a shared rung is identifiable and movable from evidence (measured
+# 10 of 10 on the capture that motivated this round), and refusing on the
+# window denied the file the pass that would have adjudicated it. The whole-file
+# pass still refuses what the evidence cannot settle, naming it.
+[ "$rc" -ne 3 ] && ok "a windowed duplicate no longer refuses (rc=$rc) — the whole-file pass decides" \
+  || no "dup-PTS still refuses on the window (rc=3)"
+has "$o" "(in window)" "the duplicate count is SCOPED at the point of print (B1)"
+has "$o" "NOT a refusal" "…and the line says so in as many words"
+has "$o" "diagnose.sh" "…and names where the whole-file census lives"
 has "$o" "duplicate PTS" "the refusal names the duplication"
 
 # N/A-PTS injection -> exit 3. WHICH route the refusal names is CONDITIONAL on

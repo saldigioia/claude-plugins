@@ -60,10 +60,9 @@ esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
 [ -n "$VLT" ] || { echo "--video-drop-lt N is required (lead-check.sh measures it)" >&2; exit 2; }
 case "$VLT" in *[!0-9]*) echo "--video-drop-lt must be a packet index" >&2; exit 2;; esac
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-mux.sh"    # rtm_part + mux_census (D5)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 . "$SELF_DIR/lib-rewrap.sh" # layout preservation + the prediction contract
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT   # only our own scratch; never the source
 
@@ -128,7 +127,7 @@ if [ "$CONSENT" -ne 1 ]; then
   echo ">> REFUSED: this is a Tier-2 content-discarding cut. Removing decodable media" >&2
   echo "   is the operator's trade, never this tool's — re-run with --discard-content" >&2
   echo "   to make that call explicitly. Nothing was written." >&2
-  exit 2
+  exit 2   # TIER 1 T1.7 the operator's own --discard-content consent gate
 fi
 
 # --- drop expressions (the declared selection — also the verification reference) --

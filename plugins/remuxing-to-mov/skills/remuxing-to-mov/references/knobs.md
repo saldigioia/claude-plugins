@@ -22,6 +22,12 @@ documented in SKILL.md's machine-lines table, not here.
 | `RTM_SYNC_TOL` | `0.25` (s) | `verify.sh` gate (f) | Base A/V duration-parity tolerance, widened only by the source's *measured* gap seconds. |
 | `RTM_SOURCE_GAP_BUDGET` | unset | `verify.sh` gate (f) | Caller-supplied gap budget (seconds) when SOURCE is an intermediate whose own scan can't stand in for the original (WO 2.4). |
 | `RTM_SIL_MIN` | `5` (s) | `verify.sh --silence` | Minimum window length counted as silence. |
+| `RTM_OVERWRITE` | `0` | every writer (`lib-mux.sh` `rtm_claim_out`) | `1` authorizes replacing an OUT that already exists — announced, never silent. The lock stops two builds racing; it does not stop today's build from quietly replacing yesterday's verified deliverable (T1.10). |
+| `RTM_STRUCT_MAX_BYTES` | `4294967296` | `verify.sh` gates (h)/(k) | Output size above which the whole-file header parse those two gates share is DECLINED on budget. Declining is announced and both gates report UNPROVEN — never a silent pass. `--full` runs them regardless; `0` disables the budget. |
+| `RTM_RATE_DEV_MAX` | `1.10` | `verify.sh` gate (h) | Ratio band between the declared `avg_frame_rate` and samples ÷ duration. The defect it catches is a 2× error (one sample per FIELD); container rounding and capture jitter live within a few percent, so 1.10 is the empty middle. |
+| `PL_TOL` | `1` (tick) | `pf_poc_lattice` (`verify.sh` gate (k), `poc-gate.sh`) | Rounding tolerance when checking a picture against its POC lattice slot. A 30000/1001 stream in a 15360 timescale has a 512.512-tick frame, so the muxer rounds every value and an exact-integer test reports every picture off-slot. |
+| `RTM_BATTERY_SECONDS` | `60` (s) | `attempt-battery.sh` | Head-slice length for the nine remux variants, so "does the mux fail?" costs seconds on a 25 GB source. `--whole-file` runs the real thing. |
+| `RTM_BATTERY_KEEP` | `0` | `attempt-battery.sh` | `1` keeps the variants' artifacts instead of discarding them. |
 | `RTM_SIL_DB` | `-50dB` | `verify.sh --silence` | Silence threshold. |
 | `RTM_SIL_TOL` | `2.0` (s) | `verify.sh --silence` | Allowed output-silence excess beyond source total + measured gap-fill budget. |
 | `RTM_CHAPTER_TS_WARN_SECS` | `2900` | `mov.sh`, `resync.sh` | Chaptered movie-timescale overflow pre-announce onset (true onset 2^31/movie_timescale; lower it for finer movie timescales). |

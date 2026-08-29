@@ -45,6 +45,100 @@ eval "$(PF_PPF_IN="${PF_PPF:-}" pf_reorder_scan "$IN")"
 # annotation says so wherever they are printed. The numbers themselves stay
 # visible; only the attribution is corrected. PF_BACKPTS is container-real
 # (it comes from the pts column) and carries no annotation.
+# (0a) WHOLE-FILE censuses — the numbers the windowed scans are not entitled to
+# claim (WO-1.15.21 B1; TIERS.md T3.10).
+#
+# WHY. The 2024 VMA field run read `duplicate-PTS values=0` off a 5,000-packet
+# head window while the whole-file truth was 10, and the rung's refusal was
+# phrased as an absolute. Worse, the refusal message named THIS script as the
+# place to go and this script had no such census to give. A window may say
+# "none here"; only a whole-file pass may say "none".
+#
+# They run FIRST, before the ladder: several of its routes exit early with a
+# verdict, and a census that only prints on the paths that reach the bottom is
+# a census the operator cannot rely on. It is one demux, and diagnose already reads the file — a counter, not a new
+# pass. The finding that matters is the LAST one: how many duplicates straddle
+# an unstamped burst. Two of ten did on the VMA capture, which is the signature
+# that says "the holes and the repeated timestamps are ONE discontinuity
+# event", in a line, instead of a session.
+echo "-- (0a) whole-file PTS census (unstamped packets + duplicate display slots) --"
+eval "$(ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$IN" 2>/dev/null | \
+  awk -F, 'BEGIN{ n=0 }
+    NF{
+      n++
+      if($1=="N/A"||$1==""){ na++; nap[n]=1; if(nahead=="") nahead=n-1; else nahead=nahead","(n-1); next }
+      c[$1]++
+      if(c[$1]==2){ dv++; firstat[$1]=seen[$1]; dupval[dv]=$1 }
+      if(c[$1]>1){ dp++; dupidx[dp]=n-1; dupv[dp]=$1 }
+      seen[$1]=n-1
+    }
+    END{
+      # a duplicate STRADDLES a burst when an unstamped packet sits between the
+      # two coded positions that share the value
+      straddle=0
+      for(i=1;i<=dp;i++){
+        a=firstat[dupv[i]]; b=dupidx[i]
+        for(j=a+2;j<=b+1;j++) if(nap[j]){ straddle++; break }
+      }
+      vl=""; for(i=1;i<=dv && i<=8;i++) vl=vl (vl==""?"":",") dupval[i]
+      if(dv>8) vl=vl",..."
+      il=""; for(i=1;i<=dp && i<=8;i++) il=il (il==""?"":",") dupidx[i]
+      if(dp>8) il=il",..."
+      hl=nahead; if(hl=="") hl="-"
+      printf "DGC_N=%d DGC_NA=%d DGC_DUPVALS=%d DGC_DUPPKTS=%d DGC_STRADDLE=%d DGC_VALS=%c%s%c DGC_POS=%c%s%c DGC_NAPOS=%c%s%c\n",
+        n+0, na+0, dv+0, dp+0, straddle+0, 39, vl, 39, 39, il, 39, 39, substr(hl,1,120), 39
+    }')"
+echo "   video packets (whole file): ${DGC_N:-0}"
+echo "   packets with data but NO PTS: ${DGC_NA:-0}${DGC_NA:+  coded positions: ${DGC_NAPOS}}"
+echo "   duplicate PTS: ${DGC_DUPPKTS:-0} packet(s) across ${DGC_DUPVALS:-0} value(s)"
+if [ "${DGC_DUPVALS:-0}" -gt 0 ]; then
+  echo "     values: ${DGC_VALS}"
+  echo "     later holders at coded: ${DGC_POS}"
+  echo "     straddling an unstamped burst: ${DGC_STRADDLE:-0} of ${DGC_DUPPKTS:-0}"
+  if [ "${DGC_STRADDLE:-0}" -gt 0 ]; then
+    echo "     >> the holes and the repeated timestamps are ONE discontinuity event, not two:"
+    echo "        ${DGC_STRADDLE} duplicate(s) bracket an unstamped run. A packet carried a stale"
+    echo "        timestamp across the break; the earlier holder fits its local lattice and the"
+    echo "        later one does not, which is what makes them adjudicable from the bitstream."
+  fi
+fi
+DGC_ANY=0; { [ "${DGC_NA:-0}" -gt 0 ] || [ "${DGC_DUPPKTS:-0}" -gt 0 ]; } && DGC_ANY=1
+echo "DIAG_PTS_CENSUS packets=${DGC_N:-0} nopts=${DGC_NA:-0} dup_packets=${DGC_DUPPKTS:-0} dup_values=${DGC_DUPVALS:-0} straddle=${DGC_STRADDLE:-0}"
+
+# (0b) POC capability — can the bitstream state its own display positions?
+# CHEAP (a head trace_headers parse, seconds) and it decides whether the POC
+# routes are available at all. Before 1.16.0 diagnose could print a route whose
+# only outcome was exit 3; a capability it can measure in seconds is not a
+# thing to find out after a 38-second rung run.
+if [ "${PF_CODEC:-na}" = h264 ]; then
+  echo "-- (0b) POC capability (can this stream state its own display order?) --"
+  # ONE WRITER for the routing measurement (lib-paff.sh pf_poc_probe): this
+  # script RECOMMENDS the rung and auto.sh EXECUTES it, and a condition each
+  # measured for itself would drift — on exactly the question three sessions
+  # already got wrong.
+  eval "$(pf_poc_probe "$IN")"
+  DIAG_PAIRS=${PP_PAIRS:-0}; DIAG_FIELDS=${PP_FIELDS:-0}
+  echo "   pic_order_cnt_type=${PCAP_POC_TYPE:--1}  MaxPicOrderCntLsb=${PCAP_MAXLSB:-0}  first-slice lsb rows=${PCAP_LSB_ROWS:-0}/${PCAP_PICS:-0}"
+  if [ "${PCAP_OK:-no}" = yes ]; then
+    echo "   POC capability: ok — every picture states its display position outright, so a"
+    echo "   duplicate or an unstamped packet can be adjudicated from the bitstream rather"
+    echo "   than guessed from its neighbours' arithmetic."
+  else
+    echo "   POC capability: NO (${PCAP_WHY:-unknown}) — the POC-based routes cannot run on"
+    echo "   this stream, and no gate that depends on POC will be able to judge its output."
+  fi
+  echo "   ISO/IEC 14496-15 structure in the same window: ${DIAG_FIELDS:-0} field picture(s),"
+  echo "   ${DIAG_PAIRS:-0} complementary field pair(s) (coded-adjacent, opposite parity, same frame_num)"
+  if [ "${DIAG_PAIRS:-0}" -gt 0 ] && [ "${PF_HALF_TS:-no}" != yes ]; then
+    echo "   >> THE FIELDS ARE PAIRED. If a timestamp-delta rule reports otherwise on this"
+    echo "      stream, the rule is reading a proxy: these fields are coded-adjacent and"
+    echo "      share frame_num, and the source may stamp the bottom field at a constant"
+    echo "      offset BELOW its own top field (measured -5400 ticks, 2026-08-29). The rung"
+    echo "      that reads this directly is Rung 3-POC (scripts/poc-remux.sh)."
+  fi
+  echo "DIAG_POC_CAPABILITY ok=${PCAP_OK:-no} why=${PCAP_WHY:--} poc_type=${PCAP_POC_TYPE:--1} pics=${PCAP_PICS:-0} pairs=${DIAG_PAIRS:-0} fields=${DIAG_FIELDS:-0}"
+fi
+
 DTSQ=""
 [ "${PF_DTS_SOURCE:-carried}" = reconstructed ] && DTSQ=" (demuxer-reconstructed — not a source property)"
 if [ "$PF_FIELD_RATE" = unknown ]; then
@@ -67,7 +161,17 @@ DERIVE="scripts/derive-dts.sh \"$IN\" OUT.mov"
 # records which of the two this file is, for the verdict's own prose.
 FRAC0=0; pf_derive_routable && FRAC0=1
 DRV_SPARSE=0; pf_sparse_nopts && DRV_SPARSE=1
-if [ "$PF_HALF_TS" = yes ] && [ "${PF_CODEC:-na}" = h264 ]; then
+POCMUX="scripts/poc-remux.sh \"$IN\" OUT.mov"
+if pf_poc_routable; then
+  # THE feed.ts CLASS (TIERS.md T3.4, 2026-08-29). Fields coded-adjacent and
+  # sharing frame_num — so the structure IS paired — while their timestamps are
+  # NOT one field duration apart, so every delta heuristic above reads "no
+  # pairing here" and refuses. Rung 3-POC reads the pairing from the slice
+  # headers and the display positions from pic_order_cnt, which is where both
+  # facts were stated all along.
+  REPAIR="$POCMUX"
+  REPAIR_WHY="paff=$PF_PAFF reorder=yes half_ts=no, and the slice headers show ${DIAG_PAIRS} complementary field pair(s) with pic_order_cnt readable (poc_type=${PCAP_POC_TYPE:--1}): the structure is paired even though the timestamps are not +1 field apart. Rung 3-POC pairs per ISO/IEC 14496-15 and times every frame from its own POC (k = POC + C, C per IDR-epoch and field parity, >=99.9% unanimous), then gates its own output through the full verify suite"
+elif [ "$PF_HALF_TS" = yes ] && [ "${PF_CODEC:-na}" = h264 ]; then
   REPAIR="$PFILL"
   REPAIR_WHY="half_ts=yes (nopts_frac=$PF_NOPTS_FRAC — the pair signature): keep every real PTS, fill the pair-mates"
 elif [ "$PF_REORDER" = yes ] && [ "$FRAC0" -eq 1 ]; then
@@ -343,7 +447,7 @@ read -r ndup nback < <(ffp -v error -select_streams v:0 -read_intervals "%+#${PF
   -show_entries packet=dts -of csv=p=0 "$IN" 2>/dev/null | \
   awk -F, 'NR>1 && $1!="N/A" && p!="N/A"{ if($1<p)bk++; else if($1==p)du++ } {p=$1}
     END{print (du+0), (bk+0)}')
-echo "   first ${PF_SCAN_WINDOW} packets: duplicate(equal) DTS=${ndup:-0}  backward DTS=${nback:-0}${DTSQ}"
+echo "   first ${PF_SCAN_WINDOW} packets (in window): duplicate(equal) DTS=${ndup:-0}  backward DTS=${nback:-0}${DTSQ}"
 
 # (4) forward-gap (discontinuity) scan — timestamps that are present AND monotonic
 # but JUMP forward (dropped frames). Steps (1)-(3) and the MKV mux all PASS these;

@@ -132,8 +132,20 @@ if awk "BEGIN{exit !(($ST) > 0.05)}"; then
   ZB_PF=$(bash "$SELF_DIR/zero-base.sh" "$IN" --preflight-only --src-tsh "$TMP/tsh" 2>&1 >/dev/null); ZB_RC=$?
   set -e
   if [ "$ZB_RC" -eq 0 ]; then
-    finding timeline "timeline starts at ${ST}s, not zero (players rebase it; tools and clocks read it)" \
-      "TIER 1 (structural): scripts/zero-base.sh \"$IN\" OUT.ts — lossless re-wrap to the floor, PID layout kept, prediction-gated"
+    # ASK, DON'T MODEL, still — and since 1.16.0 zero-base can answer
+    # "eligible, WITH a warning" (TIERS.md T3.3: its field-coded arms warn and
+    # build rather than refusing on a prediction about the output). A route
+    # relayed without its warning is the 1.15.11 defect in the other direction:
+    # the operator gets a ready-to-run command and none of the caveat the tool
+    # attached to it. So the warning is relayed here, in zero-base's own words.
+    ZB_WARN=$(printf '%s\n' "$ZB_PF" | sed -n 's/^ZB_PREFLIGHT_WARN //p' | head -1 || true)
+    if [ -n "${ZB_WARN:-}" ]; then
+      finding timeline "timeline starts at ${ST}s, not zero (players rebase it; tools and clocks read it)" \
+        "TIER 1 (structural), WITH A WARNING zero-base attached to it — $ZB_WARN: scripts/zero-base.sh \"$IN\" OUT.ts. It will BUILD and let its own gates judge the result (it no longer refuses this shape on a prediction); --preflight-only gives the verdict without the build. For a QuickTime deliverable from a field-coded source the route is scripts/mov.sh, and scripts/diagnose.sh picks the repair rung by measured profile."
+    else
+      finding timeline "timeline starts at ${ST}s, not zero (players rebase it; tools and clocks read it)" \
+        "TIER 1 (structural): scripts/zero-base.sh \"$IN\" OUT.ts — lossless re-wrap to the floor, PID layout kept, prediction-gated"
+    fi
     route zero-base
   elif [ "$ZB_RC" -eq 2 ]; then
     # Relay, do not paraphrase: the refusal text is zero-base's, so this

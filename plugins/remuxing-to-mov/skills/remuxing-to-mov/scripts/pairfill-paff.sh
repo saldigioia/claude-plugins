@@ -101,11 +101,10 @@ while [ $# -gt 0 ]; do case "$1" in
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"
 . "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 . "$SELF_DIR/lib-attest.sh" # precond_attest: recorded operator override of a precondition
 
 # backhaul gate (1.11: advises + warns, refuses nothing — the 4:2:2 advisory
@@ -116,7 +115,7 @@ backhaul_gate "$IN" || exit $?
 
 echo "== pairfill: $IN -> $OUT =="
 eval "$(pf_detect "$IN")"
-[ "$PF_CODEC" = h264 ] || { echo "not H.264 (codec=$PF_CODEC) — pairfill is an H.264 PAFF repair." >&2; exit 3; }
+[ "$PF_CODEC" = h264 ] || { echo "not H.264 (codec=$PF_CODEC) — pairfill is an H.264 PAFF repair." >&2; exit 3; }   # TIER 3 cached deterministic: pairfill is an H.264 field repair
 [ "$PF_PAFF" = yes ] || echo "   note: rate test reads paff=$PF_PAFF — proceeding anyway (caller's call)."
 echo "   coded-pic rate=${PF_CODED_RATE}/s  untimestamped fraction=${PF_NOPTS_FRAC} (half_ts=$PF_HALF_TS)"
 # F9 (2026-08-28; ported home by WO-1.15.20 S0 from the installed field
@@ -147,25 +146,25 @@ if [ "$RATE" = unknown ] || [ -z "$RATE" ]; then
        "PF_CODED_RATE=${PF_CODED_RATE:-0}" "PF_FIELD_RATE=${PF_FIELD_RATE:-unknown}" "PF_RATIO=${PF_RATIO:-0}"; then
     PP_ATTESTED=pf-rate-map
     RATE=$(awk "BEGIN{printf \"%d\", int(${PF_CODED_RATE:-0}+0.5)}")
-    [ "${RATE:-0}" -gt 0 ] 2>/dev/null || { echo "measured coded rate ${PF_CODED_RATE}/s unusable even under attestation" >&2; exit 3; }
+    [ "${RATE:-0}" -gt 0 ] 2>/dev/null || { echo "measured coded rate ${PF_CODED_RATE}/s unusable even under attestation" >&2; exit 3; }   # TIER 3 cached deterministic: no field rate can be expressed
     echo "** attested rate-map override: using the measured coded rate rounded to ${RATE}/s"
     echo "**   as the field rate (the table could not map ${PF_CODED_RATE}/s; the operator's"
     echo "**   recorded evidence decides). Every output gate below still runs."
   else
     echo "cannot map a field rate (measured ${PF_CODED_RATE}/s); pass --rate, e.g. 60000/1001" >&2
     precond_attest_route pf-rate-map pairfill-paff.sh >&2
-    exit 3
+    exit 3   # TIER 3 cached deterministic: no field rate can be expressed
   fi
 fi
 TB=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$IN" 2>/dev/null)
-TBDEN=${TB##*/}; case "$TBDEN" in ''|*[!0-9]*) echo "unusable stream time_base '$TB'" >&2; exit 3;; esac
+TBDEN=${TB##*/}; case "$TBDEN" in ''|*[!0-9]*) echo "unusable stream time_base '$TB'" >&2; exit 3;; esac   # TIER 3 cached deterministic: the timebase cannot carry the model
 RN=${RATE%%/*}; RD=${RATE##*/}; [ "$RN" = "$RATE" ] && RD=1   # "50" -> 50/1
 read -r PAIR A B <<EOF
 $(awk "BEGIN{p=$TBDEN*2*$RD/$RN; ip=int(p+0.5);
   if(p-int(p)>1e-9 && int(p)+1-p>1e-9){print \"x x x\"; exit}
   a=int(ip/2); printf \"%d %d %d\", ip, a, ip-a}")
 EOF
-[ "$PAIR" != x ] || { echo "timebase 1/$TBDEN at field rate $RATE gives a non-integer pair duration — remux via a 90 kHz carrier first, or pick another repair." >&2; exit 3; }
+[ "$PAIR" != x ] || { echo "timebase 1/$TBDEN at field rate $RATE gives a non-integer pair duration — remux via a 90 kHz carrier first, or pick another repair." >&2; exit 3; }   # TIER 3 cached deterministic: the timebase cannot carry the model
 AB=$((B - A))
 echo "   timebase=1/$TBDEN  field rate=$RATE  pair=${PAIR} ticks (fields ${A}/${B})"
 
@@ -197,8 +196,8 @@ echo "   packets=$PP_N  untimestamped=$PP_MISS  max consecutive untimestamped=$P
 # bash 3.2 can't parse $(cmd "...\"...\"...") inside a double-quoted string — precompute
 EXC_PAIRS=$(awk "BEGIN{printf \"%.2f\", ${PP_EXC:-0}/$PAIR}")
 echo "   PTS excursion vs pair-cadence ramp: +${PP_EXC}/${PP_EXC_MIN} ticks ($EXC_PAIRS pairs of pyramid depth)"
-[ "${PP_N:-0}" -gt 0 ] || { echo "no video packets read" >&2; exit 3; }
-[ "${PP_FIRST_OK:-0}" -eq 1 ] || { echo ">> PRECONDITION FAIL: first video packet has no PTS — nothing to anchor the fill to. Use rebuild-paff.sh (no real timing survives to preserve)." >&2; exit 3; }
+[ "${PP_N:-0}" -gt 0 ] || { echo "no video packets read" >&2; exit 3; }   # TIER 1 instrumentation: nothing was read, so nothing is claimed
+[ "${PP_FIRST_OK:-0}" -eq 1 ] || { echo ">> PRECONDITION FAIL: first video packet has no PTS — nothing to anchor the fill to. Use rebuild-paff.sh (no real timing survives to preserve)." >&2; exit 3; }   # TIER 3 cached deterministic: nothing to anchor the fill to
 # --- fill model dispatch (2026-08-18): strict pair alternation keeps today's
 # rule byte-identical; a max run of exactly 2 is the measured displaced-
 # timestamp class and triggers the JUNCTION MODEL (announced; census + setts
@@ -225,7 +224,7 @@ else
   else
     echo ">> PRECONDITION FAIL: $PP_MAXRUN consecutive untimestamped packets — not strict pair alternation; the +1-field fill would be wrong. If this stream is fully-timestamped and reordered — the derive-dts route (scripts/derive-dts.sh, Rung 3-DERIVE) is the repair; pairfill only applies to half-timestamped pair sources." >&2
     precond_attest_route pf-maxrun pairfill-paff.sh >&2
-    exit 3
+    exit 3   # TIER 3 T3.6 junction jurisdiction (superseded by Rung 3-POC)
   fi
 fi
 
@@ -241,7 +240,7 @@ if [ "$PP_MODEL" = junction ]; then
     echo "   >= 5.x with the full setts variable set is required (probed with a synthetic"
     echo "   invocation; never build unproven). The strict pair rule cannot repair a 2-run,"
     echo "   so nothing was built; the source is untouched."
-    exit 3
+    exit 3   # TIER 3 cached deterministic: this ffmpeg's setts cannot express it
   fi
   echo "   setts NEXT_PTS/NEXT_DTS support: probed OK"
   # --- junction precondition 2 (the operator's 2026-08-18 WARNING): the fixed
@@ -288,7 +287,7 @@ if [ "$PP_MODEL" = junction ]; then
       echo "   from the stream head (probe rc=${pp_hrc:-0}) — the census cannot be taken, and"
       echo "   the junction fill is never built unproven. Nothing was built; the source is"
       echo "   untouched."
-      exit 3
+      exit 3   # TIER 1 instrumentation: trace_headers parsed nothing here
     fi
     if [ "${PCAP_OK:-no}" != yes ]; then
       echo ">> JUNCTION MODEL REFUSED: pic_order_cnt_type=${PCAP_POC_TYPE:--1} — this stream carries no"
@@ -303,7 +302,7 @@ if [ "$PP_MODEL" = junction ]; then
       echo "   through to the flattening rebuild; reorder + the derive signature escalates to"
       echo "   Rung 3-DERIVE — NEITHER carries a POC gate, so that artifact is judged by its"
       echo "   own rung's gates only."
-      exit 3
+      exit 3   # TIER 3 cached deterministic: no POC in the stream to read
     fi
     if [ "${PCAP_MAXLSB:-0}" -gt 0 ]; then
       echo "   junction POC-gate capability: poc_type=${PCAP_POC_TYPE} MaxPicOrderCntLsb=${PCAP_MAXLSB} (head probe: ${PCAP_LSB_ROWS} lsb rows / ${PCAP_PICS} pictures)"
@@ -320,7 +319,7 @@ if [ "$PP_MODEL" = junction ]; then
   if [ "${PC_OK:-no}" != yes ]; then
     echo ">> JUNCTION MODEL REFUSED: the whole-file trace_headers census parsed no coded"
     echo "   pictures — unprovable cadence, nothing built."
-    exit 3
+    exit 3   # TIER 1 instrumentation: the census parsed nothing
   fi
   echo "   pictures=$PC_PICS  field pictures=$PC_FIELDS  frame pictures=$PC_FRAMES  pic_struct histogram: $PC_STRUCT_HIST"
   if [ "${PC_STRUCT_BAD:-1}" -ne 0 ]; then
@@ -328,7 +327,7 @@ if [ "$PP_MODEL" = junction ]; then
     echo "   (frame/repeat/doubling) — the cadence is NOT uniform fields, so the fixed field"
     echo "   interval the junction fill assumes is unproven for this file."
     echo "   pic_struct histogram: $PC_STRUCT_HIST"
-    exit 3
+    exit 3   # TIER 3 T3.6 junction jurisdiction (pic_struct breaks the model)
   fi
   [ "$PC_STRUCT_HIST" = none ] && \
     echo "   note: no pic_timing pic_struct carried — no repeat/doubling signaled; the census stands on the field/frame split"

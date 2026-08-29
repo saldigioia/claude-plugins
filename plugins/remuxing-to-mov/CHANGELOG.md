@@ -4,6 +4,186 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.16.0 — "gate the assertion, not the attempt" (2026-08-29)
+
+The gates in this plugin were built to stop hallucination-driven damage
+happening quietly. That goal survives. They were attached to the wrong verb.
+
+On 2026-08-28 the plugin **refused to attempt** `ffmpeg -c copy` on a 25.38 GB
+PAFF capture — the third session running — while two builds that were
+**unusable** passed every check it had: one MOV sample per coded **field** (the
+container claiming ~50/s over a ~25/s decode), and a `.mp3` sample entry over
+MPEG-1 **Layer II** payload. Both were bit-identical to the source, so every
+gate was an essence hash and every essence hash was happy. On the field-per-
+sample build the old `verify.sh` printed, in full:
+
+    >> OK (lossless proven; timeline scrub-clean)
+
+Nothing quiet was caught. Something safe was stopped. This round re-aims the
+gates at the assertion, and the capture that was refused three times now
+converts.
+
+**The invariant every edit satisfied:** refusing to *do* something is what broke
+this; refusing to *claim success without proof* is what we want more of. Both
+come out of the mouth as "no". They are different things. Fewer refusals to
+attempt; strictly more refusals to assert.
+
+### The measured proof, both directions
+
+A 20 s slice of the capture, video-only so nothing else is in the way:
+
+| | 1.15.20 | 1.16.0 |
+|---|---|---|
+| plain `-c copy` (one sample per field) | `>> OK (lossless proven; timeline scrub-clean)` | `>> FAIL` — gate (h) *declared 1002 samples vs 501 implied*, gate (k) *501 off-lattice* |
+| `.mp3` entry over Layer II | REVIEW, for unrelated reasons | `>> FAIL` — gate (i) *sample entry contradicts payload* |
+| the capture itself | refused, 0 bytes written | **built** by Rung 3-POC; gates (a)–(m) judge it |
+
+Both counter-examples are minted on demand by `tests/mint-counterexamples.py`.
+The field-per-sample one needs no exotic tool: **a plain `ffmpeg -c copy` of a
+PAFF source produces it**, which is the finding.
+
+### TIERS.md — every refusal in the tree, classified
+
+New document at the plugin root. Three tiers, one classification test, and a
+disposition for all **50** refusal sites. It is mechanically enforced: every
+site carries a `# TIER n` comment naming its row, and `94-rot-sweep.sh` §11
+fails the bench on a refusal that carries none — so the classification is
+permanent rather than a one-time cleanup (guard mutation-tested, G40/P40).
+
+### Tier 1 — two hardenings, and one incident
+
+- **T1.10 final-OUT no-clobber** (`rtm_claim_out`). The writer lock closed
+  *concurrent* writers; nothing closed the *sequential* one, so today's build
+  silently replaced yesterday's verified deliverable. The claim is made ONCE,
+  by the process that acquires the lock, so a ladder still replaces its own
+  artifact across rungs; `RTM_OVERWRITE=1` is the announced override. A
+  directory at OUT is refused outright — `mv -f PART DIR` files the artifact
+  *inside* it and reports success. Test 103.
+- **T1.11 beside the source, never onto it** (`rtm_sibling_guard`). This fact
+  had **thirteen** byte-identical copies of one string comparison, and the
+  copies nobody wrote were the ones that mattered: none looked at the sidecar
+  names derived from OUT. **MEASURED: given a source named `x.autobest.mov`,
+  `auto.sh IN OUT` computed its park file as that same name and its opening
+  `rm -f` DELETED THE SOURCE — after which the run printed ">> FAIL … Source
+  untouched."** One writer now, identity by inode (a dot-path, a symlink and a
+  hard link all pass a string compare), covering OUT, the deterministic
+  sidecars and the atomic `.part` shape. Tests 104, 94 §12 (G41/P41).
+
+### Tier 2 — the container-level gates, and a ledger
+
+`verify.sh` gains six gates and the thing that makes them honest:
+
+- **(h) declared-vs-stored structure** — MOV sample count vs the whole-file
+  coded-picture census with fields paired per ISO/IEC 14496-15, plus declared
+  frame rate vs samples ÷ duration.
+- **(i) codec-tag-vs-payload** (`codec-id.py`) — sample-entry fourcc vs codec,
+  and MPEG audio layer bits / AC-3 bsid vs the payload itself. Gate (g) passes
+  a `.mp3`-over-Layer-II file: `.mp3` is allowlisted and ffmpeg's `mp3float`
+  decodes Layer II happily, so the decode probe is blind to the mislabel.
+- **(j) duplicate display slots + DTS ≤ PTS**, whole file. An unstamped packet
+  gets `pts=dts` — the wrong slot *and* a collision with a rung another packet
+  holds.
+- **(k) presentation order vs `pic_order_cnt`** — generalized beyond the
+  junction lane, **source-baselined** before it indicts (a source whose own
+  timeline contradicts its bitstream makes a faithful remux look guilty), with
+  the reconstructed-stamp count in the budget so the comparison is like for
+  like.
+- **(l) first-displayed-frame anchor** — REVIEW, not FAIL: what is measured is
+  that samples sit outside the declared presentation, not that a player drops
+  them.
+- **(m) essence arbiter** (`nalhash.py`) — merging two field AUs turns a 4-byte
+  start code into a 3-byte one, so a byte hash false-mismatches a *correct*
+  build by one byte per pair. Paid only to adjudicate a gate (b) mismatch.
+- **(n) THE UNPROVEN LEDGER** — one `VERIFY_LEDGER` row per gate **including
+  the ones that could not run**, and a sentence per unproven gate. `unproven`
+  (owed, unevaluable) downgrades to REVIEW; `n/a` (does not apply) does not —
+  collapse them and either every run reads REVIEW or an unreadable track passes
+  as clean. Test 107 removes a gate's tool from PATH and requires the ledger to
+  *say so*.
+
+### Tier 3 — conversions
+
+- **T3.1 the PAFF copy-rung skip: CUT.** The exemplar. The reasoning was: the
+  muxer cannot write a packet with no PTS, so it invents one, so the confession
+  gate refuses, so the write is a foregone waste. Every clause plausible; the
+  conclusion false. `scripts/attempt-battery.sh` is the standing replacement —
+  nine plain remux variants, run on demand, reporting what actually happened.
+  The prediction survives as a warning ahead of an attempt. Test 109.
+- **T3.3 zero-base's PAFF pre-flight: CONVERTED.** Its own text said "POLICY,
+  not measurement". It warns and builds; `--preflight-only` still answers
+  without building, and `clean.sh` relays the warning attached to the route.
+  Tests 75 (rewritten), 88, 93.
+- **T3.4 the pairing evidence: REPLACED, the standard kept.** `_pair_parity`
+  measured *timestamp deltas* and inferred *structure*. On the capture: **0 of
+  424,596** adjacent pairs one field duration apart — true, and the wrong
+  conclusion. Those fields are coded-adjacent and share `frame_num`; the source
+  stamps each bottom field a constant offset **below** its own top. The direct
+  evidence is now preferred where it can be read, the delta rule keeps the class
+  it provably fits, and the refusal states which shape of missing evidence it
+  hit instead of listing three.
+- **T3.5 the duplicate-PTS refusal: CONVERTED.** Adjudicated from POC — the
+  later holder never fits its local lattice, the earlier always does. Refuses
+  only what the evidence cannot settle. Windowed counts are now scoped at the
+  point of print, and a windowed zero says it is not a whole-file zero.
+- **T3.10 diagnose reports instead of predicting** — whole-file unstamped and
+  duplicate-PTS censuses with positions, a POC capability probe, and the
+  straddle count that says *the holes and the repeated timestamps are ONE
+  discontinuity event*. They run before every verdict path, not below them.
+- **T3.11 resync `--force`** — the layout-change refusal stays the default and
+  the override *mandates* the silence gate: a way to reach the check, not skip it.
+- **T3.12 REFUSED ≠ FAIL** — a child's exit 3 propagates as `result=REFUSED
+  best_rung=none`, exit 11. A run in which nothing was built and nothing was
+  wrong with any artifact no longer reports `>> FAIL`. Test 102.
+
+### Rung 3-POC — the rung the refusals had been describing
+
+`poc-remux.sh` / `poc-remux.py`, with `h264poc.py` as the shared evidence
+engine. For field-coded H.264 whose fields are coded-adjacent and share
+`frame_num` — so the structure IS paired — while their timestamps are not one
+field duration apart. Pairing per ISO/IEC 14496-15 (both fields in ONE sample);
+timing from `k = POC + C`, **C per (IDR epoch, field parity)** — the per-parity
+split is mandatory, and measured on the slice: `top C=143`, `bottom C=139`,
+each unanimous at 501/501, four rungs apart. Pooled, the same data reads as two
+competing answers, which is exactly how the naive version fails. ≥99.9 % over
+≥100 votes, no fallback; anchors on the earliest displayed frame; gates its own
+output through the full suite before blessing.
+
+**Nothing in the port is tuned to one capture.** The predecessor hardcoded that
+file's SPS and its 1800/415 tick lattice; every one of those is parsed or
+measured here, because a constant that happens to be right is indistinguishable
+from one that is right.
+
+### Constitution
+
+- **I.3 rewritten** from "never build to a foregone refusal" to **"gate the
+  assertion, not the attempt"**. The original measurement (a 23.68 GB build to
+  a foregone hard stop) was real; the rule generalized from it was not.
+- **I.4 — an essence hash is necessary and not sufficient.**
+- **I.5 — a verifier states what it could not prove.**
+
+### Found by the new guards, while building them
+
+- `41-422-empirical.sh` mapped `m2v422.mov` and `m2v422.ts` onto one output
+  path, so the second build silently replaced the first and the suite asserted
+  against whichever survived. Invisible until T1.10 refused the overwrite.
+- `pf_poc_lattice` demanded an **integer** half-interval, so a 30000/1001
+  stream in a 15360 timescale (frame duration 512.512, every timestamp rounded)
+  read as *every picture off-lattice*. Now fitted as a rational within a
+  1-tick rounding tolerance.
+- Gate-level `>> FAIL` / `>> REVIEW` prints **re-graded the run**: callers match
+  those tokens anywhere in the output. Gates now say `>> gate (x) FAILS:`.
+  `auto.sh`'s "only gate (f)" test reads the ledger instead of parsing prose.
+- `mp4v` is the generic MPEG-4 visual entry whose `esds` OTI selects the codec,
+  MPEG-2 included — which is this plugin's own container-swap route. A narrower
+  table in gate (i) accused it of a mislabel it does not have.
+- An apostrophe inside a single-quoted `awk` program, twice, in the pairing
+  census — the class `94-rot-sweep.sh` §1 exists for.
+
+### Bench
+
+Version → **1.16.0**. New: tests 101–109, `references/paff-poc.md`, `TIERS.md`.
+`94-rot-sweep.sh` §11/§12. Mutation cases G40–G42 with their prose lanes.
+
 ## 1.15.20 — "twenty-four packets" round (2026-08-28)
 
 A field re-test of the 2024 VMA capture (`feed.ts`, 25.38 GB, 02:24:25) came

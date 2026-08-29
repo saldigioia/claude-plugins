@@ -83,11 +83,11 @@ IN="${1:?usage: qt-groups.sh INPUT.mov OUTPUT.mov (alternate-group post-pass; so
 OUT="${2:?need OUTPUT.mov (written atomically; the input is never edited in place)}"
 [ $# -le 2 ] || { echo "unknown opt: $3" >&2; exit 2; }
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 command -v MP4Box >/dev/null 2>&1 \
   || { echo "MP4Box not found — the independent-parse proof needs it (doctor.sh lists it; brew install gpac)" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
+. "$SELF_DIR/lib-mux.sh"    # rtm_sibling_guard: one writer for "beside, never onto" (T1.11)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 
 OSV=$(sw_vers -productVersion 2>/dev/null || echo '?')
 TODAY=$(date +%Y-%m-%d)

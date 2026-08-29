@@ -92,11 +92,10 @@ fi
 refuse () { [ "$PREFLIGHT_ONLY" -eq 1 ] && exit 2; exit 1; }
 TAG='>> FAIL:'; [ "$PREFLIGHT_ONLY" -eq 1 ] && TAG='>> would REFUSE (pre-flight):'
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-paff.sh"   # probe_shaped_failure / probe_retry_notice / FF_RETRY_OPTS
 . "$SELF_DIR/lib-mux.sh"    # mux_census (D5); the part name here already kept its extension (1.9)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 
 WINDOW="${RTM_IDR_WINDOW:-5000}"
 

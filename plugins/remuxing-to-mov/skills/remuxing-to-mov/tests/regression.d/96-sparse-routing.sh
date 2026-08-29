@@ -118,11 +118,18 @@ echo "== 4. S0: the copy rung is decided from the probe, never written to discov
 # at its bootstrap and nothing is ever built.
 mkdir -p "$WORK/nodata"
 S0=$(PF_PKT_FILE="$WORK/sparse_paff.csv" CLAUDE_PLUGIN_DATA="$WORK/nodata"        bash "$SC/auto.sh" "$MKV" "$WORK/s0.mov" 2>&1)
-has "$S0" "skipping Rung" "auto.sh skips the copy rung on an unstamped-packet source"
-has "$S0" "refusal is predetermined" "…and says why the write would have been wasted"
-hasnt "$S0" "attempting Rung 0" "…so the copy rung is never attempted at all"
-has "$S0" "nopts_frac=0.008" "…and the skip quotes the measurement that decided it"
-ls "$WORK"/s0.mov* >/dev/null 2>&1 && no "a skipped-copy run still wrote an artifact" || ok "nothing written"
+# CUT IN 1.16.0 (TIERS.md T3.1). This used to assert that auto.sh SKIPPED the
+# copy rung on an unstamped-packet source, because the muxer would invent
+# timing and the confession gate would refuse the output — so the write was a
+# foregone waste. The reasoning was plausible and the conclusion was false: all
+# nine plain `-c copy` variants mux this class (scripts/attempt-battery.sh),
+# and what comes out is a wrong TIMELINE for gates (d)/(j)/(k) to judge. The
+# prediction is kept — as a WARNING, ahead of an attempt that settles it.
+hasnt "$S0" "skipping Rung" "the copy rung is no longer skipped on a prediction"
+hasnt "$S0" "predetermined" "…and no outcome is called predetermined"
+has "$S0" "attempting Rung 0" "the copy rung is ATTEMPTED"
+has "$S0" "WARNING, not a refusal" "…behind an announced warning, not a refusal"
+has "$S0" "nopts_frac=0.008" "…and the warning quotes the measurement it rests on"
 ls "$WORK"/dry.mov* >/dev/null 2>&1 && no "--dry-run wrote an artifact" || ok "nothing written (--dry-run)"
 
 echo

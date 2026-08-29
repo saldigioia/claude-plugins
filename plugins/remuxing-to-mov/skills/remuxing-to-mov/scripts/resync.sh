@@ -41,17 +41,25 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 IN="${1:?usage: resync.sh INPUT OUTPUT.mov [--all-audio] [--audio a:N] [--pcm 16|24|32]}"
 OUT="${2:?need OUTPUT.mov}"; shift 2
 AMAP="-map 0:a:0?"; PCM=pcm_s24le
+FORCE=0; FORCED_LAYOUT=0
 while [ $# -gt 0 ]; do case "$1" in
   --all-audio) AMAP="-map 0:a?"; shift;;
   --audio)     AMAP="-map 0:${2:?--audio needs a:N}"; shift 2;;
   --pcm) case "${2:-}" in 16) PCM=pcm_s16le;; 24) PCM=pcm_s24le;; 32) PCM=pcm_s32le;; *) echo "bad --pcm: ${2:-}" >&2; exit 2;; esac; shift 2;;
+  # TIERS.md T3.11 (1.16.0): the mid-stream layout-change refusal below stays
+  # the DEFAULT — the injected-silence class is invisible to duration parity,
+  # so shipping it silently is exactly the failure that gate was built from.
+  # But the operator may have evidence this script does not (they can listen),
+  # and refusing an attempt outright is the habit this round retired. --force
+  # attempts it and MANDATES the content gate that can actually see the defect:
+  # verify.sh --silence on the result, non-negotiable and non-waivable.
+  --force) FORCE=1; shift;;
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 2; }
-[ "$(cd "$(dirname "$IN")" && pwd)/$(basename "$IN")" != "$(cd "$(dirname "$OUT")" 2>/dev/null && pwd)/$(basename "$OUT")" ] \
-  || { echo "refusing to overwrite the source in place" >&2; exit 2; }
 . "$SELF_DIR/lib-probe.sh"  # ffp/FF_INPUT_OPTS: raised probe window on every input open
 . "$SELF_DIR/lib-mux.sh"    # rtm_part (extension-keeping atomics), mux_census (D5)
+rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 
 vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
@@ -153,7 +161,16 @@ for spec in $ASPECS; do
     echo "              (a sub-frame video gap costs milliseconds — under sync tolerance)"
     echo "     keep     the source — it is already the archival master"
     echo "     playback lossless MKV mux (holds the discontinuous timeline honestly)"
-    exit 11
+    if [ "$FORCE" -ne 1 ]; then
+      echo "   If you have evidence this stream is safe, --force attempts it anyway and"
+      echo "   MANDATES verify.sh --silence on the result (the only gate that can see"
+      echo "   injected silence). It is not a way to skip the check; it is a way to"
+      echo "   reach it."
+      exit 11   # TIER 3 T3.11 injected-silence default (announced --force overrides)
+    fi
+    echo "** --force: building anyway. The silence content gate is now MANDATORY on this"
+    echo "**   run and its verdict is final — a --force build that fails it is not shipped."
+    FORCED_LAYOUT=1
   fi
 done
 
@@ -189,6 +206,12 @@ mv -f "$PART" "$OUT"
 echo "   wrote: $OUT"
 
 echo "-- verify (sync + lossless video + silence content-parity) --"
+if [ "${FORCED_LAYOUT:-0}" -eq 1 ]; then
+  echo "   THIS RUN WAS --force'd past the mid-stream layout guard. The silence"
+  echo "   content gate below is the one check that can see injected silence, and"
+  echo "   its verdict decides this build: --force reaches the gate, it never"
+  echo "   skips it. Listen to the result before archiving either way."
+fi
 # --silence: duration parity cannot see injected silence (the 2008 build passed
 # it with ~17 min inserted) — the content gate compares long-window silence
 # source vs output against the legitimate gap-fill budget.
@@ -204,6 +227,8 @@ case "$o" in
                    exit 10
                  fi
                  exit 0 ;;
-  *">> REVIEW"*) echo ">> REVIEW: $OUT written; see the sync/parity note above (a tail residual can remain — confirm against the source)."; exit 10 ;;
+  *">> REVIEW"*) echo ">> REVIEW: $OUT written; see the sync/parity note above (a tail residual can remain — confirm against the source)."
+                 [ "${FORCED_LAYOUT:-0}" -eq 1 ] && echo "   (--force run: a REVIEW here is not a pass. The layout change this was forced past is the first thing to listen for.)"
+                 exit 10 ;;
   *)             echo ">> FAIL: see verify output above. Source untouched; $OUT is unverified."; exit 1 ;;
 esac
