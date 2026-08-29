@@ -336,16 +336,39 @@ class PocUnwrapper:
     feed(slice) -> (poc, epoch). `epoch` increments at every IDR, because POC
     restarts there: any `k = POC + C` relation is valid only INSIDE one epoch,
     and a single global C is exactly how the naive version fails.
+
+    IT ALSO INCREMENTS AT AN SPS ACTIVATION THAT CHANGES THE POC PARAMETERS.
+    §8.2.1.1 is modular arithmetic under MaxPicOrderCntLsb, so lsb state means
+    nothing across a change of modulus — and a broadcast capture spanning a
+    program change carries more than one. Measured 2026-08-29 on a 24 GB
+    deliverable: unwrapped under a single (wrong) modulus, 215,949 of 216,631
+    pictures read off their own declared slot. `scope` counts those
+    activations; `epoch` advances on either boundary, so every downstream
+    per-epoch relation (the k = POC + C classes) is automatically scoped too.
     """
 
     def __init__(self):
         self.prev_lsb = 0
         self.prev_msb = 0
         self.epoch = 0
+        self.scope = 0
+        self._params = None          # (poc_type, max_poc_lsb) in force
         self.frame_num_offset = 0
         self.prev_frame_num = 0
 
+    def _check_scope(self, s):
+        """A change of POC parameters opens a new scope: reset the lsb state."""
+        params = (s["poc_type"], s["max_poc_lsb"])
+        if self._params is not None and params != self._params:
+            self.scope += 1
+            self.epoch += 1
+            self.prev_lsb = 0
+            self.prev_msb = 0
+            self.frame_num_offset = 0
+        self._params = params
+
     def feed(self, s):
+        self._check_scope(s)
         if s["poc_type"] == 2:
             # display order == decode order; a stable increasing counter is the
             # honest POC here

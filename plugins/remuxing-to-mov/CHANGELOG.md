@@ -4,6 +4,64 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.16.2 — per-SPS-activation POC scopes (2026-08-29)
+
+Gate (k) reported UNPROVEN on the 2024 VMA deliverable because the capture
+carries more than one SPS with differing `log2_max_pic_order_cnt_lsb`, and
+§8.2.1.1 is **modular arithmetic** — a single global `MaxPicOrderCntLsb`
+unwraps the rest of the file with the wrong modulus. Under one (wrong) value,
+**215,949 of 216,631** pictures of a build every other gate proved correct read
+"off-lattice".
+
+UNPROVEN was the right answer to give. It was also a refusal to judge exactly
+the program-change captures this plugin exists for. Now each SPS activation
+opens its own POC scope carrying its own modulus, lsb state never crosses a
+scope boundary, and the gate aggregates per scope.
+
+**On the real deliverable, before and after:**
+
+    1.16.1  VERIFY_LEDGER gate=k verdict=unproven why=more than one SPS with a
+            differing log2_max_pic_order_cnt_lsb — no single MaxPicOrderCntLsb
+            unwraps the whole file
+    1.16.2  VERIFY_LEDGER gate=k verdict=pass why=216631/216631 pictures on
+            their POC lattice slot across 19 scope(s)
+
+    1.16.1  VERIFY_LEDGER_SUMMARY gates=13 unproven=1 verdict=REVIEW
+    1.16.2  VERIFY_LEDGER_SUMMARY gates=13 unproven=0 verdict=REVIEW
+
+Every gate on that 24.28 GB artifact now reaches a verdict. The REVIEW that
+remains is gates (c)/(e) inherited capture noise and (g)'s naked-MP2 doctrine
+point — named, measured, and nothing to do with the timeline.
+
+**No bar is lowered.** A scope whose presentation interval cannot be FIT is
+UNPROVEN — named, with its index and picture count — and the other scopes are
+still reported (`PL_NOFIT`, `PL_NOFIT_PICS`, `PL_NOFIT_AT`). Its pictures still
+count OFF in `PL_OFF` so no caller can bless what was never judged;
+`poc-gate.sh` exits 10 rather than 1 for that case, because "could not judge"
+is not "torn".
+
+Where it landed:
+- `pf_poc_lattice` reads `idr,poc,l2,pts` and opens a scope at an IDR **or** an
+  l2 change, with the modulus taken per scope. The legacy 3-column
+  `idr,poc,pts` is read exactly as before (test 76's tables are untouched).
+- `pf_trace_census` and `pf_poc_extract` both emit the active modulus as a
+  third column — still byte-identical to each other (test 78's claim).
+- `h264poc.py`'s `PocUnwrapper` advances its epoch at an SPS activation that
+  changes the POC parameters, so every downstream `k = POC + C` class is
+  scoped automatically rather than by a second mechanism.
+
+**Independent cross-check.** The built deliverable's PTS column was compared
+against `plugin-doctor/data/full_fix.tsv` — the workshop's separately solved
+column, from a different tool — after pairing per ISO/IEC 14496-15:
+**216,631 of 216,631 samples agree at a uniform shift of 0.** The workshop
+filled coded picture 11 to rung 45; so did this rung.
+
+New `tests/regression.d/111-poc-scopes.sh`: unit lanes over canned 4-column
+tables (scope on l2 change, teeth on a torn scope, legacy 3-column unchanged,
+unfittable scope named), plus real two-SPS media minted with libx264 (`-bf`
+selects the modulus: 3 → 2, 8 → 3) where a faithful copy passes gate (k) and a
+`setts=pts=DTS` restamp of the same media FAILs it. Mutation guard G45.
+
 ## 1.16.1 — the park-name collision, swept as a class (2026-08-29)
 
 1.16.0 found and fixed a Tier-1 breach: a SOURCE named `x.autobest.mov` was

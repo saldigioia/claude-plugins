@@ -94,8 +94,18 @@ else
   echo "   MaxPicOrderCntLsb: no SPS value — inferred per sequence (next power of two above the largest lsb)"
 fi
 eval "$(pf_poc_lattice "$TMP/table.csv" "$MAXLSB")"
-echo "   on_slot=$PL_ON/$PL_TOTAL  off_lattice=$PL_OFF  (IDR sequences=$PL_SEQS)"
-echo "PP_POC_LATTICE on_slot=$PL_ON total=$PL_TOTAL off=$PL_OFF"
+echo "   on_slot=$PL_ON/$PL_TOTAL  off_lattice=$PL_OFF  (POC scopes=$PL_SEQS)"
+echo "PP_POC_LATTICE on_slot=$PL_ON total=$PL_TOTAL off=$PL_OFF scopes=${PL_SEQS:-0} nofit=${PL_NOFIT:-0}"
+# 1.16.2: a scope whose presentation interval cannot be FIT was never judged.
+# Reporting it as off-lattice would be an accusation the gate did not earn —
+# and this script's own contract already has the right word for it: UNPROVEN.
+if [ "${PL_NOFIT:-0}" -ne 0 ] && [ "${PL_OFF:-0}" -eq "${PL_NOFIT_PICS:-0}" ]; then
+  echo ">> POC-LATTICE UNPROVEN — ${PL_NOFIT} of ${PL_SEQS} scope(s) carry no fittable"
+  echo "   presentation interval (scope index ${PL_NOFIT_AT:-?}; ${PL_NOFIT_PICS} picture(s))."
+  echo "   Those pictures are not judged, and not accused; the rest are on-slot."
+  echo "PP_POC_LATTICE unproven=1 why=nofit scopes=${PL_NOFIT} pictures=${PL_NOFIT_PICS}"
+  exit 10
+fi
 if [ "${PL_OFF:-1}" -ne 0 ]; then
   echo ">> OFF-LATTICE: $PL_OFF picture(s) off their presentation slot — the written"
   echo "   timeline is not the derived lattice."

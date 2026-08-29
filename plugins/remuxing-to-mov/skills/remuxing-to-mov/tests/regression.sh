@@ -694,9 +694,16 @@ if [ -n "$sfound" ]; then
   out=$(bash "$SC/verify.sh" "$S" "$BDUP" 2>&1); rc=$?
   [ "$rc" -eq 1 ] && ok "patched dup-DTS artifact FAILs" || no "patched artifact rc=$rc, want 1"
   case "$out" in *"VERIFY_LEDGER gate=d verdict=fail"*) ok "gate (d) reports the duplicate-DTS count signature";; *) no "gate (d) did not report the count signature";; esac
-  # THE NEW FINDING: the same corruption tore the presentation order, and an
-  # independent proof says so. That is what makes it un-waivable.
-  case "$out" in *"VERIFY_LEDGER gate=k verdict=fail"*) ok "gate (k) independently proves the presentation order is torn";; *) no "gate (k) did not see the tear";; esac
+  # THE NEW FINDING: an independent proof refuses to clear this artifact, and
+  # that is what makes it un-waivable. Zeroing the stts delta collapses EVERY
+  # timestamp onto one value, so gate (k) cannot fit a presentation interval at
+  # all — its honest answer is UNPROVEN, not "torn". Either way it does not
+  # bless the file, and a waiver may not cover a gate that did not clear it.
+  case "$out" in
+    *"VERIFY_LEDGER gate=k verdict=fail"*)     ok "gate (k) independently proves the presentation order is torn" ;;
+    *"VERIFY_LEDGER gate=k verdict=unproven"*) ok "gate (k) refuses to clear it (UNPROVEN — no interval can be fit from one repeated timestamp)" ;;
+    *) no "gate (k) cleared an artifact whose every timestamp is identical" ;;
+  esac
   case "$out" in *"VERIFY_SIGNATURE gate=d"*) no "a waiver signature was offered for an artifact whose presentation order is torn";; *) ok "NO waiver signature is offered — an independent proof failed";; esac
   bash "$SC/waiver.sh" "$S" "$BDUP" --attest "${RTM_WAIVER_ATTEST%.}" --coverage c --proof p >/dev/null 2>&1; rc=$?
   { [ "$rc" -eq 2 ] && [ ! -f "$BDUP.waiver.json" ]; } && ok "near-miss attestation refused, nothing written" || no "near-miss accepted (rc=$rc)"

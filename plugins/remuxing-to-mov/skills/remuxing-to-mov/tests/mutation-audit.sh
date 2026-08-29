@@ -326,6 +326,17 @@ mut_unregistered_inline_scratch () {  # a scratch name built inline, outside the
 pro_unregistered_inline_scratch () {  # prose quoting the shape stays CLEAN
   printf '\n# never: TMP="${OUT%%.*}.sneaky.$ext" without adding the tag to RTM_SIDECAR_TAGS\n' >> "$1/scripts/mov.sh"
 }
+mut_single_poc_modulus () {  # the lattice checker goes back to ONE modulus for the file
+  # §8.2.1.1 is modular arithmetic. Unwrapping a whole capture under one
+  # MaxPicOrderCntLsb reads most of a program-change file as off its own
+  # declared slot — measured 2026-08-29: 215,949 of 216,631 pictures of a build
+  # every other gate proved correct.
+  perl -0pi -e 's/if \(\$1 \+ 0 == 1 \|\| \(l2seen && l2v != curl2\)\) endseq\(\)/if (\$1 + 0 == 1) endseq()/' \
+    "$1/scripts/lib-paff.sh"
+}
+pro_single_poc_modulus () {  # prose naming the retired assumption stays CLEAN
+  printf '\n# never: one global MaxPicOrderCntLsb for a whole file — a POC scope opens at\n# an SPS activation that changes the modulus, not only at an IDR (test 111)\n' >> "$1/scripts/clock.sh"
+}
 mut_unask_trim () {   # the trim-to-idr CALL stops asking (clean.sh's prose still says --preflight-only)
   perl -pi -e 's/--preflight-only/--dry-run-only/ if /trim-to-idr\.sh"/' "$1/scripts/clean.sh"
 }
@@ -432,6 +443,8 @@ G43|defect|110-park-name-collision.sh|the source survives auto.sh|mut_unguard_de
 P43|prose|110-park-name-collision.sh|the source survives auto.sh|pro_unguard_derived_names
 G44|defect|110-park-name-collision.sh|every inline-derived scratch name is in RTM_SIDECAR_TAGS|mut_unregistered_inline_scratch|inline scratch names the sibling guard cannot see
 P44|prose|110-park-name-collision.sh|every inline-derived scratch name is in RTM_SIDECAR_TAGS|pro_unregistered_inline_scratch
+G45|defect|111-poc-scopes.sh|both scopes on-slot under their OWN modulus|mut_single_poc_modulus|the l2 change did not open a new scope
+P45|prose|111-poc-scopes.sh|both scopes on-slot under their OWN modulus|pro_single_poc_modulus
 '
 
 # --------------------------------------------------------------------- runner

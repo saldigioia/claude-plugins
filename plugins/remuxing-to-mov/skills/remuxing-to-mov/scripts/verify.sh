@@ -1455,9 +1455,9 @@ if [ "$H_RUN" -eq 1 ]; then
       if [ "$k_sn" -eq "$k_na" ]; then
         paste -d, "$HTD/poc.csv" "$HTD/str.csv" | awk -F, '
           # drop a bottom field that continues the pair its predecessor opened
-          { fld=$3+0; bot=$4+0; fn=$5+0
+          { fld=$4+0; bot=$5+0; fn=$6+0
             cont = (prev_open && fld==1 && bot==1 && fn==prev_fn)
-            if (!cont) printf "%s,%s\n", $1, $2
+            if (!cont) printf "%s,%s,%s\n", $1, $2, $3
             prev_open = (fld==1 && bot==0); prev_fn = fn }' > "$HTD/poc_samples.csv"
         k_pa=$(grep -c . "$HTD/poc_samples.csv" 2>/dev/null || true); k_pa=${k_pa:-0}
         if [ "$k_pa" -eq "$k_nb" ]; then
@@ -1468,21 +1468,16 @@ if [ "$H_RUN" -eq 1 ]; then
         fi
       fi
     fi
+    # 1.16.2: a multi-SPS capture is EVALUATED, not declined. The POC table
+    # carries the modulus active at each picture and pf_poc_lattice opens a new
+    # scope when it changes, so no picture is unwrapped under another scope's
+    # MaxPicOrderCntLsb. 1.16.1 reported UNPROVEN here — correct, and a refusal
+    # to judge exactly the program-change captures this plugin exists for.
     if [ "${PC_SPS_L2_VARIES:-no}" = yes ]; then
-      # A SINGLE GLOBAL MaxPicOrderCntLsb CANNOT UNWRAP A MULTI-SPS FILE. A
-      # broadcast capture spanning a program change carries more than one SPS,
-      # and the lattice check would judge most of the file with the wrong
-      # modulus. Measured 2026-08-29: a build every other gate proved correct
-      # read 215,949 of 216,631 pictures off-lattice under one wrong value.
-      # Saying "cannot judge" is the honest answer; saying "torn" is not.
-      echo "   UNPROVEN: this stream carries more than one SPS with a different"
-      echo "   log2_max_pic_order_cnt_lsb, so no single MaxPicOrderCntLsb unwraps the"
-      echo "   whole file. The presentation order is NOT judged here — and it is not"
-      echo "   accused either."
-      [ "$verdict" = FAIL ] || verdict=REVIEW
-      note="${note:+$note }Gate (k): the output carries more than one SPS with differing log2_max_pic_order_cnt_lsb, so a single-modulus POC unwrap cannot judge it — UNPROVEN, not failed."
-      led k unproven "more than one SPS with a differing log2_max_pic_order_cnt_lsb — no single MaxPicOrderCntLsb unwraps the whole file"
-    elif [ "$k_prc" -ne 0 ] || [ "$k_na" -eq 0 ] || [ "$k_na" -ne "$k_nb" ]; then
+      echo "   this stream carries more than one SPS modulus — judging per SPS-activation"
+      echo "   scope (8.2.1.1 is modular; lsb state never crosses a scope boundary)."
+    fi
+    if [ "$k_prc" -ne 0 ] || [ "$k_na" -eq 0 ] || [ "$k_na" -ne "$k_nb" ]; then
       k_why=count
       [ "$k_na" -eq 0 ] && k_why="pic_order_cnt_type != 0 (the stream carries no pic_order_cnt_lsb)"
       [ "$k_prc" -ne 0 ] && k_why="the PTS probe failed (rc=$k_prc)"
@@ -1496,7 +1491,22 @@ if [ "$H_RUN" -eq 1 ]; then
       eval "$(pf_poc_lattice "$HTD/table.csv" "$k_maxlsb")"
       echo "   MaxPicOrderCntLsb=${k_maxlsb:-inferred}  on_slot=$PL_ON/$PL_TOTAL  off_lattice=$PL_OFF  (IDR sequences=$PL_SEQS)"
       echo "VERIFY_POC_LATTICE on_slot=$PL_ON total=$PL_TOTAL off=$PL_OFF seqs=$PL_SEQS"
-      if [ "${PL_OFF:-1}" -ne 0 ]; then
+      if [ "${PL_OFF:-1}" -ne 0 ] && [ "${PL_OFF:-0}" -eq "${PL_NOFIT_PICS:-0}" ]; then
+        # every off-lattice picture is inside a scope whose interval could not
+        # be FIT at all — that is "could not judge", not "torn". Naming the
+        # scopes is the point (Constitution II.1/II.3).
+        echo "   UNPROVEN: ${PL_NOFIT} POC scope(s) carry no fittable presentation interval"
+        echo "   (scope index: ${PL_NOFIT_AT:-?}; ${PL_NOFIT_PICS} picture(s)). Those pictures are"
+        if [ "${PL_NOFIT:-0}" -lt "${PL_SEQS:-0}" ]; then
+          echo "   NOT judged here, and NOT accused. The remaining scopes reported on-slot."
+        else
+          echo "   NOT judged here, and NOT accused. NO scope in this output could be fitted,"
+          echo "   so gate (k) has no opinion on it at all — (d)/(j) are the timeline verdict."
+        fi
+        [ "$verdict" = FAIL ] || verdict=REVIEW
+        note="${note:+$note }Gate (k): ${PL_NOFIT} of ${PL_SEQS} POC scope(s) (index ${PL_NOFIT_AT:-?}) have no fittable presentation interval, so ${PL_NOFIT_PICS} picture(s) are UNPROVEN."
+        led k unproven "${PL_NOFIT} of ${PL_SEQS} POC scope(s) unfittable (index ${PL_NOFIT_AT:-?}, ${PL_NOFIT_PICS} pictures)"
+      elif [ "${PL_OFF:-1}" -ne 0 ]; then
         # SOURCE-BASELINE BEFORE INDICTING (the doctrine gates (c) and (e)
         # already run on). A remux is judged against its source: if the SOURCE's
         # own timeline already contradicts its bitstream — a synthetically
@@ -1574,7 +1584,7 @@ if [ "$H_RUN" -eq 1 ]; then
         fi
       else
         echo "   PASS: every picture sits where its own pic_order_cnt says it should."
-        led k pass "$PL_ON/$PL_TOTAL pictures on their POC lattice slot across $PL_SEQS sequence(s)"
+        led k pass "$PL_ON/$PL_TOTAL pictures on their POC lattice slot across $PL_SEQS scope(s)"
       fi
     fi
   fi

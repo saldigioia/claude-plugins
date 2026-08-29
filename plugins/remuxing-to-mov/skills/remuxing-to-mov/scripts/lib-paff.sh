@@ -1145,7 +1145,7 @@ pf_setts_probe () {
 # PC_OK=no (zero pictures parsed) = trace_headers unusable on this ffmpeg/file.
 # POC_OUT/SPS_OUT (WO-1.15.3 Item 2, the 1.15.2 leftover 5.4): optional side
 # files, the spsf pattern from the POC gate's own extraction. When given, the
-# SAME pass also writes one "idr,poc" line per coded picture (decode order,
+# SAME pass also writes one "idr,poc,l2" line per coded picture (decode order,
 # first slice only — the pend discipline) to POC_OUT and the SPS
 # log2_max_pic_order_cnt_lsb_minus4 value to SPS_OUT — zero extra reads; the
 # awk grows four token matches. This is what lets pairfill's POC-lattice gate
@@ -1196,7 +1196,7 @@ pf_trace_census () {
       if(name=="frame_num"){ if(have && cur_fnum<0) cur_fnum=v; next }
       if(name=="field_pic_flag"){ if(pend){ pend=0; if(v==1) fields++ }; if(have) cur_field=v; next }
       if(name=="bottom_field_flag"){ if(have) cur_bottom=v; next }
-      if(name=="pic_order_cnt_lsb"){ if(pendp){ pendp=0; if(pocf!="") printf "%d,%d\n", idr, v > pocf }; next }
+      if(name=="pic_order_cnt_lsb"){ if(pendp){ pendp=0; if(pocf!="") printf "%d,%d,%s\n", idr, v, (l2seen ? l2 : "") > pocf }; next }
       # NOTE: the structure row is emitted from complete_pic(), not here — the
       # field/bottom tokens of a picture arrive AFTER its pic_order_cnt_lsb.
       # pic_struct (exact token — pic_struct_present_flag never matches here)
@@ -1314,7 +1314,7 @@ pf_poc_routable () {
 
 # pf_poc_extract ARTIFACT POC_OUT SPS_OUT — the POC gate's direct-output
 # extraction, factored (WO-1.15.3): one whole-file trace_headers pass over
-# ARTIFACT's video track writing one "idr,poc" line per coded picture (decode
+# ARTIFACT's video track writing one "idr,poc,l2" line per coded picture (decode
 # order, first slice only) to POC_OUT and the SPS log2_max value to SPS_OUT.
 # This is the FALLBACK arm — pairfill's gate prefers the census-emitted table
 # (same rows, already paid for; test 78 pins the two arms byte-identical on a
@@ -1329,18 +1329,23 @@ pf_poc_extract () {
            for(i=1;i<=NF;i++) if($i=="nal_unit_type"||$i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
            if(name=="") next
            v=$NF+0
-           if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; next }
+           if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; l2seen=1; next }
            if(name=="nal_unit_type"){ nal=v; next }
            if(name=="first_mb_in_slice"){ if(v==0){ pend=1; idr=(nal==5)?1:0 }; next }
-           if(pend){ printf "%d,%d\n", idr, v; pend=0 } }
+           if(pend){ printf "%d,%d,%s\n", idr, v, (l2seen ? l2 : ""); pend=0 } }
          END{ if(l2 != "") printf "%d\n", l2 > spsf }' > "${2:?pf_poc_extract needs POC_OUT}"
 }
 
 # pf_poc_lattice TABLE_FILE [MAX_POC_LSB] — the POC-lattice output gate's
 # checker (the record call it local gate 2: the strongest correctness evidence
 # for a field fill). TABLE_FILE carries one line per coded picture, DECODE
-# order: "idr,poc,pts" (idr 1|0, poc = pic_order_cnt_lsb, pts in stream
-# ticks). pic_order_cnt_lsb is POC MODULO MaxPicOrderCntLsb, so each sequence
+# order: "idr,poc,l2,pts" (idr 1|0, poc = pic_order_cnt_lsb, l2 = the
+# log2_max_pic_order_cnt_lsb_minus4 ACTIVE at that picture, pts in stream
+# ticks). The legacy 3-column "idr,poc,pts" is still read exactly as before.
+# A POC SCOPE opens at an IDR **or** at an SPS activation that changes l2:
+# 8.2.1.1 is modular arithmetic, and a capture spanning a program change
+# carries more than one modulus (1.16.2 — measured on a 24 GB deliverable
+# where one global value read 215,949 of 216,631 pictures off-lattice). pic_order_cnt_lsb is POC MODULO MaxPicOrderCntLsb, so each sequence
 # is first UNWRAPPED to full POC per ITU-T H.264 §8.2.1.1 (PicOrderCntMsb
 # steps by MaxPicOrderCntLsb on a half-range jump between consecutive
 # pictures; msb resets at the IDR that heads the sequence). MAX_POC_LSB is the
@@ -1372,13 +1377,17 @@ pf_poc_extract () {
 # Emits eval-able:  PL_ON=n PL_TOTAL=n PL_OFF=n PL_SEQS=n
 pf_poc_lattice () {
   awk -F, -v maxlsb="${2:-0}" -v tol="${PL_TOL:-1}" '
-    function endseq(   i, half, dp, dt, h, lim, base, M, m, raw, prev, msb) {
+    function endseq(   i, half, dp, dt, h, lim, base, M, m, raw, prev, msb, want, d) {
       if (cnt == 0) return
       seqs++
+      # PER-SCOPE MODULUS. §8.2.1.1 is modular arithmetic, so the unwrap is only
+      # valid under the MaxPicOrderCntLsb the ACTIVE SPS declares. A capture
+      # spanning a program change carries more than one, and a single global
+      # value unwraps the rest of the file with the wrong modulus — measured
+      # 2026-08-29: 215,949 of 216,631 pictures of a correct build read
+      # "off-lattice" under one wrong value.
+      M = (scope_l2 != "" ? 16 * (2 ^ (scope_l2 + 0)) : maxlsb + 0)
       if (cnt == 1) { total++; on++; cnt = 0; return }
-      # unwrap pic_order_cnt_lsb -> full POC (§8.2.1.1), msb 0 at the sequence
-      # head; comparisons are between consecutive RAW lsb values
-      M = maxlsb + 0
       if (M <= 0) { m = 0; for (i = 1; i <= cnt; i++) if (poc[i] > m) m = poc[i]; M = 16; while (M <= m) M *= 2 }
       msb = 0; prev = poc[1]
       for (i = 2; i <= cnt; i++) {
@@ -1387,20 +1396,20 @@ pf_poc_lattice () {
         else if (raw > prev && raw - prev > M / 2) msb -= M
         prev = raw; poc[i] = raw + msb
       }
-      # THE HALF INTERVAL NEED NOT BE A WHOLE NUMBER OF TICKS. A 30000/1001
-      # stream in a 15360 timescale has a frame duration of 512.512, so the
-      # muxer ROUNDS every timestamp and no picture sits on an exact integer
-      # lattice. Requiring an integer h therefore made this gate report EVERY
-      # picture off-lattice on ordinary 29.97 material — a false accusation
-      # against correct files, measured 2026-08-29 (180 of 180 on a plain
-      # libx264 remux). Fit h as a rational and compare within the rounding
-      # the muxer itself had to do: PL_TOL ticks, default 1.
       half = 0; lim = (cnt < 16 ? cnt : 16)
       for (i = 2; i <= lim && !half; i++) {
         dp = poc[i] - poc[1]; dt = pts[i] - pts[1]
         if (dp != 0) { h = dt / dp; if (h > 0) half = h }
       }
-      if (half == 0) { total += cnt; off += cnt; cnt = 0; return }
+      if (half == 0) {
+        # UNFITTABLE, not torn. Every picture still counts OFF so no caller can
+        # bless what was never judged (the standing rule), and PL_NOFIT lets a
+        # caller that wants to say UNPROVEN rather than FAIL tell the two apart.
+        total += cnt; off += cnt; nofit++; nofitpics += cnt
+        if (nofitat == "") nofitat = seqs; else if (nofitn < 6) nofitat = nofitat "," seqs
+        nofitn++
+        cnt = 0; return
+      }
       base = pts[1] - poc[1] * half
       for (i = 1; i <= cnt; i++) {
         total++
@@ -1410,12 +1419,23 @@ pf_poc_lattice () {
       }
       cnt = 0
     }
+    # idr,poc,l2,pts (4+ columns) or the legacy idr,poc,pts (3 columns).
     NF >= 3 {
-      if ($1 + 0 == 1) endseq()
-      cnt++; poc[cnt] = $2 + 0; pts[cnt] = $3 + 0
+      if (NF >= 4) { l2v = $3; ptsv = $4 } else { l2v = ""; ptsv = $3 }
+      # A SCOPE OPENS AT AN IDR **OR** AT AN SPS ACTIVATION THAT CHANGES THE
+      # MODULUS. lsb state may never cross either boundary.
+      if ($1 + 0 == 1 || (l2seen && l2v != curl2)) endseq()
+      curl2 = l2v; l2seen = 1; scope_l2 = l2v
+      cnt++; poc[cnt] = $2 + 0; pts[cnt] = ptsv + 0
     }
     END{
       endseq()
       printf "PL_ON=%d\nPL_TOTAL=%d\nPL_OFF=%d\nPL_SEQS=%d\n", on+0, total+0, off+0, seqs+0
+      # append-only (Ground Rule 4): the four rows above keep their name and
+      # meaning; these three describe scopes that could not be JUDGED at all.
+      # QUOTED: this value is a LIST, and an eval-ed assignment that meets an
+      # unquoted separator runs the rest as a command (measured 2026-08-29:
+      # "2: command not found" from a ;-joined scope list).
+      printf "PL_NOFIT=%d\nPL_NOFIT_PICS=%d\nPL_NOFIT_AT=%c%s%c\n", nofit+0, nofitpics+0, 39, (nofitat=="" ? "-" : nofitat), 39
     }' "${1:?pf_poc_lattice needs TABLE_FILE}"
 }

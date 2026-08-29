@@ -181,6 +181,10 @@ def main():
     cap_ok, cap_why = par.capability()
     print("-- pass 1: %d coded picture(s) (%d empty skipped, %d header(s) unparsed) --"
           % (n, n_empty, n_unparsed))
+    # scopes, not just SPS ids: two activations can share an id and differ in
+    # their POC parameters, and it is the PARAMETERS that scope the unwrap
+    print("   POC scopes (SPS activations changing the POC parameters): %d"
+          % (unw.scope + 1))
     print("   SPS: %s" % "; ".join(
         "id=%d profile=%d %dx%d poc_type=%d max_poc_lsb=%d frame_mbs_only=%d"
         % (v["sps_id"], v["profile_idc"], v["width"], v["height"], v["poc_type"],
