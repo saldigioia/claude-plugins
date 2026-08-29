@@ -121,6 +121,45 @@ constant standing in for a measurement looks like from the outside.
 `tests/regression.d/112-sps-aware-slice-reader.sh` mints a synthetic bitstream
 with those unusual widths and pins that the reader recovers the true values.
 
+## 6a. A picture with no `pic_order_cnt_lsb` still has a position
+
+`pic_order_cnt_type` decides what the slice header even carries:
+
+| type | what the slice carries | how the position is obtained |
+|---|---|---|
+| 0 | `pic_order_cnt_lsb` | unwrap it (§8.2.1.1), scope by scope |
+| 1 | cycle deltas in the SPS | **unsupported here** — UNPROVEN by index |
+| 2 | nothing | the spec *defines* display order to equal decode order |
+
+Type 2 is the trap, because the absence is silent. The extractor used to emit
+no row at all for such a picture; downstream, gate (k) compared row count to
+timestamped-packet count, found them unequal, and reported UNPROVEN with a
+`count` symptom. Measured 2026-08-29 on a mixed capture: `POC rows=50,
+timestamped packets=100` — **an absence the extractor created, read back as a
+fact about the file** (Constitution III.1, one layer down from where it was
+first written).
+
+So every coded picture emits exactly one row, and the row carries a
+**provenance** column saying where its position came from:
+
+```
+1,0,2,lsb     poc_lsb was present and unwrapped under this scope's modulus
+0,99,,t2      pic_order_cnt_type 2: position DERIVED from decode order
+0,0,,none     neither — a placeholder, judged by index and counted unproven
+```
+
+The modulus column is empty on a `t2` row on purpose: `MaxPicOrderCntLsb` is
+undefined for type 2, and carrying the previous SPS's value forward would
+publish a number that does not apply there.
+
+**No bar moves.** A `t2` scope is judged by *its own* rule — presentation must
+advance with decode order, which is exactly what type 2 promises — so a torn
+one is off-slot, not exempt. A `none` scope (type 1, or a picture whose header
+could not be read) is counted in `PL_NOFIT` with its picture count and reaches
+the operator as UNPROVEN. `tests/regression.d/113-poc-type2-scopes.sh` pins all
+three lanes; guard G47 suppresses the placeholder emission and the count
+disagreement comes straight back.
+
 ## 7. Duplicate display slots are adjudicable, and the asymmetry is why
 
 Where two packets claim one rung, the later holder is carrying a timestamp
@@ -196,3 +235,4 @@ dual-track's *preserved original* with a PCM access track alongside.
 | `scripts/codec-id.py` | sample entry vs payload identity (gate (i)) |
 | `scripts/attempt-battery.sh` | measures whether the mux fails, instead of predicting it |
 | `verify.sh` gates (h)–(n) | the container-level tier, and the ledger that says what it could not prove |
+| `lib-paff.sh` `pf_poc_lattice` | judges each scope by its OWN provenance rule (§6a) — lattice, decode order, or unproven |

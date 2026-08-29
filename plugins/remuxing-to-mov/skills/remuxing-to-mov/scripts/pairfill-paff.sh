@@ -254,10 +254,12 @@ if [ "$PP_MODEL" = junction ]; then
   # applied here): the POC gate's capability is knowable from the SAME head
   # probe in seconds — the build never asks. One ffmpeg run, captured once to
   # a file; pf_poc_capability reads it, and the old "parsed no coded picture"
-  # refusal folds into PCAP_WHY=no_pictures. On PCAP_WHY=poc_type
-  # (pic_order_cnt_type != 0: zero pic_order_cnt_lsb rows — measured on the
-  # x264 -bf 0 mint) the junction model refuses at pre-flight, exit 3,
-  # NOTHING written — pre-round this discovery cost the entire build
+  # refusal folds into PCAP_WHY=no_pictures. When no display position can be
+  # stated for the stream at all (pic_order_cnt_type 1 — unsupported by this
+  # plugin's reader and by h264poc.py alike) the junction model refuses at
+  # pre-flight, exit 3, NOTHING written. Since 1.16.4 pic_order_cnt_type 2 is
+  # NOT that case: display order equals decode order by spec, the gate judges
+  # it by that rule, and the build proceeds (test 114) — pre-round this discovery cost the entire build
   # (field-recorded ~55 min mux + 26 min parse to a foregone UNPROVEN).
   # NO bypass flag, deliberately (1.15.2 Defect-B lesson: a gate that can be
   # waived into UNPROVEN-by-default is no gate); the manual route and the
@@ -290,11 +292,13 @@ if [ "$PP_MODEL" = junction ]; then
       exit 3   # TIER 1 instrumentation: trace_headers parsed nothing here
     fi
     if [ "${PCAP_OK:-no}" != yes ]; then
-      echo ">> JUNCTION MODEL REFUSED: pic_order_cnt_type=${PCAP_POC_TYPE:--1} — this stream carries no"
-      echo "   pic_order_cnt_lsb, so the POC-lattice output gate (the junction model's"
-      echo "   strongest correctness evidence) cannot evaluate any build from it. The build"
-      echo "   would end UNPROVEN at its final gate and could never be blessed."
-      echo "   Nothing was built; the source is untouched."
+      echo ">> JUNCTION MODEL REFUSED: pic_order_cnt_type=${PCAP_POC_TYPE:--1} (why=${PCAP_WHY:--}) — no"
+      echo "   display position can be stated for this stream's pictures, so the POC-lattice"
+      echo "   output gate (the junction model's strongest correctness evidence) cannot"
+      echo "   evaluate any build from it. The build would end UNPROVEN at its final gate"
+      echo "   and could never be blessed. Nothing was built; the source is untouched."
+      echo "   (pic_order_cnt_type 2 is NOT this case: display order equals decode order by"
+      echo "    spec, and such a source is built and judged by that rule since 1.16.4.)"
       echo "   Manual route (unproven, by hand): the Rung 3-PAIR mux commands in"
       echo "   references/timeline-repair.md build the artifact without this gate's evidence."
       echo "   Under auto.sh this refusal lands as a generic pairfill FAIL and the ladder"
@@ -302,7 +306,7 @@ if [ "$PP_MODEL" = junction ]; then
       echo "   through to the flattening rebuild; reorder + the derive signature escalates to"
       echo "   Rung 3-DERIVE — NEITHER carries a POC gate, so that artifact is judged by its"
       echo "   own rung's gates only."
-      exit 3   # TIER 3 cached deterministic: no POC in the stream to read
+      exit 3   # TIER 3 cached deterministic: no display position statable (poc_type 1)
     fi
     if [ "${PCAP_MAXLSB:-0}" -gt 0 ]; then
       echo "   junction POC-gate capability: poc_type=${PCAP_POC_TYPE} MaxPicOrderCntLsb=${PCAP_MAXLSB} (head probe: ${PCAP_LSB_ROWS} lsb rows / ${PCAP_PICS} pictures)"
@@ -586,9 +590,10 @@ if [ "$PP_JM" -eq 1 ]; then
     # arm before any build; the count arm was announced at census time.)
     pp_why=count; [ "${pp_na:-0}" -eq 0 ] && pp_why=poc_type
     echo ">> POC-LATTICE GATE UNPROVEN — POC not extractable or picture/packet counts differ"
-    echo "   (POC rows=$pp_na, timestamped packets=$pp_nb; pic_order_cnt_type != 0 streams"
-    echo "    carry no pic_order_cnt_lsb and the lattice cannot be evaluated — never"
-    echo "    blessed unproven; this is not evidence the artifact is bad)."
+    echo "   (POC rows=$pp_na, timestamped packets=$pp_nb; every coded picture emits a row"
+    echo "    since 1.16.4, so a count that still disagrees means the output's packets and"
+    echo "    the source's pictures are not in correspondence — never blessed unproven;"
+    echo "    this is not evidence the artifact is bad)."
     echo "PP_POC_LATTICE unproven=1 why=$pp_why rows=$pp_na packets=$pp_nb"   # machine-readable (additive, WO-1.15.3)
     echo "   Kept: $PART ($(wc -c < "$PART" | tr -d ' ') bytes; delete: rm \"$PART\";"
     echo "    re-judge: scripts/poc-gate.sh \"$PART\")"

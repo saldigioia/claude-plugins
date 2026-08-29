@@ -1455,9 +1455,9 @@ if [ "$H_RUN" -eq 1 ]; then
       if [ "$k_sn" -eq "$k_na" ]; then
         paste -d, "$HTD/poc.csv" "$HTD/str.csv" | awk -F, '
           # drop a bottom field that continues the pair its predecessor opened
-          { fld=$4+0; bot=$5+0; fn=$6+0
+          { fld=$5+0; bot=$6+0; fn=$7+0
             cont = (prev_open && fld==1 && bot==1 && fn==prev_fn)
-            if (!cont) printf "%s,%s,%s\n", $1, $2, $3
+            if (!cont) printf "%s,%s,%s,%s\n", $1, $2, $3, $4
             prev_open = (fld==1 && bot==0); prev_fn = fn }' > "$HTD/poc_samples.csv"
         k_pa=$(grep -c . "$HTD/poc_samples.csv" 2>/dev/null || true); k_pa=${k_pa:-0}
         if [ "$k_pa" -eq "$k_nb" ]; then

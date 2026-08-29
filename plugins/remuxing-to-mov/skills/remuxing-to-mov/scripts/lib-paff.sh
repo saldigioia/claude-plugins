@@ -1165,8 +1165,20 @@ pf_trace_census () {
     # its first_mb_in_slice. ISO/IEC 14496-15: a top field immediately followed
     # by a bottom field with the SAME frame_num is one complementary pair and
     # belongs in ONE sample. Anything else is its own sample.
-    function complete_pic() {
+    function complete_pic(   src, pv) {
       if (!have) return
+      # ONE ROW PER PICTURE (Constitution III.1, one layer down). A
+      # pic_order_cnt_type 2 stream carries no pic_order_cnt_lsb at all, and
+      # emitting nothing for those pictures made a downstream count comparison
+      # read an ABSENCE THIS EXTRACTOR CREATED as a fact about the file.
+      # For type 2 the spec defines display order to EQUAL decode order, so the
+      # position is derived, not guessed, and says so in its provenance column.
+      if (pocf != "") {
+        if (cur_poc != "")      { src = "lsb";  pv = cur_poc }
+        else if (ptseen && poctype == 2) { src = "t2"; pv = pics }
+        else                    { src = "none"; pv = 0 }
+        printf "%d,%d,%s,%s\n", cur_idr, pv, ((l2seen && src == "lsb") ? l2 : ""), src > pocf
+      }
       # one row per coded picture, in the SAME order as the POC rows, so a
       # caller can align the two by line number. (No apostrophes in here: one
       # inside a single-quoted awk program ends the shell string and the rest
@@ -1186,17 +1198,19 @@ pf_trace_census () {
       have = 0
     }
     { name=""
-      for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"||$i=="field_pic_flag"||$i=="pic_struct"||$i=="nal_unit_type"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"||$i=="frame_num"||$i=="bottom_field_flag"){ name=$i; break }
+      for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"||$i=="field_pic_flag"||$i=="pic_struct"||$i=="nal_unit_type"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"||$i=="pic_order_cnt_type"||$i=="frame_num"||$i=="bottom_field_flag"){ name=$i; break }
       if(name=="") next
       v=$NF+0
       if(name=="nal_unit_type"){ nal=v; next }
       if(name=="log2_max_pic_order_cnt_lsb_minus4"){ if(l2seen && v!=l2) l2vary=1; l2=v; l2seen=1; next }
+      if(name=="pic_order_cnt_type"){ poctype=v; ptseen=1; next }
       if(name=="first_mb_in_slice"){ if(v==0){ complete_pic(); pics++; pend=1; pendp=1; idr=(nal==5)?1:0
-                                               have=1; cur_field=0; cur_bottom=0; cur_fnum=-1 }; next }
+                                               have=1; cur_field=0; cur_bottom=0; cur_fnum=-1
+                                               cur_poc=""; cur_idr=idr }; next }
       if(name=="frame_num"){ if(have && cur_fnum<0) cur_fnum=v; next }
       if(name=="field_pic_flag"){ if(pend){ pend=0; if(v==1) fields++ }; if(have) cur_field=v; next }
       if(name=="bottom_field_flag"){ if(have) cur_bottom=v; next }
-      if(name=="pic_order_cnt_lsb"){ if(pendp){ pendp=0; if(pocf!="") printf "%d,%d,%s\n", idr, v, (l2seen ? l2 : "") > pocf }; next }
+      if(name=="pic_order_cnt_lsb"){ if(pendp){ pendp=0; cur_poc=v }; next }
       # NOTE: the structure row is emitted from complete_pic(), not here — the
       # field/bottom tokens of a picture arrive AFTER its pic_order_cnt_lsb.
       # pic_struct (exact token — pic_struct_present_flag never matches here)
@@ -1246,7 +1260,7 @@ pf_poc_capability () {
       for(i=1;i<=NF;i++) if($i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"||$i=="pic_order_cnt_type"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
       if(name=="") next
       v=$NF+0
-      if(name=="pic_order_cnt_type"){ ptype=v; tseen=1; next }
+      if(name=="pic_order_cnt_type"){ ptype=v; tseen=1; if(v==1) t1seen=1; if(v==2) t2seen=1; next }
       if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; l2seen=1; next }
       if(name=="first_mb_in_slice"){ if(v==0){ pics++; pendp=1 }; next }
       if(pendp){ pendp=0; rows++ }
@@ -1254,9 +1268,21 @@ pf_poc_capability () {
     END{
       maxlsb=0
       if(l2seen && l2+0>=0 && l2+0<=12){ maxlsb=16; for(i=0;i<l2+0;i++) maxlsb*=2 }
+      # A STREAM THAT CARRIES NO pic_order_cnt_lsb IS NOT A STREAM WITH NO
+      # DISPLAY ORDER. For pic_order_cnt_type 2 the spec defines display order
+      # to equal decode order, and h264poc.Parser.capability() — the authority
+      # this probe stands in for at pre-flight — has said so since 1.16.0. This
+      # arm said "no" anyway until 1.16.4, and pairfill refused the build on it
+      # (measured: shell PCAP_OK=no why=poc_type vs module (True, "poc_type=2
+      # ... by spec") on one x264 -bf 0 mint). Type 1 is unsupported by BOTH
+      # readers and still refuses. Test 114 pins the two answers together.
       ok="yes"; why="-"
       if(pics+0==0){ ok="no"; why="no_pictures" }
-      else if(rows+0==0){ ok="no"; why="poc_type" }
+      else if(t1seen){ ok="no"; why="poc_type" }
+      else if(rows+0>0){ ok="yes"; why="-" }
+      else if(t2seen){ ok="yes"; why="t2_derived" }
+      else if(tseen){ ok="no"; why="poc_type" }
+      else{ ok="no"; why="no_sps" }
       printf "PCAP_POC_TYPE=%d\nPCAP_MAXLSB=%d\nPCAP_LSB_ROWS=%d\nPCAP_PICS=%d\nPCAP_OK=%s\nPCAP_WHY=%s\n", \
         (tseen? ptype : -1), maxlsb, rows+0, pics+0, ok, why
     }' "${1:?pf_poc_capability needs HEAD_TRACE_LOG}"
@@ -1325,15 +1351,28 @@ pf_poc_extract () {
   ffmpeg -nostdin -hide_banner -nostats ${FF_INPUT_OPTS[@]+"${FF_INPUT_OPTS[@]}"} \
       -i "${1:?pf_poc_extract needs ARTIFACT}" -map 0:v:0 -c copy \
       -bsf:v trace_headers -f null - 2>&1 | \
-    awk -v spsf="${3:?pf_poc_extract needs SPS_OUT}" '{ name=""
-           for(i=1;i<=NF;i++) if($i=="nal_unit_type"||$i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"){ name=$i; break }
+    awk -v spsf="${3:?pf_poc_extract needs SPS_OUT}" '
+         # ONE ROW PER PICTURE, provenance-marked — the same contract the census
+         # arm emits, so the two stay byte-identical (test 78).
+         function flush_pic(   src, pv) {
+           if (!have) return
+           if (cur_poc != "")               { src = "lsb";  pv = cur_poc }
+           else if (ptseen && poctype == 2) { src = "t2";   pv = pics }
+           else                             { src = "none"; pv = 0 }
+           printf "%d,%d,%s,%s\n", cur_idr, pv, ((l2seen && src == "lsb") ? l2 : ""), src
+           have = 0
+         }
+         { name=""
+           for(i=1;i<=NF;i++) if($i=="nal_unit_type"||$i=="first_mb_in_slice"||$i=="pic_order_cnt_lsb"||$i=="log2_max_pic_order_cnt_lsb_minus4"||$i=="pic_order_cnt_type"){ name=$i; break }
            if(name=="") next
            v=$NF+0
            if(name=="log2_max_pic_order_cnt_lsb_minus4"){ l2=v; l2seen=1; next }
+           if(name=="pic_order_cnt_type"){ poctype=v; ptseen=1; next }
            if(name=="nal_unit_type"){ nal=v; next }
-           if(name=="first_mb_in_slice"){ if(v==0){ pend=1; idr=(nal==5)?1:0 }; next }
-           if(pend){ printf "%d,%d,%s\n", idr, v, (l2seen ? l2 : ""); pend=0 } }
-         END{ if(l2 != "") printf "%d\n", l2 > spsf }' > "${2:?pf_poc_extract needs POC_OUT}"
+           if(name=="first_mb_in_slice"){ if(v==0){ flush_pic(); pics++; pend=1; have=1; cur_poc=""
+                                                    cur_idr=(nal==5)?1:0 }; next }
+           if(pend){ cur_poc=v; pend=0 } }
+         END{ flush_pic(); if(l2 != "") printf "%d\n", l2 > spsf }' > "${2:?pf_poc_extract needs POC_OUT}"
 }
 
 # pf_poc_lattice TABLE_FILE [MAX_POC_LSB] — the POC-lattice output gate's
@@ -1386,6 +1425,27 @@ pf_poc_lattice () {
       # value unwraps the rest of the file with the wrong modulus — measured
       # 2026-08-29: 215,949 of 216,631 pictures of a correct build read
       # "off-lattice" under one wrong value.
+      # NO PRESENTATION POSITION IS DERIVABLE for this scope (pic_order_cnt_type
+      # 1): it is UNPROVEN, named by index, and its pictures still count OFF so
+      # nothing downstream can bless what was never judged.
+      if (scope_src == "none") {
+        total += cnt; off += cnt; nofit++; nofitpics += cnt
+        if (nofitat == "") nofitat = seqs; else if (nofitn < 6) nofitat = nofitat "," seqs
+        nofitn++
+        cnt = 0; return
+      }
+      # pic_order_cnt_type 2: the spec DEFINES display order to equal decode
+      # order, so the rule is that presentation advances with it. Judged by its
+      # own rule — not exempted, and with teeth: a scope out of decode order is
+      # off-slot exactly like one off its lattice.
+      if (scope_src == "t2") {
+        total++; on++                       # the scope head is its own baseline
+        for (i = 2; i <= cnt; i++) {
+          total++
+          if (pts[i] > pts[i - 1]) on++; else off++
+        }
+        cnt = 0; return
+      }
       M = (scope_l2 != "" ? 16 * (2 ^ (scope_l2 + 0)) : maxlsb + 0)
       if (cnt == 1) { total++; on++; cnt = 0; return }
       if (M <= 0) { m = 0; for (i = 1; i <= cnt; i++) if (poc[i] > m) m = poc[i]; M = 16; while (M <= m) M *= 2 }
@@ -1419,13 +1479,21 @@ pf_poc_lattice () {
       }
       cnt = 0
     }
-    # idr,poc,l2,pts (4+ columns) or the legacy idr,poc,pts (3 columns).
+    # idr,poc,l2,src,pts (5 columns, 1.16.4) | idr,poc,l2,pts (4, 1.16.2)
+    # | idr,poc,pts (3, legacy). `src` is the PROVENANCE of the poc value:
+    #   lsb   read from pic_order_cnt_lsb (pic_order_cnt_type 0)
+    #   t2    DERIVED from decode order, which is what the spec defines
+    #         presentation order to be for pic_order_cnt_type 2
+    #   none  no presentation position is derivable (type 1) — unproven
     NF >= 3 {
-      if (NF >= 4) { l2v = $3; ptsv = $4 } else { l2v = ""; ptsv = $3 }
-      # A SCOPE OPENS AT AN IDR **OR** AT AN SPS ACTIVATION THAT CHANGES THE
-      # MODULUS. lsb state may never cross either boundary.
-      if ($1 + 0 == 1 || (l2seen && l2v != curl2)) endseq()
-      curl2 = l2v; l2seen = 1; scope_l2 = l2v
+      if (NF >= 5)      { l2v = $3; srcv = $4; ptsv = $5 }
+      else if (NF == 4) { l2v = $3; srcv = "lsb"; ptsv = $4 }
+      else              { l2v = "";  srcv = "lsb"; ptsv = $3 }
+      # A SCOPE OPENS AT AN IDR, AT AN SPS ACTIVATION THAT CHANGES THE MODULUS,
+      # OR WHERE THE PROVENANCE CHANGES — lsb state may never cross any of them,
+      # and two scopes judged by different rules are never one scope.
+      if ($1 + 0 == 1 || (l2seen && l2v != curl2) || (l2seen && srcv != cursrc)) endseq()
+      curl2 = l2v; cursrc = srcv; l2seen = 1; scope_l2 = l2v; scope_src = srcv
       cnt++; poc[cnt] = $2 + 0; pts[cnt] = ptsv + 0
     }
     END{

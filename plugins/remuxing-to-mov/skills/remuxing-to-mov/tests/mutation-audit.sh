@@ -331,7 +331,12 @@ mut_single_poc_modulus () {  # the lattice checker goes back to ONE modulus for 
   # MaxPicOrderCntLsb reads most of a program-change file as off its own
   # declared slot — measured 2026-08-29: 215,949 of 216,631 pictures of a build
   # every other gate proved correct.
-  perl -0pi -e 's/if \(\$1 \+ 0 == 1 \|\| \(l2seen && l2v != curl2\)\) endseq\(\)/if (\$1 + 0 == 1) endseq()/' \
+  # WRITTEN LOOSELY ON PURPOSE. This pattern named every scope-open clause
+  # explicitly, so when 1.16.4 added the provenance clause the mutation stopped
+  # matching, reported MUTATE-NOOP, and the guard silently went unaudited for a
+  # round. Matching "everything after the IDR clause" keeps the next added
+  # clause inside the mutation instead of outside the audit.
+  perl -0pi -e 's/if \(\$1 \+ 0 == 1 \|\|.*\) endseq\(\)/if (\$1 + 0 == 1) endseq()/' \
     "$1/scripts/lib-paff.sh"
 }
 pro_single_poc_modulus () {  # prose naming the retired assumption stays CLEAN
@@ -348,6 +353,39 @@ mut_hardcoded_frame_num_width () {  # the slice reader goes back to a constant w
 }
 pro_hardcoded_frame_num_width () {  # prose naming the retired constant stays CLEAN
   printf '\n# never: FRAME_NUM_BITS = 8 — the width comes from the ACTIVE SPS (test 112)\n' \
+    >> "$1/scripts/clock.sh"
+}
+mut_suppress_t2_row () {  # the extractor goes back to emitting NOTHING for a type-2 picture
+  # The III.1 defect one layer down. A pic_order_cnt_type 2 slice carries no
+  # pic_order_cnt_lsb, so both extractor arms used to skip it entirely — and
+  # the gap was never reported as a gap. Downstream, gate (k) compared row
+  # count to timestamped-packet count, found them unequal, and filed UNPROVEN
+  # with a "count" symptom: an ABSENCE THE EXTRACTOR CREATED, read back as a
+  # fact about the file (measured 2026-08-29 on a mixed capture: POC rows=50,
+  # timestamped packets=100). Both arms are mutated together because a defect
+  # in only one would be caught by test 78's byte-identity pin instead, which
+  # would credit the wrong guard.
+  perl -0pi -e 's/if \(pocf != ""\) \{\n(\s+)if \(cur_poc/if (pocf != "" && cur_poc != "") {\n$1if (cur_poc/' \
+    "$1/scripts/lib-paff.sh"
+  perl -0pi -e 's/if \(!have\) return/if (!have || cur_poc == "") { have = 0; return }/' \
+    "$1/scripts/lib-paff.sh"
+}
+mut_model_the_capability () {  # the shell probe goes back to modelling what h264poc.py knows
+  # pf_poc_capability stands in for h264poc.Parser.capability() at pre-flight,
+  # where parsing the whole stream is too expensive. A stand-in that answers
+  # differently from the authority is not a shortcut, it is a second writer:
+  # measured 2026-08-29, shell said PCAP_OK=no why=poc_type on the same x264
+  # -bf 0 mint the module called (True, "poc_type=2 ... by spec"), and
+  # pairfill refused the build, exit 3, on the shell answer.
+  perl -0pi -e 's/else if\(t1seen\)\{ ok="no"; why="poc_type" \}/else if(rows+0==0){ ok="no"; why="poc_type" }/' \
+    "$1/scripts/lib-paff.sh"
+}
+pro_model_the_capability () {  # prose naming the retired model stays CLEAN
+  printf '\n# never: "no pic_order_cnt_lsb" == "no display order" — pic_order_cnt_type 2\n# derives its position from decode order, and h264poc.py is the authority (test 114)\n' \
+    >> "$1/scripts/clock.sh"
+}
+pro_suppress_t2_row () {  # prose naming the retired skip stays CLEAN
+  printf '\n# never: emit a POC row only when pic_order_cnt_lsb was present — a picture\n# the extractor skips becomes a count disagreement it blames on the file (test 113)\n' \
     >> "$1/scripts/clock.sh"
 }
 mut_unask_trim () {   # the trim-to-idr CALL stops asking (clean.sh's prose still says --preflight-only)
@@ -460,6 +498,10 @@ G45|defect|111-poc-scopes.sh|both scopes on-slot under their OWN modulus|mut_sin
 P45|prose|111-poc-scopes.sh|both scopes on-slot under their OWN modulus|pro_single_poc_modulus
 G46|defect|112-sps-aware-slice-reader.sh|the true value|mut_hardcoded_frame_num_width|want 3
 P46|prose|112-sps-aware-slice-reader.sh|the true value|pro_hardcoded_frame_num_width
+G47|defect|113-poc-type2-scopes.sh|no picture emits nothing|mut_suppress_t2_row|VERIFY_LEDGER gate=k verdict=unproven
+P47|prose|113-poc-type2-scopes.sh|no picture emits nothing|pro_suppress_t2_row
+G48|defect|114-capability-one-authority.sh|the shell probe agrees|mut_model_the_capability|two writers, one fact
+P48|prose|114-capability-one-authority.sh|the shell probe agrees|pro_model_the_capability
 '
 
 # --------------------------------------------------------------------- runner

@@ -4,6 +4,98 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.16.4 — a picture the extractor skipped, blamed on the file (2026-08-29)
+
+Gate (k) declined a whole class of capture with a symptom it had manufactured
+itself. `pic_order_cnt_type = 2` slices carry **no** `pic_order_cnt_lsb` — for
+that type the spec defines display order to equal decode order — and the POC
+extractor emitted no row at all for such a picture. Downstream, the gate
+compared row count to timestamped-packet count, found them unequal, and filed
+UNPROVEN with a `count` symptom. Measured on a mixed type-0/type-2 fixture:
+
+```
+before:  VERIFY_LEDGER gate=k verdict=unproven why=count (POC rows=50, timestamped packets=100)
+after:   VERIFY_LEDGER gate=k verdict=pass why=100/100 pictures on their POC lattice slot across 4 scope(s)
+```
+
+**This is Constitution III.1 one layer down from where it was written.** EMPTY ≠
+ABSENT was applied to the *gates*; here the extractor feeding them created an
+absence, and the count comparison read it as a fact about the file. A missing
+row and a picture with no derivable position are not the same thing, and only
+the second is the file's problem.
+
+Every coded picture now emits exactly one row, carrying a **provenance** column
+that says where its position came from — `lsb` (unwrapped under this scope's
+modulus), `t2` (derived from decode order), or `none` (placeholder). Both
+extractor arms (`pf_trace_census` and `pf_poc_extract`) emit it identically, so
+test 78's byte-identity pin still holds.
+
+**No bar moves — the rule changes, not the standard.** `pf_poc_lattice` judges
+each scope by its own provenance: a `t2` scope must have presentation advancing
+with decode order (a torn one is off-slot, not exempt), an `lsb` scope must fit
+its lattice, and a `none` scope is counted in `PL_NOFIT` with its picture count
+and surfaces as UNPROVEN by index. `pic_order_cnt_type = 1` remains
+unsupported and lands in that third lane. The modulus column is left empty on a
+`t2` row deliberately: `MaxPicOrderCntLsb` is undefined for type 2, and
+carrying the previous SPS's value forward would publish a number that does not
+apply there.
+
+New `tests/regression.d/113-poc-type2-scopes.sh` (17 assertions) pins the three
+judging lanes on synthetic tables, the one-row-per-picture contract and the
+provenance markers on a minted mixed capture, and the end-to-end result that
+the capture is *evaluated* rather than declined on a count. Guard G47 suppresses
+the placeholder emission in a throwaway tree and the old symptom returns
+verbatim (`POC rows=50, timestamped packets=100`, gate (k) UNPROVEN).
+
+**And the same stale premise was refusing whole builds one layer up.** Sweeping
+the class (V.1) found `pf_poc_capability` — the cheap shell head-probe that
+stands in for `h264poc.py` at pre-flight — still modelling "no
+`pic_order_cnt_lsb` rows" as "no display order". On one x264 `-bf 0` mint:
+
+```
+pf_poc_capability      ->  PCAP_OK=no  PCAP_WHY=poc_type
+h264poc.Parser.capability() ->  (True, 'poc_type=2 (display order equals decode order by spec)')
+```
+
+The module that would do the work said it could; the stand-in said it could
+not; and `pairfill-paff.sh` refused the build at pre-flight, **exit 3, nothing
+written**, on the stand-in's answer. That is Constitution IV.2 (ask the
+authority, never model it) failing in the quietest possible direction —
+refusing work that now succeeds. The probe answers `PCAP_OK=yes
+PCAP_WHY=t2_derived` for a derivable stream and keeps `why=poc_type` for
+`pic_order_cnt_type 1`, which **neither** reader supports; `pairfill`'s refusal
+text, its `# TIER 3` classification and its UNPROVEN parenthetical were narrowed
+to what still holds. New `tests/regression.d/114-capability-one-authority.sh`
+(20 assertions) pins the two readers to one answer per `pic_order_cnt_type`
+(0/1/2, media-free via a minted SPS on one side and a canned trace log on the
+other), that the type-2 source is built, and that a type-1 source still exits 3
+with nothing written. `77-poc-capability.sh` keeps every refusal-shape
+assertion, moved onto the type that still refuses (46 assertions, was 40).
+
+**One existing fixture had to change shape, and the change is the point.**
+`90-harness-honesty.sh` §4 pinned pairfill's count-arm UNPROVEN branch by
+minting a census of 75 pictures of which only 70 carried `pic_order_cnt_lsb`,
+on the assumption that the other 5 would yield no rows. They now yield 5
+placeholder rows, so that fixture stopped being a count disagreement and became
+what it always described — five pictures whose position is unproven. The lane
+now mints a genuine picture/packet mismatch (76 census pictures against 75
+timestamped packets, the multi-slice / non-VCL framing class the gate names)
+and pins the identical branch, machine row and retention.
+
+**A guard had gone quiet, too.** G45 (the per-scope-modulus guard) named every
+clause of the scope-open condition in its mutation pattern, so when this round
+added the provenance clause the pattern stopped matching and the case reported
+MUTATE-NOOP — audited zero times while reading as harmless. Its pattern now
+matches the whole condition, and the audit is 4/4 in contract on the affected
+cases.
+
+`tests/regression.d/79-poc-gate-standalone.sh` §3 changed with the capability it
+tests: it pinned exit 10 UNPROVEN for a type-2 artifact, which was honest when
+the gate could not judge one. It now pins exit 0 for a faithful type-2 artifact
+**and exit 1 for a torn one** — the UNPROVEN lane did not disappear, it moved to
+the case that really is unsupported. `references/paff-poc.md` gains §6a with the
+type table and the row format.
+
 ## 1.16.3 — the census breakdown was right; the reference was wrong (2026-08-29)
 
 A carry-forward from 1.16.0 read: *the census classifies feed.ts's 8,617

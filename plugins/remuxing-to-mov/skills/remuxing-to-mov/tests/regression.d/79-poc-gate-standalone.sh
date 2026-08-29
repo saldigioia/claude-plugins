@@ -24,6 +24,7 @@ pass=0; fail=0
 ok () { printf '  \033[32mPASS\033[0m  %s\n' "$1"; pass=$((pass+1)); }
 no () { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=$((fail+1)); }
 has () { case "$1" in *"$2"*) ok "$3";; *) no "$3 [missing: $2]";; esac; }
+hasnt () { case "$1" in *"$2"*) no "$3 [unexpected: $2]";; *) ok "$3";; esac; }
 ff () { ffmpeg -nostdin -y -v error "$@"; }
 PG="$SC/poc-gate.sh"
 [ -f "$PG" ] || { no "scripts/poc-gate.sh does not exist"; echo "poc-gate-standalone: $pass passed, $((fail)) failed"; exit 1; }
@@ -45,11 +46,33 @@ has "$o" "PP_POC_LATTICE on_slot=" "prints the PP_POC_LATTICE machine row"
 has "$o" " off=0" "every picture on its slot"
 
 echo
-echo "== 3. type-2 artifact -> 10 UNPROVEN (never 1: no bless decision here) =="
+echo "== 3. type-2 artifact is now JUDGED by its own rule (1.16.4) =="
+# UNTIL 1.16.4 this pinned exit 10 UNPROVEN: the extractor emitted no row for a
+# pic_order_cnt_type 2 picture, so the gate had nothing to judge and said so.
+# That was honest and it was also a blind spot — for type 2 the spec DEFINES
+# display order to equal decode order, so the presentation position is
+# derivable, not missing. The gate now judges those scopes by that rule.
+# UNPROVEN did not go away; it moved to the case that really is unsupported
+# (pic_order_cnt_type 1), pinned in 113 §3.
 o=$(bash "$PG" "$WORK/t2.mov" 2>&1); rc=$?
-[ "$rc" -eq 10 ] && ok "type-2 artifact -> exit 10 (UNPROVEN, REVIEW semantics)" || no "type-2 artifact rc=$rc, want 10"
-has "$o" "UNPROVEN" "verdict text says UNPROVEN"
-has "$o" "PP_POC_LATTICE unproven=1 why=poc_type" "machine row: unproven=1 why=poc_type"
+[ "$rc" -eq 0 ] && ok "a faithful type-2 artifact -> exit 0 (judged, not declined)" || { no "type-2 artifact rc=$rc, want 0"; printf '%s\n' "$o" | tail -3; }
+has "$o" "PP_POC_LATTICE on_slot=" "…with the same machine row every other verdict prints"
+hasnt "$o" "unproven=1" "no UNPROVEN row for a stream whose order IS derivable"
+# THE TEETH, on the same media: presentation that does not advance with decode
+# order is off-slot, because that is exactly what type 2 promises.
+if ffmpeg -nostdin -hide_banner -bsfs 2>/dev/null | grep -qw setts; then
+  ffmpeg -nostdin -y -v error -i "$WORK/t2.mov" -map 0:v:0 -c copy \
+    -bsf:v "setts=pts=if(eq(mod(N\,2)\,0)\,PTS+14400\,PTS)" -tag:v avc1 "$WORK/t2torn.mov" 2>/dev/null
+  if [ -s "$WORK/t2torn.mov" ]; then
+    o=$(bash "$PG" "$WORK/t2torn.mov" 2>&1); rc=$?
+    [ "$rc" -eq 1 ] && ok "a type-2 artifact out of decode order -> exit 1 (the rule has teeth)" \
+      || no "torn type-2 artifact rc=$rc, want 1"
+  else
+    echo "  (skip: this ffmpeg could not mint the torn type-2 variant)"
+  fi
+else
+  echo "  (skip: this ffmpeg has no setts bsf — the torn variant needs it)"
+fi
 
 echo
 echo "== 4. --table: the unit lane's entry point (test 76's table shapes) =="

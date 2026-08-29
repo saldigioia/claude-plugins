@@ -2,14 +2,25 @@
 # 77-poc-capability.sh — WO-1.15.3 Item 1: the POC gate's capability is
 # knowable at pre-flight, and the build never asks.
 #
-# Pre-round measured (2026-08-27, this bench): a pic_order_cnt_type=2 source
-# (x264 -bf 0) hands the junction model's POC-lattice gate ZERO extractable
-# rows — knowable from a 40-frame head probe in seconds — yet pairfill ran the
-# ENTIRE mux plus a whole-file output parse to reach a foregone UNPROVEN,
-# exit 1, .part retained (field-recorded on the 23.68 GB job: ~55 min mux +
-# 26 min parse). The 1.15.2 Item C precedent (zero-base's 23.68 GB build to a
-# foregone hard-stop) applies verbatim: refuse at pre-flight, exit 3, nothing
-# written. NO bypass flag (1.15.2 Defect-B lesson: a gate waived into
+# Pre-round measured (2026-08-27, this bench): a source whose pictures carry no
+# statable display position hands the junction model's POC-lattice gate ZERO
+# usable rows — knowable from a 40-frame head probe in seconds — yet pairfill
+# ran the ENTIRE mux plus a whole-file output parse to reach a foregone
+# UNPROVEN, exit 1, .part retained (field-recorded on the 23.68 GB job: ~55 min
+# mux + 26 min parse). The 1.15.2 Item C precedent (zero-base's 23.68 GB build
+# to a foregone hard-stop) applies verbatim: refuse at pre-flight, exit 3,
+# nothing written.
+#
+# WHICH SOURCES THOSE ARE CHANGED IN 1.16.4, and the refusal did not. It was
+# written for `pic_order_cnt_type != 0` because nothing here could then read a
+# type-2 stream. Type 2 carries no pic_order_cnt_lsb because the spec defines
+# display order to EQUAL decode order — the position is derivable, and since
+# 1.16.4 the lattice judges those scopes by that rule. So the refusal now
+# belongs to `pic_order_cnt_type 1` alone, which neither this probe nor
+# h264poc.py can state a position for. §3 drives it through the canned-log hook
+# (x264 mints only types 0 and 2), §4 pins that the type-2 source it used to
+# refuse is now built, and test 114 pins the shell probe and the module to one
+# answer. NO bypass flag (1.15.2 Defect-B lesson: a gate waived into
 # UNPROVEN-by-default is no gate); the manual route and the auto.sh driver
 # consequence are named in the refusal instead.
 #
@@ -83,13 +94,31 @@ cat > "$WORK/head_t2.log" <<'LOG'
 [trace_headers @ 0x1] 8           first_mb_in_slice                                           1 = 0
 LOG
 eval "$(pf_poc_capability "$WORK/head_t2.log")"
-[ "${PCAP_OK:-yes}" = no ] && ok "type-2 log: PCAP_OK=no" || no "type-2 log: PCAP_OK=${PCAP_OK:-unset}, want no"
-[ "${PCAP_WHY:-}" = poc_type ] && ok "type-2 log: PCAP_WHY=poc_type" || no "PCAP_WHY=${PCAP_WHY:-unset}, want poc_type"
-{ [ -n "${PCAP_WHY:-}" ] && [ "${PCAP_WHY:-}" != - ]; } \
-  && ok "capable=no => PCAP_WHY nonempty (the relationship pin)" || no "capable=no with empty/placeholder PCAP_WHY"
-[ "${PCAP_POC_TYPE:--1}" = 2 ] && ok "type-2 log: PCAP_POC_TYPE=2 (named in the refusal)" || no "PCAP_POC_TYPE=${PCAP_POC_TYPE:-unset}, want 2"
+[ "${PCAP_OK:-no}" = yes ] && ok "type-2 log: PCAP_OK=yes (the position is derivable, 1.16.4)" \
+  || no "type-2 log: PCAP_OK=${PCAP_OK:-unset}, want yes"
+[ "${PCAP_WHY:-}" = t2_derived ] && ok "type-2 log: PCAP_WHY names HOW (t2_derived), not a refusal" \
+  || no "PCAP_WHY=${PCAP_WHY:-unset}, want t2_derived"
+[ "${PCAP_POC_TYPE:--1}" = 2 ] && ok "type-2 log: PCAP_POC_TYPE=2 (named either way)" || no "PCAP_POC_TYPE=${PCAP_POC_TYPE:-unset}, want 2"
 [ "${PCAP_LSB_ROWS:-9}" = 0 ] && ok "type-2 log: zero lsb rows" || no "PCAP_LSB_ROWS=${PCAP_LSB_ROWS:-unset}, want 0"
 [ "${PCAP_MAXLSB:-9}" = 0 ] && ok "type-2 log: PCAP_MAXLSB=0 (no SPS value to carry)" || no "PCAP_MAXLSB=${PCAP_MAXLSB:-unset}, want 0"
+
+# type-1 shape: pic_order_cnt_type 1 — no lsb rows either, and unlike type 2 no
+# rule that derives the position. NEITHER reader supports it (h264poc.py's
+# capability() says so by name), so this is the log that still refuses.
+cat > "$WORK/head_t1.log" <<'LOG'
+[trace_headers @ 0x1] 41          pic_order_cnt_type                                        010 = 1
+[trace_headers @ 0x1] 7           nal_unit_type                                           00101 = 5
+[trace_headers @ 0x1] 8           first_mb_in_slice                                           1 = 0
+[trace_headers @ 0x1] 7           nal_unit_type                                           00001 = 1
+[trace_headers @ 0x1] 8           first_mb_in_slice                                           1 = 0
+[trace_headers @ 0x1] 8           first_mb_in_slice                                           1 = 0
+LOG
+eval "$(pf_poc_capability "$WORK/head_t1.log")"
+[ "${PCAP_OK:-yes}" = no ] && ok "type-1 log: PCAP_OK=no" || no "type-1 log: PCAP_OK=${PCAP_OK:-unset}, want no"
+[ "${PCAP_WHY:-}" = poc_type ] && ok "type-1 log: PCAP_WHY=poc_type" || no "PCAP_WHY=${PCAP_WHY:-unset}, want poc_type"
+{ [ -n "${PCAP_WHY:-}" ] && [ "${PCAP_WHY:-}" != - ]; } \
+  && ok "capable=no => PCAP_WHY nonempty (the relationship pin)" || no "capable=no with empty/placeholder PCAP_WHY"
+[ "${PCAP_POC_TYPE:--1}" = 1 ] && ok "type-1 log: PCAP_POC_TYPE=1 (named in the refusal)" || no "PCAP_POC_TYPE=${PCAP_POC_TYPE:-unset}, want 1"
 
 # empty log: the old "parsed no coded picture" refusal folds into no_pictures
 : > "$WORK/head_empty.log"
@@ -118,15 +147,18 @@ N/A,N/A
 CSV
 
 echo
-echo "== 3. junction path on a type-2 source: refused at PRE-FLIGHT, exit 3, nothing written =="
+echo "== 3. junction path on an UNREADABLE source: refused at PRE-FLIGHT, exit 3, nothing written =="
 # PF_SETTS_OK=yes pins past precondition 1 hermetically on any bench; the
 # refusal under test is the capability pre-flight, which comes after it.
-o=$(PP_SCAN_FILE="$WORK/scan_run2.csv" PF_SETTS_OK=yes \
-    bash "$PF" "$WORK/poc2.ts" "$WORK/j2.mov" --rate 50 2>&1); rc=$?
-[ "$rc" -eq 3 ] && ok "type-2 junction source -> exit 3 (pre-flight refusal)" \
-  || no "type-2 junction source rc=$rc, want 3 (pre-round measured: rc=1 AFTER the whole build)"
-has "$o" "JUNCTION MODEL REFUSED: pic_order_cnt_type=2" "refusal names the measured pic_order_cnt_type"
-has "$o" "pic_order_cnt_lsb" "refusal names the missing syntax element"
+# The head-log hook supplies the pic_order_cnt_type this bench cannot mint
+# (x264 emits 0 and 2 only) — and, because the FILE here is type 0, it also
+# pins that the hook drives the verdict rather than the media.
+o=$(PP_SCAN_FILE="$WORK/scan_run2.csv" PF_SETTS_OK=yes PF_HEAD_TRACE_FILE="$WORK/head_t1.log" \
+    bash "$PF" "$WORK/poc0.ts" "$WORK/j2.mov" --rate 50 2>&1); rc=$?
+[ "$rc" -eq 3 ] && ok "type-1 junction source -> exit 3 (pre-flight refusal)" \
+  || no "type-1 junction source rc=$rc, want 3 (pre-round measured: rc=1 AFTER the whole build)"
+has "$o" "JUNCTION MODEL REFUSED: pic_order_cnt_type=1" "refusal names the measured pic_order_cnt_type"
+has "$o" "display position can be stated" "refusal states that no display position can be stated"
 has "$o" "UNPROVEN" "refusal states the foregone verdict the build would reach"
 has "$o" "Nothing was built" "refusal states nothing was built"
 has "$o" "references/timeline-repair.md" "refusal names the manual route (unproven, by hand)"
@@ -134,6 +166,7 @@ has "$o" "auto.sh" "refusal names the driver consequence (Item 1 step 6)"
 has "$o" "rebuild" "refusal names the PF_REORDER=no fallthrough (flattening rebuild)"
 has "$o" "3-DERIVE" "refusal names the reorder+derive escalation (Rung 3-DERIVE)"
 has "$o" "PP_POC_CAPABILITY ok=no why=poc_type" "machine row emitted on the refusal path"
+has "$o" "pic_order_cnt_type 2 is NOT this case" "…and the refusal says which type it does NOT cover"
 hasnt "$o" "-- muxing" "the mux never started"
 if ls "$WORK"/j2* >/dev/null 2>&1; then no "refusal wrote something (ls: $(ls "$WORK"/j2*))"
 else ok "nothing written by pairfill (no output, no .part)"; fi
@@ -142,12 +175,15 @@ hasnt "$o" "RTM_PRECOND_ATTEST" "no attestation bypass on the capability refusal
 hasnt "$o" "I attest" "no attestation string offered"
 
 echo
-echo "== 4. hermetic hook: PF_HEAD_TRACE_FILE drives the pre-flight, not the file =="
-o=$(PP_SCAN_FILE="$WORK/scan_run2.csv" PF_SETTS_OK=yes PF_HEAD_TRACE_FILE="$WORK/head_t2.log" \
-    bash "$PF" "$WORK/poc0.ts" "$WORK/j3.mov" --rate 50 2>&1); rc=$?
-{ [ "$rc" -eq 3 ] && case "$o" in *"pic_order_cnt_type=2"*) true;; *) false;; esac; } \
-  && ok "canned type-2 head log refuses a type-0 file (hook drives the verdict)" \
-  || no "PF_HEAD_TRACE_FILE hook not honored (rc=$rc)"
+echo "== 4. the type-2 source this pre-flight used to refuse is now BUILT =="
+o=$(PP_SCAN_FILE="$WORK/scan_run2.csv" PF_SETTS_OK=yes \
+    bash "$PF" "$WORK/poc2.ts" "$WORK/j3.mov" --rate 50 2>&1); rc=$?
+has "$o" "PP_POC_CAPABILITY ok=yes why=t2_derived" "the capability row says capable, and how"
+case "$o" in
+  *"JUNCTION MODEL REFUSED: pic_order_cnt_type=2"*) no "still refused at pre-flight on the POC capability" ;;
+  *) ok "no POC-capability refusal for a stream whose order is derivable" ;;
+esac
+hasnt "$o" "cannot evaluate any build from it" "no refusal claims the lattice cannot evaluate this build"
 
 echo
 echo "== 5. type-0 source: the pre-flight ANNOUNCES capability and lets the build proceed =="

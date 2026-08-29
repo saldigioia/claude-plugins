@@ -113,13 +113,24 @@ if pf_setts_probe 'if(lt(PTS\,-8000000000000000000)\,NEXT_PTS\,PTS)'; then
   S75="$WORK/s75.ts"
   ff -f lavfi -i testsrc2=r=25:s=320x240:d=3 -c:v libx264 -bf 3 -g 25 -pix_fmt yuv420p -f mpegts "$S75" \
     || { echo "mint failed"; exit 2; }
-  # canned census: 75 pictures (so the junction histogram gate PASSES against
-  # the written 75 pair-durations) but only 70 carry pic_order_cnt_lsb — the
-  # census side table comes up short and the COUNT guard must trip.
-  awk 'BEGIN{ for(i=0;i<75;i++){
+  # canned census: 76 pictures against the output's 75 timestamped packets, so
+  # the count guard trips on a REAL disagreement between what the census saw
+  # and what the artifact carries (the multi-slice / non-VCL framing class the
+  # gate names). 80 is too far — the duration histogram refuses first.
+  #
+  # THE SHAPE CHANGED IN 1.16.4, and the branch under test did not. This lane
+  # used to mint 75 pictures of which only 70 carried pic_order_cnt_lsb, on the
+  # assumption that a picture without that syntax element yields no row. It no
+  # longer does: every coded picture emits a row, carrying the provenance of
+  # its position, so "the extractor skipped 5 pictures" stopped being a count
+  # disagreement and became 5 UNPROVEN placeholders — which is the whole point
+  # of that change (a gap the extractor creates must never read as a fact about
+  # the file). The count arm survives for genuine picture/packet mismatches,
+  # and that is what this fixture now produces.
+  awk 'BEGIN{ for(i=0;i<76;i++){
         printf "[trace_headers @ 0x1] 7           nal_unit_type                                           00001 = %d\n", (i==0?5:1)
         print  "[trace_headers @ 0x1] 8           first_mb_in_slice                                           1 = 0"
-        if(i<70) printf "[trace_headers @ 0x1] 5           pic_order_cnt_lsb                                  0000000000 = %d\n", (2*i)%256 } }' \
+        printf "[trace_headers @ 0x1] 5           pic_order_cnt_lsb                                  0000000000 = %d\n", (2*i)%256 } }' \
     > "$WORK/census75.log"
   cat > "$WORK/scan_run2.csv" <<'CSV'
 0,0
@@ -138,7 +149,7 @@ CSV
   t_has "$o" "consequence: the POC gate's count guard WILL trip" "the census announces the foregone ceiling pre-mux"
   [ "$rc" -eq 1 ] && t_ok "in-situ UNPROVEN keeps exit 1 (a bless decision is at stake)" || t_no "E6 run rc=$rc, want 1"
   t_has "$o" ">> POC-LATTICE GATE UNPROVEN" "the count arm reaches the in-situ UNPROVEN branch"
-  t_has "$o" "PP_POC_LATTICE unproven=1 why=count rows=70 packets=75" "machine row: why=count with the real counts"
+  t_has "$o" "PP_POC_LATTICE unproven=1 why=count rows=76 packets=75" "machine row: why=count with the real counts"
   t_has "$o" "re-judge: scripts/poc-gate.sh" "retention names the re-judge route"
   ls "$WORK"/e6.part* >/dev/null 2>&1 && t_ok ".part kept for the closer look" || t_no "no .part kept"
 else
