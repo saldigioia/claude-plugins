@@ -60,7 +60,13 @@ DERIVE="scripts/derive-dts.sh \"$IN\" OUT.mov"
 # (half_ts OR reorder -> pairfill) sent fully-timestamped reordered streams
 # into pairfill's exit 3 with PF_NOPTS_FRAC=0.000 in scope and ignored — the
 # 2023-VMA misroute.
-FRAC0=0; awk "BEGIN{exit !((${PF_NOPTS_FRAC:-0})+0 <= 0.001)}" && FRAC0=1
+# WO-1.15.20 S2/S3: the derive route now covers TWO classes — PTS-complete
+# outright, and sparse-unstamped (isolated holes the rung's pre-pass stamps
+# from their pair-mates first). pf_derive_routable is the shared predicate, so
+# diagnose and auto.sh cannot drift apart on the same measurement; DRV_SPARSE
+# records which of the two this file is, for the verdict's own prose.
+FRAC0=0; pf_derive_routable && FRAC0=1
+DRV_SPARSE=0; pf_sparse_nopts && DRV_SPARSE=1
 if [ "$PF_HALF_TS" = yes ] && [ "${PF_CODEC:-na}" = h264 ]; then
   REPAIR="$PFILL"
   REPAIR_WHY="half_ts=yes (nopts_frac=$PF_NOPTS_FRAC — the pair signature): keep every real PTS, fill the pair-mates"
@@ -72,7 +78,11 @@ elif [ "$PF_REORDER" = yes ] && [ "$FRAC0" -eq 1 ]; then
     REPAIR_WHY="nopts_frac=$PF_NOPTS_FRAC + reorder=yes, but depth_class=unknown — evidence that cannot support a derivation must not route one automatically"
   else
     REPAIR="$DERIVE"
-    REPAIR_WHY="nopts_frac=$PF_NOPTS_FRAC (PTS-complete) + reorder=yes (depth_class=$PF_DEPTH_CLASS, dts_short=${PF_DTS_SHORT:-unknown}, dts_source=${PF_DTS_SOURCE:-carried}): derive DTS from the sorted PTS — absent, reconstructed or carried-but-rotten DTS is discarded either way"
+    if [ "$DRV_SPARSE" -eq 1 ]; then
+      REPAIR_WHY="nopts_frac=$PF_NOPTS_FRAC (head window; sparse-unstamped, NOT the ~0.5 pair signature) + reorder=yes (depth_class=$PF_DEPTH_CLASS, dts_short=${PF_DTS_SHORT:-unknown}, dts_source=${PF_DTS_SOURCE:-carried}): the rung's pre-pass stamps each isolated unstamped packet from its pair-mate, then derives DTS from the sorted PTS. It reads EVERY packet before writing a byte and refuses the whole file if any hole lacks a timestamped mate — this fraction routes the decision, it does not make it"
+    else
+      REPAIR_WHY="nopts_frac=$PF_NOPTS_FRAC (PTS-complete) + reorder=yes (depth_class=$PF_DEPTH_CLASS, dts_short=${PF_DTS_SHORT:-unknown}, dts_source=${PF_DTS_SOURCE:-carried}): derive DTS from the sorted PTS — absent, reconstructed or carried-but-rotten DTS is discarded either way"
+    fi
   fi
 elif [ "${PF_CODEC:-na}" != h264 ] && [ "${PF_CODEC:-na}" != na ]; then
   # non-H.264 timeline rot (mpeg2video .mpg/.vob included): pairfill refuses the
@@ -80,9 +90,30 @@ elif [ "${PF_CODEC:-na}" != h264 ] && [ "${PF_CODEC:-na}" != na ]; then
   # H.264-only. derive-dts is codec-agnostic (packets copied untouched).
   REPAIR="$DERIVE"
   REPAIR_WHY="codec=$PF_CODEC (non-H.264: pairfill exits 3 on codec, rebuild's -f h264 extraction cannot apply) -> derive-dts is the codec-agnostic timeline repair; its own gate refuses if PTS is incomplete (nopts_frac=$PF_NOPTS_FRAC)"
-elif [ "$PF_HALF_TS" = yes ] || [ "$PF_REORDER" = yes ]; then
+elif [ "$PF_HALF_TS" = yes ]; then
   REPAIR="$PFILL"
-  REPAIR_WHY="reorder=$PF_REORDER with partial timestamps (nopts_frac=$PF_NOPTS_FRAC, half_ts=$PF_HALF_TS): pairfill keeps every surviving PTS; its own gates refuse (exit 3) if the shape is not the pair class"
+  # WO-1.15.20 S1 (the sixth defect). This branch used to be reached by
+  # `half_ts=yes OR reorder=yes` and promised that "its own gates refuse (exit
+  # 3) if the shape is not the pair class". MEASURED FALSE: pairfill's shape
+  # checks are warnings that PROCEED (pairfill-paff.sh, the paff= note and the
+  # F9 half_ts warning); its only exit-3 refusals are codec, rate-map and the
+  # alternation preconditions. An operator following that verdict on a
+  # half_ts=no source got a full-length build (~26.8 GB on the 2024-VMA
+  # capture) and a post-write timeline-gate rejection, on the promise the tool
+  # would refuse first. Two fixes: the reorder-only arm no longer lands here at
+  # all (see the else below), and the prose now states what the tool does.
+  # Same rule as F1/1.15.11 — the clinic must not hand you a refusal, nor
+  # promise you one.
+  REPAIR_WHY="half_ts=$PF_HALF_TS with partial timestamps (nopts_frac=$PF_NOPTS_FRAC): pairfill keeps every surviving PTS and fills each pair-mate. Its shape checks WARN and build — the refusals it does have are codec, rate-map and pair-alternation, so judge the fit from the measurements above before spending a full-length write"
+elif [ "$PF_REORDER" = yes ]; then
+  # WO-1.15.20 S1/S2: reorder=yes + half_ts=no + an unstamped fraction past the
+  # sparse bound. Neither rung's precondition holds and no composition covers
+  # it: the pre-pass reconstructs ISOLATED holes only, and pairfill wants ~0.5.
+  # auto.sh prints the same verdict for the same profile (pinned by test 96) —
+  # a diagnostic that routes where the ladder refuses is worse than silent.
+  DRV_UNK=1
+  REPAIR="NO AUTOMATIC ROUTE — this profile has no rung; scripts/derive-dts.sh \"$IN\" OUT.mov will read the whole file and tell you exactly which packets it cannot place (nothing is written unless it can place all of them)"
+  REPAIR_WHY="reorder=yes, half_ts=no, nopts_frac=$PF_NOPTS_FRAC — past the sparse bound ${RTM_SPARSE_NOPTS_MAX} the derive pre-pass covers, and far short of the ~0.5 pair signature pairfill needs. The constant-rate rebuild is refused by doctrine while a reorder pyramid is present (it would flatten PTS to DTS and play fields in decode order). The source remains the master"
 else
   REPAIR="$RB"
   REPAIR_WHY="reorder=no, half_ts=no (nopts_frac=$PF_NOPTS_FRAC): no reorder pyramid survives, so the constant-rate rebuild is safe (H.264-only)"

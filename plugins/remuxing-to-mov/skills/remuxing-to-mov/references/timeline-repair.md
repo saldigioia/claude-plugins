@@ -227,6 +227,66 @@ or the recorded attestation — never restamped on a guess. Pairfill is for
 the half-timestamped class only; the flattening rebuild below is for
 no-surviving-reorder only — the rung must match the measured profile.
 
+**The sparse-unstamped class, and the pre-pass that repairs it (1.15.20).**
+A stream can be PTS-complete *except* for a handful of isolated packets. The
+motivating case: a 25.38 GB 2024 broadcast capture with **24 unstamped video
+packets out of 424,645** — 5.65e-5 — in three clusters, two with stride 2.
+That file fits neither rung. Derive needs the fraction to be exactly zero,
+because it computes `DTS[i] = sorted_pts[i-D]` by INDEXING the sorted PTS
+column and an unstamped packet has no position in it. Pair-fill needs it near
+one half, because its model is a pair-cadence ramp over alternating fields.
+Sitting between them cost that capture two full-length writes (27.2 GB on a
+copy rung, then 26.8 GB on pair-fill) before anything refused it.
+
+`derive-dts.py` now runs a **bounded pre-pass** before the derivation. When the
+unstamped set is SPARSE (`RTM_SPARSE_NOPTS_MAX`, default 0.01 — a cut in the
+empty band between the two rungs, 35x below pairfill's 0.35 floor) and every
+member's value is forced by evidence, it reconstructs those PTS and the
+derivation then runs UNCHANGED on a complete column.
+
+*This is not a loosened gate.* Raising the routing bound alone was investigated
+and rejected — it only sends a file to a derivation that still cannot place its
+unstamped packets. The pre-pass does not widen the precondition; it SATISFIES
+it, from measurement, before the derivation starts.
+
+**The one evidence rule is the pair-mate.** A PAFF field pair is two ADJACENT
+coded pictures — the two fields of one frame — one field duration apart;
+reordering moves whole pairs and never lifts a field out of its pair. The
+pairing is proven over the WHOLE file (every adjacent pair at the winning
+coded-index parity must differ by exactly one field duration, and the opposite
+parity must decisively not), which identifies each hole's mate and so its
+value. This is why "stride 2" matters in the capture above: every hole is one
+field of a distinct consecutive pair, so every hole has a live mate.
+
+**Rejected, because a plausible rule that is wrong is worse than none:**
+"both neighbours timestamped and exactly two field durations apart, so the
+value is forced." It is not forced. In CODED order a reorder anchor sits
+between two packets of a sequential run without disturbing their arithmetic.
+Measured on the round's own fixture — coded 306/307/308 read PTS 1227600 /
+1252800 / 1234800; the neighbours are exactly 2 steps apart and the packet
+between them is the next P anchor, seven steps from where the cadence claims.
+The rule proposed a value another packet already carried. Widening the window
+does not help. Container arithmetic cannot tell "continues the run" from "is
+the next anchor", so a stream with no provable field pairing is REFUSED.
+
+**Refusals (exit 3, whole file, nothing written).** Any hole without a
+timestamped mate — two unstamped packets side by side (each is the other's
+mate), a hole whose mate falls off the end, or an unprovable pairing. A
+reconstructed value that collides with a timestamp already on the timeline. A
+fraction past the sparse bound. Never a partial fill: that is invented timing
+with better manners.
+
+**Provenance.** Every reconstruction is announced as a `DERIVE_STAMP idx= pts=
+mate= rule=` row and counted on the `DERIVE_DTS` machine line as `stamped=N`,
+so the artifact records that N of its timestamps are reconstructions. Output
+gate 2 is told exactly which extra values to expect rather than loosened to
+tolerate a surplus. The essence is untouched — stamps are container metadata,
+and the packet-hash gates run unchanged.
+
+**Rung 4 / gate-loosening remains rejected** for the reason above: the
+derivation indexes a column unstamped packets have no place in. The pre-pass
+gives them a place from evidence; it does not lower the bar.
+
 **Rung 3 — full timeline rebuild (`rebuild-paff.sh IN OUT RATE [TS]`):**
 Discard container timestamps and re-derive at the true field rate. Video stays
 bit-identical; the H.264 parser rebuilds proper access units on re-ingest.

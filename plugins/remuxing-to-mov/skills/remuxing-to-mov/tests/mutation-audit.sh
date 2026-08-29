@@ -123,6 +123,23 @@ mut_dup_aud_manifest () {  # a SECOND definition in the SAME file (grep -l blind
 }
 mut_dup_disk_preflight () { printf '\nrtm_disk_preflight () { : ; }\n' >> "$1/scripts/lib-mux.sh"; }
 mut_dup_lock ()           { printf '\nrtm_lock () { : ; }\n'           >> "$1/scripts/lib-mux.sh"; }
+# --- WO-1.15.20 guards -------------------------------------------------------
+mut_false_exit3_promise () {   # the sixth defect, put back into the routing prose
+  perl -pi -e 's|(REPAIR_WHY="half_ts=\$PF_HALF_TS)|$1 — its own gates refuse (exit 3) if the shape is not the pair class;|' \
+    "$1/scripts/diagnose.sh"
+}
+mut_no_rung_composes () {      # the retired claim, shipped again in a verdict
+  perl -pi -e 's|(echo "   Diagnose: scripts/diagnose.sh)|echo "   no rung composes '"'"'fill the few missing PTS'"'"' -> '"'"'derive DTS'"'"'."\n        $1|' \
+    "$1/scripts/auto.sh"
+}
+mut_hardcode_version () {      # the stale-string trap: a script keeps its own copy
+  printf '\nRTM_PLUGIN_VERSION="1.15.20"\n' >> "$1/scripts/doctor.sh"
+}
+mut_dup_sparse_bound () {      # a SECOND definition in the same file
+  printf '\nRTM_SPARSE_NOPTS_MAX="${RTM_SPARSE_NOPTS_MAX:-0.05}"\n' >> "$1/scripts/lib-paff.sh"
+}
+pro_false_exit3_promise () { printf '\n# the 2024-VMA defect: prose claiming its own gates refuse (exit 3) if the shape is wrong\n' >> "$1/scripts/clock.sh"; }
+pro_hardcode_version ()    { printf '\n# never hardcode: VERSION=1.15.20 belongs in the manifest, read at runtime\n' >> "$1/scripts/clock.sh"; }
 mut_ffp_head () {     # reintroduce the 1.15.2 SIGPIPE shape
   printf '\n_m=$(ffp -v error -show_entries format=duration -of csv=p=0 "$IN" | head -1)\n' >> "$1/scripts/clock.sh"
 }
@@ -325,6 +342,12 @@ P14|prose|41-422-empirical.sh|within reach of a live yuv422p predicate|pro_422_r
 P19|prose|73-rewrap-sigpipe.sh|pipes into head|pro_program_head
 P21|prose|93-clean-paff-route.sh|asks zero-base for its own verdict|pro_unask_zerobase
 P22|prose|93-clean-paff-route.sh|the axis closed without it|pro_nprog_model
+G36|defect|99-route-prose-and-identity.sh|no script promises pairfill refuses on shape|mut_false_exit3_promise
+G37|defect|99-route-prose-and-identity.sh|the retired claim survives in no script|mut_no_rung_composes
+G38|defect|99-route-prose-and-identity.sh|no script assigns a hardcoded plugin version|mut_hardcode_version
+G39|defect|99-route-prose-and-identity.sh|the shell half defines the sparse bound exactly once|mut_dup_sparse_bound
+P36|prose|99-route-prose-and-identity.sh|no script promises pairfill refuses on shape|pro_false_exit3_promise
+P38|prose|99-route-prose-and-identity.sh|no script assigns a hardcoded plugin version|pro_hardcode_version
 G24|defect|94-rot-sweep.sh|every set +e region restores set -e|mut_unrestored_errexit
 G24b|defect|94-rot-sweep.sh|every set +e region restores set -e|mut_exit_while_disarmed
 G25|defect|94-rot-sweep.sh|no literal copy of the vocabulary survives|mut_vocab_copy

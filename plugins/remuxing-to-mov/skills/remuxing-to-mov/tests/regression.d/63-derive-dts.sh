@@ -109,12 +109,36 @@ o=$(CLAUDE_PLUGIN_DATA="$WORK/shimdata" PF_PKT_TICKS_FILE="$WORK/dup.csv" \
 [ "$rc" -eq 3 ] && ok "duplicate PTS -> SIGNATURE REFUSED, exit 3" || no "dup-PTS rc=$rc, want 3"
 has "$o" "duplicate PTS" "the refusal names the duplication"
 
-# N/A-PTS injection -> exit 3, routed to pairfill (the half-timestamped class)
+# N/A-PTS injection -> exit 3. WHICH route the refusal names is CONDITIONAL on
+# the measured pair signature (F9, ported WO-1.15.20 S0), so both arms are
+# pinned here — and the profile is measured by derive-dts.sh's own window scan.
+# Pre-S0 this script read an unset PF_HALF_TS, defaulted it to `no`, and could
+# only ever print the second arm; the first was unreachable and the refusal
+# asserted "half_ts=no" whether or not anything had measured it.
+#
+# arm 1 — a TRUE pair signature (alternating stamped/unstamped, fraction 0.5):
+# this IS pairfill's class and the refusal must say so.
+awk 'BEGIN{for(i=0;i<50;i++){printf "%d,%d\n", i*33, i*33; print "N/A,N/A"}}' > "$WORK/half.csv"
+o=$(CLAUDE_PLUGIN_DATA="$WORK/shimdata" PF_PKT_TICKS_FILE="$WORK/half.csv" \
+    bash "$SC/derive-dts.sh" "$ANYIN" "$WORK/half.mov" 2>&1); rc=$?
+[ "$rc" -eq 3 ] && ok "half-timestamped column -> SIGNATURE REFUSED, exit 3" || no "half rc=$rc, want 3"
+has "$o" "half_ts=yes" "the profile is MEASURED, not defaulted"
+has "$o" "pairfill-paff.sh" "a real pair signature routes to pairfill (the class that owns it)"
+
+# arm 2 — unstamped packets that are NOT the pair signature and NOT sparse
+# (0.333: below the 0.35 band, far above the sparse bound). Neither rung's
+# precondition holds, so the refusal must decline to name a route rather than
+# send a full-length build to a tool that would warn-and-proceed into a
+# post-write rejection (the 2024-VMA 26.8 GB path).
 awk 'BEGIN{for(i=0;i<50;i++){printf "%d,%d\n", i*33, i*33; if(i%2)print "N/A,N/A"}}' > "$WORK/napts.csv"
 o=$(CLAUDE_PLUGIN_DATA="$WORK/shimdata" PF_PKT_TICKS_FILE="$WORK/napts.csv" \
     bash "$SC/derive-dts.sh" "$ANYIN" "$WORK/na.mov" 2>&1); rc=$?
 [ "$rc" -eq 3 ] && ok "N/A-PTS packets -> SIGNATURE REFUSED, exit 3" || no "N/A-PTS rc=$rc, want 3"
-has "$o" "pairfill-paff.sh" "the refusal routes to pairfill (the class that owns missing PTS)"
+has "$o" "half_ts=no (nopts_frac=0.333)" "the refusal quotes the fraction it measured"
+has "$o" "NOT the pairfill" "0.333 is not the pair class — the refusal says so"
+case "$o" in *"scripts/pairfill-paff.sh"*)
+  no "the non-pair refusal still routes to pairfill — the dead-end F9 removed" ;;
+*) ok "no pairfill route offered for a shape pairfill would not refuse" ;; esac
 
 echo
 echo "== 4. the minted reordered MKV + chapters (fixture for guard + end-to-end) =="

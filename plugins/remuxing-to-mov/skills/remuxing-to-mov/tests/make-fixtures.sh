@@ -28,6 +28,15 @@
 #   h264_422*.ts,    HEVC Rext (hvc1) — backhaul-gate phases; m2v420.ts is the
 #   hevc_422_10.mov, verified-good 4:2:0 control that must keep passing
 #   m2v420.ts
+#   sparse-nopts.ts  a REORDERED field-pair timeline that is PTS-complete
+#                    EXCEPT a few isolated unstamped packets in stride-2
+#                    clusters, each with a timestamped pair-mate — the class
+#                    the 2024-VMA capture is (24 of 424,645), and the one
+#                    Rung 3-DERIVE's sparse pre-pass reconstructs (WO-1.15.20)
+#   sparse-orphan.ts the same, plus TWO unstamped packets side by side: each
+#                    is the other's mate, so neither has evidence. The refusal
+#                    control — the rung must refuse the WHOLE file, not fill
+#                    the seven it can and derive anyway
 #   aac.ts           H.264 + ADTS AAC control — ffmpeg auto-inserts
 #                    aac_adtstoasc on TS→MOV; pinned so nobody "fixes" it
 #   mp4v/mjpeg/dv/   native-QuickTime matrix MOVs — coverage/messaging phases
@@ -60,7 +69,7 @@ command -v ffmpeg  >/dev/null 2>&1 || { echo "make-fixtures: ffmpeg not found"  
 command -v ffprobe >/dev/null 2>&1 || { echo "make-fixtures: ffprobe not found" >&2; exit 2; }
 mkdir -p "$FIX"
 
-ALL="multilang.ts mixed.ts dupe_lang.ts late-sps.ts gap.ts corrupt.ts rot.ts m2v422.mov m2v422i.mov m2v422.ts h264_422.ts h264_422_10.ts hevc_422_10.mov m2v420.ts aac.ts mp4v.mov mjpeg.mov dv.mov prores.mov pcm_bluray.m2ts vp9.webm"
+ALL="multilang.ts mixed.ts dupe_lang.ts late-sps.ts gap.ts corrupt.ts rot.ts m2v422.mov m2v422i.mov m2v422.ts h264_422.ts h264_422_10.ts hevc_422_10.mov m2v420.ts aac.ts mp4v.mov mjpeg.mov dv.mov prores.mov pcm_bluray.m2ts vp9.webm sparse-nopts.ts sparse-orphan.ts"
 
 FFE () { ffmpeg -nostdin -y -v error "$@"; }
 fail () { echo "FIXTURE FAILED: $1 — $2" >&2; exit 1; }
@@ -530,6 +539,76 @@ fx_vp9 () {
   built vp9.webm "VP9 in WebM; MOV mux verified impossible (the WO 5.2 refusal class)"
 }
 
+# ---- F10: the sparse-unstamped class (WO-1.15.20 S2) ------------------------
+# WHY a byte-level mint and not an encode: NO MUXER WILL WRITE THIS FILE. A
+# video packet carrying data but no PTS is rejected by libavformat outright —
+# measured here on this bench, mpegts and matroska both return -22 (invalid
+# argument), which is also what the field capture's own strict-mux test hit.
+# The class exists in the wild because a transport discontinuity DESTROYS PES
+# header timestamps after multiplexing, so that is how it is minted: rewrite
+# the PES headers of an already-valid .ts in place, never re-mux.
+#
+# Both edits are LENGTH-PRESERVING and leave the essence untouched, which the
+# self-check proves by comparing the extracted bitstream against the source:
+#   * clearing a hole  — PTS_DTS_flags -> 00 and the 5/10 timestamp bytes
+#     overwritten with 0xFF, which is legal PES stuffing. PES_header_data_length
+#     is unchanged, so every payload byte stays exactly where it was.
+#   * the field-pair timeline — the 33-bit PTS/DTS fields are re-encoded in
+#     place, same 5 bytes, same offsets.
+#
+# WHY the timeline is rewritten at all: the pre-pass reconstructs a hole from
+# its PAIR-MATE, and a pairing this file cannot PROVE is no evidence (a
+# frame-coded x264 stream has none). So the mint imposes the field-pair shape
+# the class is defined by — pairs at even coded indices, one field duration
+# apart, whole frames reordered so the opposite parity is decisively wrong.
+# The essence underneath stays ordinary H.264: this rung copies packet bytes
+# untouched and is codec-agnostic, so the timeline IS the fixture.
+fx_sparse () { # fx_sparse NAME "holes,csv" "summary"
+  # split declarations deliberately: `local` marks every listed name local
+  # BEFORE assigning, so a same-statement "$name" reads the fresh unset local
+  # and trips set -u (bash 3.2 measured)
+  local name="$1" holes="$2" summary="$3"
+  local out="$FIX/$name.part" base="$TMP/sparse-base.ts"
+  local step=1800 pkts nopts want
+  if [ ! -s "$base" ]; then
+    # b-adapt=0 + fixed keyint makes the coded order deterministic, so the hole
+    # positions below mean the same thing on every bench.
+    FFE -f lavfi -i "testsrc2=size=320x240:rate=25" -t 40 \
+        -c:v libx264 -preset ultrafast -pix_fmt yuv420p \
+        -x264-params "bframes=5:b-adapt=0:b-pyramid=none:scenecut=0:keyint=50" \
+        -f mpegts "$base"
+  fi
+  python3 "$SELF_DIR/sparse-mint.py" "$base" "$out" 90000 "$step" "$holes" >/dev/null \
+    || fail "$name" "PES-header mint failed"
+  pkts=$(ffprobe -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$out" 2>/dev/null | wc -l | tr -d ' ')
+  nopts=$(ffprobe -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$out" 2>/dev/null |
+            awk -F, '$1=="N/A"||$1==""{n++} END{print n+0}')
+  # the properties ARE the fixture — a mint that stopped producing them is a
+  # silently retired test, so each is asserted, none assumed
+  want=$(printf '%s' "$holes" | tr ',' '\n' | grep -c .)
+  [ "$nopts" -eq "$want" ] || fail "$name" "minted $nopts unstamped packets, asked for $want"
+  [ "$pkts" -gt 900 ] || fail "$name" "only $pkts video packets — too short for the sparse bound to mean anything"
+  cmp -s <(ffmpeg -nostdin -v error -i "$base" -map v:0 -c copy -f h264 - 2>/dev/null) \
+         <(ffmpeg -nostdin -v error -i "$out"  -map v:0 -c copy -f h264 - 2>/dev/null) \
+    || fail "$name" "the mint changed the video essence — it must touch PES headers only"
+  mv "$out" "$FIX/$name"
+  built "$name" "$summary ($nopts unstamped of $pkts; essence identical to the un-holed mint)"
+}
+# Cluster layout, and why these positions. Two holes sit inside the first 240
+# packets — pf_coded_rate's head window — so PF_NOPTS_FRAC reads 2/240 = 0.008:
+# nonzero, inside the sparse routing band, and nowhere near pairfill's ~0.5.
+# The rest sit beyond that window, so the head-window fraction and the
+# whole-file count DISAGREE by construction (WO-1.15.20 S3): the routing rides
+# the first, the rung's own census decides on the second.
+fx_sparse_nopts () {
+  fx_sparse sparse-nopts.ts "153,155,303,305,307,403,405" \
+    "reordered field-pair timeline, PTS-complete except 3 stride-2 clusters with timestamped mates"
+}
+fx_sparse_orphan () {
+  fx_sparse sparse-orphan.ts "153,155,303,305,307,360,361,403,405" \
+    "same, plus one ADJACENT unstamped pair (360/361) — the refusal control"
+}
+
 # ---- dispatch ---------------------------------------------------------------
 run_one () {
   case "$1" in
@@ -554,6 +633,8 @@ run_one () {
     prores.mov)      fx_prores ;;
     pcm_bluray.m2ts) fx_pcm_bluray ;;
     vp9.webm)        fx_vp9 ;;
+    sparse-nopts.ts) fx_sparse_nopts ;;
+    sparse-orphan.ts) fx_sparse_orphan ;;
     *) echo "make-fixtures: internal dispatch error: $1" >&2; exit 2 ;;
   esac
 }

@@ -4,6 +4,158 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.15.20 — "twenty-four packets" round (2026-08-28)
+
+A field re-test of the 2024 VMA capture (`feed.ts`, 25.38 GB, 02:24:25) came
+back with the F9 patches working exactly as intended — a 54 GB / 4-minute
+failure had become a 9-second / 0-byte refusal — and one blocker unmoved: the
+file misses the derive gate by **24 unstamped video packets out of 424,645**
+(5.65e-5), in three clusters, two with stride 2. Too few by four orders of
+magnitude to be pairfill's ~0.5 pair signature; not zero, which is the only
+thing the derive gate asked. This round brings the field patches home, kills
+the one route that still led into a dead end, and builds the missing rung the
+refusal had begun to describe precisely: **stamp the isolated unstamped
+packets from their pair-mates, then derive.**
+
+- **S0 — the F9 field patches, ported with their provenance** (`auto.sh`,
+  `derive-dts.sh`, `diagnose.sh`, `lib-paff.sh`, `pairfill-paff.sh`,
+  `probe.sh`). The field tree was recovered from the installed cache and
+  diffed against clean 1.15.18, so the port is the measured diff, not a
+  re-derivation from a transcript. Two defects surfaced while verifying the
+  claims against the code they landed in:
+  - `derive-dts.sh` branched on `PF_HALF_TS` and **never measured it**. The
+    unset global defaulted to `no`, so F9's "this IS the pairfill class" arm
+    was unreachable and every refusal asserted `half_ts=no  nopts_frac=?` as
+    though something had measured them — the Article II.3 shape on a
+    builder's refusal path. It now measures the profile from its own window
+    scan, and both arms are pinned (test 63, +5 assertions).
+  - the pair-signature band was inline in `pf_detect` and askable nowhere
+    else. Factored to `pf_half_ts_frac` (one writer, Article IV.1).
+- **S1 — the sixth defect: `diagnose.sh` routed into a dead end it promised
+  was guarded.** Its fallback verdict sent operators to pairfill on the claim
+  that *"its own gates refuse (exit 3) if the shape is not the pair class"*.
+  MEASURED FALSE: pairfill's shape checks are warnings that PROCEED (the
+  exit-3 refusals it really has are codec, rate-map and pair-alternation). An
+  operator who followed that verdict got a full-length build — ~26.8 GB on the
+  field capture — and a post-write timeline-gate rejection, on the promise the
+  tool would refuse first. `auto.sh` and `diagnose.sh` were giving
+  contradictory routing for one measurement. The prose now states what the
+  tool does, the reorder-only arm no longer lands there at all, and the two
+  tools share the routing predicate so they cannot drift (test 96).
+- **S2 — the missing rung: a bounded sparse-stamp pre-pass in
+  `derive-dts.py`.** When the unstamped set is SPARSE
+  (`RTM_SPARSE_NOPTS_MAX`, default 0.01 — a cut in the empty band between the
+  two rungs, 35x below pairfill's floor) and every member's value is forced by
+  measured evidence, `fill_sparse()` reconstructs those PTS and the derivation
+  runs UNCHANGED on a complete column. **Not a loosened gate:** raising the
+  routing bound alone stays rejected — it only sends a file to a rung that
+  must refuse it. The pre-pass does not widen the precondition, it satisfies
+  it. The pure function is PyAV-free so the unit lane pins the math via
+  importlib, exactly as it pins `derive_dts()`.
+  - **The one evidence rule is the PAIR-MATE**, proven over the whole file: a
+    PAFF field pair is two ADJACENT coded pictures one field duration apart,
+    and reordering moves whole pairs, never a field out of its pair.
+  - **A plausible second rule was built, measured wrong, and removed.**
+    "Both neighbours timestamped and exactly two field durations apart, so the
+    value is forced" — it is not. In coded order a reorder anchor sits between
+    two packets of a sequential run without disturbing their arithmetic.
+    Caught on this round's own fixture: coded 306/307/308 read 1227600 /
+    1252800 / 1234800, the neighbours are exactly 2 steps apart, and the
+    packet between them is the next P anchor seven steps away; the rule
+    proposed a value coded 301 already carried. Widening the window does not
+    help. A stream with no provable field pairing is now REFUSED, and test 97
+    §5 keeps that decision from being quietly undone.
+  - **Refusals are whole-file, never partial** (a partial fill is invented
+    timing with better manners): any hole without a timestamped mate, a
+    reconstruction that collides with a carried PTS, or a fraction past the
+    bound. Exit 3, nothing written, positions named.
+  - **Provenance**: one `DERIVE_STAMP idx= pts= mate= rule=` row per
+    reconstruction, and `stamped=N` on the `DERIVE_DTS` machine line (the
+    declared-stable enum in SKILL.md updated WITH the emitter — the F4 rule).
+- **Two gate defects found by running the new rung end to end**, both
+  pre-existing and both reproduced with `stamped=0`:
+  - **output gate 2** compares the output's PTS multiset against the source's,
+    and a repaired file legitimately presents instants the source had no
+    timestamp for. It is now told exactly WHICH extra values to expect — the
+    `DERIVE_STAMP` rows, cross-checked against the census — rather than
+    loosened to tolerate a surplus. A build that writes one more PTS than it
+    declared still fails, and so does one that declares a stamp it did not
+    write.
+  - **output gate 3** used the raw `streamhash`, which is container-sensitive:
+    H.264 rides mpegts as Annex-B and MOV as length-prefixed avcC, so a
+    byte-perfect TS → MOV copy hashed differently every time and the gate
+    FAILed exit 1 — a positive claim that "the copied bitstream is not
+    identical" — on **every `.ts` source**, which is the rung's whole
+    motivating class. `verify.sh` gate (a) has always had the answer; gate 3
+    now mirrors it, falling back to the VCL arbiter (Annex-B normalized,
+    SEI/SPS/PPS/AUD stripped) only when the exact hashes disagree, and
+    reporting UNPROVEN rather than an accusation when the bsfs are absent.
+    Test 95's L4 control had PINNED that false FAIL as desired behavior — its
+    own comment named the cause ("the zero-size flush packet is dropped by the
+    rung"), a packet carrying no coded picture at all. Measured here on
+    `aac.ts`: the raw hashes differ, the VCL payloads are byte-identical
+    (`2898a5df…` both sides), so a lossless artifact was being condemned
+    `exit 1` for its container's framing — the C3 shape on a blessing path.
+    The control is rebuilt in both directions: framing alone is never an
+    accusation (rc=0, blessed), and a REAL essence difference — injected by a
+    PATH shim that answers the output side with a different NON-EMPTY digest —
+    still FAILs exit 1 with both hashes printed and nothing blessed. Removing
+    a gate's false positives must not remove its teeth (95: 44 -> 49).
+- **S3 — three evidence scopes for one decision.** `PF_NOPTS_FRAC` is measured
+  over a 240-packet HEAD WINDOW (quantum 1/240 = 0.00417), so the field
+  capture's whole-file 5.65e-5 printed as `0.004` — a 70x overread that pushed
+  it across a routing cutoff — while `derive-dts.py` gated on the exact
+  whole-file count. `probe.sh` now prints the raw counts and names the window
+  (`untimestamped packets: 2/240 = fraction 0.008 (head window; whole-file
+  count decided at the rung)`), and the head-window fraction is explicitly
+  ADVISORY: it chooses who looks, the rung's own whole-file census decides.
+  `PF_NOPTS_N` is additive in `pf_detect`.
+- **S4 — build identity.** The re-test burned its opening minutes on "the
+  version says 1.15.18 but the mtimes say patched": six scripts had been
+  edited in place without a bump, so the handoff's own did-the-reinstall-take
+  check answered with a confident lie. `rtm_plugin_version` (lib-exit.sh)
+  reads the manifest at RUNTIME; `doctor.sh` names the build on its first line
+  and in `--kv` (`DOC_PLUGIN_VERSION`), `probe.sh --kv` carries
+  `PR_PLUGIN_VERSION`. An unreadable manifest reads `unknown`, never a
+  fabricated number. **CONSTITUTION V.5**: any behavioral edit that reaches an
+  installed bench carries a version bump, hotfixes included.
+- **S5 — the class is documented.** `references/timeline-repair.md` gains the
+  sparse-unstamped class in the repair ladder (definition, why each rung
+  refused it, the pre-pass, its refusal conditions, the rejected rule and the
+  measurement that rejected it, and the 2024-VMA capture as the motivating
+  case); `SKILL.md` routes it and tables `stamped=`; `references/knobs.md`
+  documents `RTM_SPARSE_NOPTS_MAX`, `PF_PTS_COMPLETE_MAX` and the
+  `PF_HALF_TS_*` band.
+- **Fixtures** (`sparse-nopts.ts`, `sparse-orphan.ts`) are minted by
+  length-preserving PES-header surgery (`tests/sparse-mint.py`), because **no
+  muxer will write this class**: libavformat refuses a data-bearing video
+  packet with no PTS — measured -22 on mpegts and matroska both, which is the
+  same error the field capture's own strict-mux test hit. The mint clears
+  `PTS_DTS_flags` and overwrites the timestamp bytes with legal PES stuffing,
+  and imposes a provable field-pair timeline; the self-check asserts the video
+  essence is byte-identical to the un-holed mint.
+- **Tests 96–99** (+107 assertions), each verified RED against 31c29f2 (96:
+  17 red of 24; 97 aborts outright — `fill_sparse`/`_pair_parity` do not exist
+  there; 98: 18 red of 28; 99: 12 red of 17):
+  96 routing agreement and the sixth defect; 97 the fill math in the unit lane
+  (PyAV-free, including the rejected-rule guard); 98 the whole rung end to end
+  (`stamped=` equals the minted count as a relationship, the output PTS column
+  is one uniform progression, VCL identity, orphan control refuses with
+  nothing written); 99 two tree-wide prose guards plus build identity.
+  `tests/mutation-audit.sh` gains G36–G39/P36/P38, **6/6 in contract** — and
+  earned its keep immediately: G36 read MISSED against a mutation that had
+  landed, because the guard's own `code_of | grep -q` took SIGPIPE on a match
+  and `pipefail` discarded the hit. The guard passed exactly when it should
+  have fired. Converted to the house `grepqe` (the 1.15.2 class, in a guard
+  written to catch a different one).
+- **Gate:** suite **297/297** (293 carried + 4 new, 4 harness skip
+  announcements); `tests/mutation-audit.sh` 6/6 in contract on the new guards;
+  `claude plugin validate --strict` green on plugin and marketplace. The
+  2024-VMA capture itself is not on this bench — every figure above is measured
+  on fixtures minted to its profile, and the field run remains the only thing
+  that can confirm its own 24 packets fill (leftover ledger in
+  WO-1.15.20-TWENTY-FOUR-PACKETS.md).
+
 ## 1.15.19 — "the gates you had to ask for" round (2026-08-28)
 
 WO-1.15.4's own leftover ledger, closed. 1.15.4 wrote the EMPTY ≠ ABSENT rule

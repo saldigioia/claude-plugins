@@ -79,8 +79,8 @@ status=READY; [ "$required_ok" = yes ] || status=BLOCKED
 { [ "$status" = READY ] && { [ "$vcl_ok" = no ] || [ "$MUX_SHASH" = no ]; }; } && status=DEGRADED
 
 if [ "$KV" -eq 1 ]; then
-  printf 'DOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_BSF_SETTS=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\nDOC_MUX_MP4=%s\nDOC_ISO_PCM=%s\nDOC_PYAV=%s\nDOC_PYAV_VER=%s\n' \
-    "$FFMPEG" "$FFPROBE" "${VER:-na}" "$MUX_MOV" "$MUX_NULL" "$MUX_SHASH" "$MUX_FMD5" \
+  printf 'DOC_PLUGIN_VERSION=%s\nDOC_FFMPEG=%s\nDOC_FFPROBE=%s\nDOC_VERSION=%s\nDOC_MUX_MOV=%s\nDOC_MUX_NULL=%s\nDOC_MUX_STREAMHASH=%s\nDOC_MUX_FRAMEMD5=%s\nDOC_BSF_FILTER_UNITS=%s\nDOC_BSF_H264_ANNEXB=%s\nDOC_BSF_HEVC_ANNEXB=%s\nDOC_BSF_SETTS=%s\nDOC_VCL_OK=%s\nDOC_DV_COPY=%s\nDOC_OS=%s\nDOC_ARCH=%s\nDOC_VIDEOTOOLBOX=%s\nDOC_MEDIAINFO=%s\nDOC_MP4BOX=%s\nDOC_MP4DUMP=%s\nDOC_STATUS=%s\nDOC_MUX_MP4=%s\nDOC_ISO_PCM=%s\nDOC_PYAV=%s\nDOC_PYAV_VER=%s\n' \
+    "$(rtm_plugin_version)" "$FFMPEG" "$FFPROBE" "${VER:-na}" "$MUX_MOV" "$MUX_NULL" "$MUX_SHASH" "$MUX_FMD5" \
     "$BSF_FU" "$BSF_H264" "$BSF_HEVC" "$BSF_SETTS" "$vcl_ok" "$dv_copy" \
     "$OS" "$ARCH" "$VTB" "$T_MINFO" "$T_MP4BOX" "$T_MP4DUMP" "$status" "$MUX_MP4" "$ISO_PCM" \
     "$PYAV" "${PYAV_VER:-na}"
@@ -90,6 +90,10 @@ fi
 
 mark () { [ "$1" = yes ] && echo "present" || echo "MISSING"; }
 echo "== remuxing-to-mov environment doctor =="
+# WO-1.15.20 S4: the FIRST line a field bench reads is which build it is
+# talking to — read from the manifest at runtime, so an in-place edit that
+# skipped its version bump cannot be laundered by a hardcoded string here.
+echo "plugin version: $(rtm_plugin_version)   (scripts: $SELF_DIR)"
 echo "ffmpeg  : $(mark "$FFMPEG")${VER:+ ($VER)}"
 echo "ffprobe : $(mark "$FFPROBE")"
 echo "-- muxers --"

@@ -147,7 +147,12 @@ esac; }
 # attempt is settled by the best-artifact machinery, never a cascade).
 derive_sig_esc () {
   [ "${PF_REORDER:-no}" = yes ] || return 1
-  awk "BEGIN{exit !((${PF_NOPTS_FRAC:-1})+0 <= 0.001)}" || return 1
+  # WO-1.15.20 S2: the rung covers the sparse-unstamped class too now — its
+  # pre-pass stamps isolated holes from their pair-mates before deriving — so
+  # the routing predicate is pf_derive_routable, not PTS-completeness alone.
+  # The bound this widens to is a ROUTE HINT measured over a 240-packet head
+  # window; the rung reads every packet and settles fill-or-refuse itself (S3).
+  pf_derive_routable || return 1   # F9/WO-1.15.20: shared bounds (lib-paff.sh)
   [ "${PF_DEPTH_CLASS:-unknown}" != unknown ]
 }
 
@@ -286,7 +291,13 @@ if [ "$DRY" -eq 1 ]; then
     echo "   plan: $(rung_desc "$PR_REC_RUNG")"
     echo "   cmd : $PR_REC_CMD"
     if [ "$PR_REC_RUNG" = 3-derive ]; then
-      echo "   [probe measured the derive profile: nopts_frac=${PF_NOPTS_FRAC:-?} (PTS-complete) + reorder,"
+      # WO-1.15.20 S2: the label must follow the measurement. Widening the
+      # route to the sparse class made a flat "(PTS-complete)" false for half
+      # the profiles that reach here — 0.008 is not complete, it is sparse
+      # enough for the pre-pass to complete it (Article II.3).
+      DRY_TSNOTE="PTS-complete"
+      pf_sparse_nopts && DRY_TSNOTE="sparse-unstamped: the rung's pre-pass stamps the holes from their pair-mates first"
+      echo "   [probe measured the derive profile: nopts_frac=${PF_NOPTS_FRAC:-?} ($DRY_TSNOTE) + reorder,"
       echo "   depth_class=${PF_DEPTH_CLASS:-?}, dts_short=${PF_DTS_SHORT:-?}]"
       echo "   escalation if verify is not OK: copy ladder fallback (Rung 0, scrub-gated);"
       echo "   venv-absent exit 10 surfaces the rung's bootstrap as REVIEW."
@@ -337,7 +348,20 @@ if [ "$PF_PAFF" = yes ]; then
       fi
     fi
   elif [ "${PF_REORDER:-no}" = yes ]; then
-    attempt "$BASE_RUNG"                       # full-TS pyramid: copy keeps the truth; scrub-gated
+    # F9 (2026-08-28): a COPY rung cannot survive unstamped packets. The MOV
+    # muxer has no way to write a packet carrying data but no PTS, so it
+    # invents one — and the mux-confession hard stop then refuses the output
+    # by design. Attempting it anyway is a FULL-LENGTH write for a refusal
+    # that is knowable from the probe (2024-VMA: 27.2 GB and ~2 min, twice,
+    # to rediscover nopts_frac=0.004). Decide from the measurement instead.
+    if pf_pts_complete; then
+      attempt "$BASE_RUNG"                     # full-TS pyramid: copy keeps the truth; scrub-gated
+    else
+      echo "-- skipping Rung $BASE_RUNG (copy): nopts_frac=${PF_NOPTS_FRAC:-?} — packets with data"
+      echo "   but no PTS force the muxer to invent timing, which the confession gate then"
+      echo "   refuses. The write would be full-length and the refusal is predetermined."
+      RESULT=FAIL; USED_RUNG="$BASE_RUNG"; GATE_F_ONLY=0
+    fi
     if [ "$RESULT" = REVIEW ] && [ "$GATE_F_ONLY" -eq 1 ]; then
       # the measured BBC cascade: gate (f) alone is a SYNC defect — pair-fill is a
       # timestamp-profile repair for a problem this file just proved it does not
@@ -352,9 +376,33 @@ if [ "$PF_PAFF" = yes ]; then
         # the derive signature is measured, so the ladder goes straight to it.
         echo "-- verdict $RESULT; pairfill signature absent (half_ts=no) + derive signature (nopts_frac=${PF_NOPTS_FRAC:-?}, reorder=yes, depth_class=${PF_DEPTH_CLASS:-?}) -> Rung 3-DERIVE --"
         attempt_derive
-      else
+      elif [ "${PF_HALF_TS:-no}" = yes ]; then
         echo "-- verdict $RESULT -> pair-fill (keeps real PTS; never the flattening rebuild) --"
         attempt P
+      else
+        # F9 (2026-08-28): pair-fill is NOT a general fallback. Its model is a
+        # pair-cadence DTS ramp, which a deep reorder pyramid violates by
+        # construction — and its precondition (half_ts=yes) is absent here.
+        # Reaching it anyway cost the 2024-VMA capture a full 26.8 GB write
+        # that its own timeline gates then rejected ("not the pair class at
+        # all"), after derive_sig_esc had correctly declined the source.
+        # WO-1.15.20 S2 narrows what this branch means. The composition F9
+        # said did not exist NOW DOES — derive-dts's pre-pass stamps isolated
+        # holes from their pair-mates and then derives — and derive_sig_esc
+        # routes to it. What is left here is the band BETWEEN the two rungs:
+        # too many unstamped packets to be isolated holes, too few to be the
+        # pair signature. Nothing composes across that gap, and the verdict
+        # says which side of it the file sits on rather than repeating a claim
+        # this round retired.
+        echo "-- verdict $RESULT; NO AUTOMATIC ROUTE (reorder=yes, half_ts=no,"
+        echo "   nopts_frac=${PF_NOPTS_FRAC:-?}). The sparse pre-pass (Rung 3-DERIVE) stamps"
+        echo "   ISOLATED unstamped packets from their pair-mates and is bounded at"
+        echo "   ${RTM_SPARSE_NOPTS_MAX}; pair-fill needs the ~0.5 pair signature. This file sits"
+        echo "   between them, so neither precondition holds."
+        echo "   That fraction is a 240-packet head-window hint: if the whole-file count is"
+        echo "   sparser than it reads, scripts/derive-dts.sh \"$IN\" OUT.mov reads every"
+        echo "   packet and decides for itself (it writes nothing unless it can place all)."
+        echo "   Diagnose: scripts/diagnose.sh \"$IN\"  (the source remains the master)."
       fi
     fi
   else

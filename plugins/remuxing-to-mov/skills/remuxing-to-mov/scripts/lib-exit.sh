@@ -61,3 +61,22 @@ rtm_err_guard () {  # fires on the failing command set -e is about to die on
 set -o errtrace   # the ERR trap reaches functions/substitutions/subshells
 trap rtm_err_guard ERR
 trap 'exit 1' INT TERM HUP
+
+# --- build identity (WO-1.15.20 S4) -----------------------------------------
+# The installed plugin's version, READ AT RUNTIME from the manifest — never a
+# hardcoded copy in a script, which is how a stale string gets believed. A
+# field bench re-testing a patched install burned its first minutes on exactly
+# that: the handoff's "if it still says 1.15.18 the reinstall did not take"
+# check read as a FALSE NEGATIVE, because the scripts had been edited in place
+# without a bump (2026-08-28 re-test report).
+# EMPTY != ABSENT: an unreadable or missing manifest reads `unknown`, never a
+# fabricated number and never a silent empty — a version string nobody can
+# trust is worse than one that admits it does not know.
+rtm_plugin_version () {
+  local mf v
+  mf="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/../../../.claude-plugin/plugin.json"
+  [ -r "$mf" ] || { echo unknown; return 0; }
+  v=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$mf" | head -1)
+  [ -n "$v" ] || v=unknown
+  echo "$v"
+}

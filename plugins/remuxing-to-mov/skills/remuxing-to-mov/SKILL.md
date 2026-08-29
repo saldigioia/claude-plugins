@@ -206,7 +206,12 @@ Verdict → action: damaged → re-capture; missing TS on the **pair signature**
 rotten DTS routed by **measured profile**: `PF_NOPTS_FRAC≈0` ∧ reorder →
 **Rung 3-DERIVE (`derive-dts.sh`)** — DTS absent, reconstructed or
 carried-but-rotten alike, **any codec** (non-H.264 timeline rot goes here too:
-pairfill/rebuild are H.264-only); half-timestamped → Rung 3-PAIR; no surviving
+pairfill/rebuild are H.264-only); **PTS-complete EXCEPT isolated unstamped
+packets** (`0 < nopts_frac ≤ RTM_SPARSE_NOPTS_MAX`, 1.15.20) → the same rung: a
+bounded **pre-pass stamps each hole from its PAFF pair-mate** and the
+derivation then runs unchanged, refusing the WHOLE file (exit 3, nothing
+written) if any hole has no timestamped mate — the class between the two rungs,
+which used to have no route at all; half-timestamped → Rung 3-PAIR; no surviving
 reorder → Rung 3; depth class `unknown` (unparseable SPS) ∧ reorder → **no
 automatic rung** — announced, with `derive-dts.sh --force` named as the
 operator's call;
@@ -442,7 +447,7 @@ renamed — Ground Rule 4):
 | `PP_CENSUS` | `pairfill-paff.sh` (junction model, 2026-08-18) | `pics= fields= frames= pic_struct_bad= [attested=]` — the whole-file trace_headers census the widened fill requires (tabled here 1.15.5; emitted since 1.15.0-era 2026-08-18, previously documented only in code) |
 | `PP_POC_CAPABILITY` | `pairfill-paff.sh` (junction pre-flight, WO-1.15.3 / 1.15.5) | `ok=yes\|no why=poc_type\|no_pictures\|- poc_type= maxlsb= lsb_rows= pics=` — the head-probe capability verdict; `ok=no why=poc_type` is the exit-3 pre-flight refusal (`pic_order_cnt_type != 0`: the POC lattice could never evaluate the build) |
 | `PP_POC_LATTICE` | `pairfill-paff.sh` (junction gate) + `poc-gate.sh` (standalone, WO-1.15.3 / 1.15.5) | evaluated: `on_slot= total= off=` (since 2026-08-18); UNPROVEN (appended 1.15.5 — the branch previously printed no machine row): `unproven=1 why=poc_type\|count\|probe_failed rows= packets=` |
-| `DERIVE_DTS` | `derive-dts.sh` (Rung 3-DERIVE; tabled 1.15.19) | `depth= shift_ms= packets= census= verdict=ok|unproven [why=packet_hash] [attested=]` — printed once, after the four output gates. `verdict=ok` is the blessed build (`mv` done); `verdict=unproven why=packet_hash` (appended 1.15.19, WO-1.15.4's leftover ledger) is the EMPTY != ABSENT arm: gates 1/2/4 passed but the streamhash pass produced NO evidence, so losslessness is UNPROVEN — exit 10 REVIEW, nothing blessed, the `.part` kept with a two-command re-judge recipe. A REAL hash mismatch is unchanged: exit 1, no machine row. |
+| `DERIVE_DTS` | `derive-dts.sh` (Rung 3-DERIVE; tabled 1.15.19) | `depth= shift_ms= packets= census= stamped=<N> verdict=ok|unproven [why=packet_hash] [attested=]` — `stamped=` (1.15.20) is how many of the output's PTS are RECONSTRUCTIONS from a pair-mate rather than carried timestamps, `0` on an ordinary derive; each one is also announced as its own `DERIVE_STAMP idx= pts= mate= rule=` provenance row. — printed once, after the four output gates. `verdict=ok` is the blessed build (`mv` done); `verdict=unproven why=packet_hash` (appended 1.15.19, WO-1.15.4's leftover ledger) is the EMPTY != ABSENT arm: gates 1/2/4 passed but the streamhash pass produced NO evidence, so losslessness is UNPROVEN — exit 10 REVIEW, nothing blessed, the `.part` kept with a two-command re-judge recipe. A REAL hash mismatch is unchanged: exit 1, no machine row. |
 | `SRCV_SUMMARY` | `verify-source.sh` (1.15) | `verdict=ok\|review\|fail hash=match\|mismatch v_src= v_out= v_drop= a_drop=<csv\|none> dur_delta= gaps_src= gaps_out= trim= notes=` — the same-container identity battery (filtered-reference streamhash + measured census arithmetic + nothing-unexplained) |
 | `ZB_SUMMARY` | `zero-base.sh` (1.15) | `out= start_src= start_out= floor= predicted_nudges= observed_nudges= verdict=` — prediction contract: predicted != observed never ships |
 | `ZB_PREFLIGHT` | `zero-base.sh --preflight-only` (1.15.13) | `verdict=eligible container= programs= paff= half_ts= back= dup= prekey=` — printed on the ELIGIBLE arm only (exit 0, nothing written); a refusal is exit 2 with its reasons on stderr and no row. `clean.sh` asks this instead of re-deriving zero-base's conditions (`--src-tsh` hands over the ts-health scan it already took). `prekey=` appended in the 1.15.18 review round with the mid-GOP refusal. |

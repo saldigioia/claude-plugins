@@ -119,6 +119,21 @@ eval "$(pf_detect "$IN")"
 [ "$PF_CODEC" = h264 ] || { echo "not H.264 (codec=$PF_CODEC) — pairfill is an H.264 PAFF repair." >&2; exit 3; }
 [ "$PF_PAFF" = yes ] || echo "   note: rate test reads paff=$PF_PAFF — proceeding anyway (caller's call)."
 echo "   coded-pic rate=${PF_CODED_RATE}/s  untimestamped fraction=${PF_NOPTS_FRAC} (half_ts=$PF_HALF_TS)"
+# F9 (2026-08-28; ported home by WO-1.15.20 S0 from the installed field
+# build, diffed against clean 1.15.18): this builder had NO precondition check on half_ts — it printed
+# the value and spent the whole pass regardless (the prose in probe.sh/the clinic
+# claimed an exit-3 refusal that does not exist in this file). A half_ts=no source
+# is not the pair class: the pair-cadence DTS ramp below will not match its
+# packets-per-field and the output timeline gates reject it after the write
+# (2024-VMA: 26.8 GB). Warn loudly and let the caller decide — no refusal, because
+# a --rate override is a legitimate manual use and this script has no --force.
+[ "$PF_HALF_TS" = yes ] || {
+  echo "** WARNING: half_ts=$PF_HALF_TS — the pair signature (~0.5 unstamped) is ABSENT."
+  echo "**          pairfill is the wrong class for this source and its timeline gates"
+  echo "**          will likely reject the output AFTER a full-length write. If the"
+  echo "**          stream is PTS-complete + reordered, the rung is scripts/derive-dts.sh;"
+  echo "**          run scripts/diagnose.sh to route by measurement. Proceeding (caller's call)."
+}
 
 # --- field rate -> whole-tick pair duration in the stream timebase ---
 PP_ATTESTED=""   # set by any precond_attest override below; appended to PP_CENSUS

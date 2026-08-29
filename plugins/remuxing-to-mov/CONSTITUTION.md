@@ -259,6 +259,33 @@ diff -rq --exclude=__pycache__ --exclude=fixtures \
   plugins/remuxing-to-mov ~/.claude/plugins/marketplaces/rare-data-club/plugins/remuxing-to-mov
 ```
 
+### V.5 — A behavioral edit that reaches a bench carries a version bump
+**Rule.** Any change to behavior that lands on an installed copy carries a
+version bump in `.claude-plugin/plugin.json` — a hotfix, a one-liner and an
+in-place field patch included. The version string is the only cheap integrity
+check a handoff has ("if it still reads X, the reinstall did not take"), and a
+stale one does not merely fail to help: it answers that check with a confident
+lie. Tools that report the version READ IT AT RUNTIME from the manifest
+(`rtm_plugin_version`, lib-exit.sh); no script carries a hardcoded copy.
+
+**Motive (measured).** A 2026-08-28 field re-test spent its opening minutes
+establishing which build it was talking to: six scripts had been patched in
+place under a version that still read `1.15.18`, so the handoff's own
+did-the-reinstall-take check produced a false negative, and mtimes and code
+markers had to settle it instead.
+**Test.**
+```
+bash tests/regression.d/99-route-prose-and-identity.sh   # §3, the standing guard
+scripts/doctor.sh --kv | grep '^DOC_PLUGIN_VERSION='     # matches the manifest
+scripts/probe.sh IN --kv | grep '^PR_PLUGIN_VERSION='    # same, from the prober
+```
+The guard is over version ASSIGNMENT, not over any mention of a release number:
+`WO-1.15.20` and "its 1.15.2 case file" are provenance and stay legal, while
+`VERSION="1.15.20"` is the stale string that answers an integrity check with a
+confident lie.
+
+---
+
 ---
 
 ## Amending this document

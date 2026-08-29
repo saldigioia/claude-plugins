@@ -82,7 +82,21 @@ cat > "$WORK/shimHASH/ffmpeg" <<EOF
 case "\$*" in *"-f streamhash"*) exit 1;; esac
 exec "$REAL_FFMPEG" "\$@"
 EOF
-chmod +x "$WORK/shimCEN/ffprobe" "$WORK/shimVDUR/ffprobe" "$WORK/shimHASH/ffmpeg"
+# shim VCL: a REAL essence difference, with two NON-EMPTY hashes. The output
+# side of every streamhash pass answers with a different digest, so gate 3's
+# accusation arm is exercised on evidence that actually was collected — the
+# discrimination control for the UNPROVEN arm above (WO-1.15.20).
+mkdir "$WORK/shimVCL"
+cat > "$WORK/shimVCL/ffmpeg" <<EOF
+#!/bin/bash
+# two nested tests, not one glob: the .part- input appears BEFORE
+# "-f streamhash" on the command line, so an ordered pattern never matches
+case "\$*" in *"-f streamhash"*)
+  case "\$*" in *.part-*) echo "0,v,MD5=00000000000000000000000000000000"; exit 0;; esac ;;
+esac
+exec "$REAL_FFMPEG" "\$@"
+EOF
+chmod +x "$WORK/shimCEN/ffprobe" "$WORK/shimVDUR/ffprobe" "$WORK/shimHASH/ffmpeg" "$WORK/shimVCL/ffmpeg"
 
 # the (--silence) / (--audio) block only, so a pin cannot be satisfied by the
 # identically-worded (f)/(g) lines that A1 already fixed above them. LITERAL
@@ -176,15 +190,29 @@ else
     [ "$rc" -eq 10 ] && ok "REVIEW exit 10 (pre-fix: 1 = condemned on zero evidence)" \
       || no "rc=$rc (want 10)"
     [ ! -f "$DD" ] && ok "nothing is blessed on an unproven gate" || no "$DD was blessed"
-    # discrimination: unshimmed, this fixture's hashes REALLY differ (the
-    # zero-size flush packet is dropped by the rung) — the accusation arm must
-    # survive the fix, with NON-EMPTY hashes and exit 1.
+    # discrimination 1 — an UNSHIMMED run of this fixture. Its raw hashes DO
+    # differ, and pre-WO-1.15.20 that alone was an exit-1 accusation that "the
+    # copied bitstream is not identical". MEASURED FALSE: the difference is a
+    # dropped ZERO-SIZE flush packet (the rung skips packets carrying no coded
+    # picture) plus Annex-B vs avcC framing, and the VCL payloads are
+    # byte-identical (`2898a5df…` both sides on this bench, 2026-08-28). The
+    # gate now consults the container-neutral arbiter before accusing anyone,
+    # so a lossless artifact is no longer condemned for its container's
+    # framing — the same class as C3, on a builder's blessing path.
     o2=$(bash "$SC/derive-dts.sh" "$SRC" "$WORK/dd2.mov" --force 2>&1); rc2=$?
-    has "$o2" "PACKET-HASH GATE FAILED" "control: a real hash mismatch is still FAILED"
-    has "$o2" "is not identical" "control: the accusation survives for real evidence"
-    hasnt "$o2" "src=
-" "control: the failing arm prints NON-empty hashes"
-    [ "$rc2" -eq 1 ] && ok "control: a real mismatch still exits 1" || no "control rc=$rc2 (want 1)"
+    has "$o2" "raw hashes differ" "control: the raw hashes really do differ here"
+    has "$o2" "VCL payload identical" "control: …and the arbiter proves the coded pictures are not"
+    hasnt "$o2" "PACKET-HASH GATE FAILED" "control: framing alone is never an accusation"
+    [ "$rc2" -eq 0 ] && ok "control: a lossless artifact is blessed (rc=0)" || no "control rc=$rc2 (want 0)"
+    # discrimination 2 — a REAL essence difference still FAILs, with two
+    # NON-EMPTY hashes. Without this the fix above would have removed the
+    # gate's teeth instead of its false positives.
+    o3=$(PATH="$WORK/shimVCL:$PATH" bash "$SC/derive-dts.sh" "$SRC" "$WORK/dd3.mov" --force 2>&1); rc3=$?
+    has "$o3" "PACKET-HASH GATE FAILED" "control: a REAL bitstream difference is still FAILED"
+    has "$o3" "is not identical" "control: the accusation survives for real evidence"
+    has "$o3" "out VCL=0,v,MD5=00000000" "control: …and prints the NON-empty hashes it judged"
+    [ "$rc3" -eq 1 ] && ok "control: a real mismatch still exits 1" || no "control rc=$rc3 (want 1)"
+    [ ! -f "$WORK/dd3.mov" ] && ok "control: nothing blessed on a real mismatch" || no "dd3.mov was blessed"
   else
     echo "  (SKIP: derive-dts did not reach gate 3 on this bench — $(printf '%s' "$o" | tail -1))"
   fi

@@ -24,7 +24,7 @@
 #   eval "$(pf_detect INPUT)"
 #   # -> PF_CODEC PF_FIELD PF_CODED_RATE PF_CODED_RATE_SPAN PF_RATE_METHOD
 #   #    PF_NOMINAL_FPS PF_RATIO PF_RATIO_HYP PF_PAFF PF_PPF
-#   #    PF_FIELD_RATE PF_TIMESCALE PF_NOPTS PF_NOPTS_FRAC PF_HALF_TS
+#   #    PF_FIELD_RATE PF_TIMESCALE PF_NOPTS PF_NOPTS_N PF_NOPTS_FRAC PF_HALF_TS
 #   #    (PF_PAFF / PF_HALF_TS are yes|no)
 #
 # Every function is a read-only probe; none touch the source.
@@ -57,6 +57,80 @@ PF_SCAN_WINDOW="${PF_SCAN_WINDOW:-5000}"
 # SAME 240 as the coded-rate window: a decode costs far more per packet than a
 # demux, so the essence probe stays as small as the question allows.
 PF_PPF_WINDOW="${PF_PPF_WINDOW:-240}"
+# --- PTS-completeness bound for the Rung 3-DERIVE signature (F9, 2026-08-28) ---
+# THE BOUND IS ZERO, AND IT IS STRUCTURAL — not a tunable tolerance.
+# derive-dts.py computes DTS[i] = sorted_pts[i - D] by INDEXING THE SORTED PTS
+# COLUMN. A video packet carrying data but no PTS has no position in that
+# column at all, so the derivation cannot place it: filling one in would be
+# INVENTING a timestamp, which is pairfill's job (from the pair mate), not
+# derive's. Both derive-dts.sh (its N/A-PTS signature gate) and derive-dts.py
+# refuse on a single such packet, and NEITHER refusal is reachable by --force
+# (--force is scoped to the depth-class gate only).
+# INVESTIGATED AND REJECTED (2026-08-28): raising this to 0.05 to admit the
+# 2024-VMA capture (24 unstamped of 424645 packets = 1 in 5000, in two ~0.4 s
+# bursts at transport discontinuities plus one head packet). It routed cleanly
+# to Rung 3-DERIVE and derive-dts.sh then refused at its own gate, exactly as
+# the structure above requires. The bound was never the defect — and this
+# rejection STANDS: raising this number still only sends a source to a tool
+# that must refuse it.
+# WHAT CHANGED (WO-1.15.20 S2): the tool no longer must. derive-dts.py gained a
+# bounded pre-pass that STAMPS a sparse set of unstamped packets from their
+# pair-mates before the derivation runs, which SATISFIES the precondition above
+# instead of loosening it. That class routes on pf_sparse_nopts below — a
+# SEPARATE predicate with a separate bound, deliberately, so this one keeps
+# meaning exactly what it says: zero holes, nothing to reconstruct.
+# NOTE ON RESOLUTION: PF_NOPTS_FRAC is measured by pf_coded_rate over a
+# 240-PACKET head window (quantum 1/240 = 0.00417, printed %.3f), so this test
+# is "zero missing in the head window" — an ADVISORY route hint. The
+# authoritative check is derive-dts's own whole-file count; a source that
+# passes here can still be refused there, and that layering is deliberate.
+PF_PTS_COMPLETE_MAX="${PF_PTS_COMPLETE_MAX:-0}"
+# The ONE predicate for "PTS-complete enough to derive a DTS column from the
+# sorted PTS". Call sites must use this rather than an inline threshold — the
+# bound mirrors a structural precondition of derive-dts.py and must not drift
+# per-file (it was triplicated across probe.sh/auto.sh/diagnose.sh before F9).
+pf_pts_complete () {
+  awk "BEGIN{exit !((${PF_NOPTS_FRAC:-1})+0 <= ${PF_PTS_COMPLETE_MAX}+0)}"
+}
+# --- the sparse-unstamped routing band (WO-1.15.20 S2/S3) --------------------
+# The fraction of unstamped video packets that routes to Rung 3-DERIVE's
+# pre-pass rather than to no rung at all. It is the SHELL SIDE of the bound
+# derive-dts.py documents in full (RTM_SPARSE_NOPTS_MAX there, same name, same
+# default, same rationale: a cut in the empty band between "isolated holes" and
+# pairfill's ~0.5 pair signature).
+# THIS TEST IS ADVISORY AND SAYS SO. PF_NOPTS_FRAC is measured by pf_coded_rate
+# over a 240-PACKET HEAD WINDOW — quantum 1/240 = 0.00417 — so it can read a
+# whole-file 5.65e-5 as 0.004 (a 70x overread, measured on the 2024-VMA
+# capture) or miss mid-file holes entirely. It is a ROUTE HINT. The rung's own
+# whole-file census reads every packet and makes the fill-or-refuse decision;
+# a file that routes here can still be refused there, and that layering is
+# deliberate — the cheap measurement chooses who looks, the expensive one
+# decides.
+RTM_SPARSE_NOPTS_MAX="${RTM_SPARSE_NOPTS_MAX:-0.01}"
+pf_sparse_nopts () {
+  [ "${PF_HALF_TS:-no}" != yes ] || return 1   # the pair signature is pairfill's
+  awk "BEGIN{f=(${PF_NOPTS_FRAC:-1})+0
+             exit !(f > ${PF_PTS_COMPLETE_MAX}+0 && f <= ${RTM_SPARSE_NOPTS_MAX}+0)}"
+}
+# --- the pair-signature band (WO-1.15.20 S0/IV.1) ---------------------------
+# "~half the packets untimestamped" as ONE writer. The band was inline in
+# pf_detect and nowhere else could ask the question, so derive-dts.sh — whose
+# F9 routing branches on exactly this — read an unset PF_HALF_TS and defaulted
+# it to `no`, printing "half_ts=no" on every refusal whether or not anything
+# had measured it (the Article II.3 shape: a verdict stating an unmeasured
+# value). Any caller with a fraction in hand can now ask.
+PF_HALF_TS_LO="${PF_HALF_TS_LO:-0.35}"
+PF_HALF_TS_HI="${PF_HALF_TS_HI:-0.65}"
+pf_half_ts_frac () {   # pf_half_ts_frac FRACTION -> yes|no
+  awk "BEGIN{f=(${1:-0})+0; print (f>=${PF_HALF_TS_LO}+0 && f<=${PF_HALF_TS_HI}+0)?\"yes\":\"no\"}"
+}
+# The ONE predicate for "Rung 3-DERIVE is the routable repair for this timeline
+# profile" — PTS-complete outright, or sparse enough for the pre-pass to make
+# it so. Call sites use this rather than testing the two bounds themselves;
+# that triplication is what F9 had just finished removing.
+pf_derive_routable () {
+  pf_pts_complete || pf_sparse_nopts
+}
 # ffprobe stderr lines tolerated behind a declared SPS value before the
 # declaration is called unreadable rather than believed. THIS NUMBER IS A
 # CALIBRATION, NOT A PROOF: nothing derives 20 from the format: it is a cut
@@ -554,7 +628,7 @@ pf_detect () {
   pf_frac=$(awk "BEGIN{if(${pf_tot:-0}>0)printf \"%.3f\",${pf_miss:-0}/$pf_tot; else print \"0.000\"}")
   # ~half the packets untimestamped = the PAFF pair signature (first field of each
   # pair timestamped, its mate not) — the class the timestamped-only rate misread.
-  pf_half=no; awk "BEGIN{exit !(${pf_frac:-0}>=0.35 && ${pf_frac:-0}<=0.65)}" && pf_half=yes
+  pf_half=$(pf_half_ts_frac "${pf_frac:-0}")
   # --- P1.2: the ratio is tested against BOTH hypotheses -----------------------
   # pf_ratio = coded-picture rate / CONTAINER fps. The pre-P1.2 gate accepted
   # exactly one reading of that denominator — that the container declares the
@@ -590,10 +664,10 @@ pf_detect () {
       esac
     fi
   fi
-  printf 'PF_CODEC=%s\nPF_FIELD=%s\nPF_CODED_RATE=%s\nPF_CODED_RATE_SPAN=%s\nPF_RATE_METHOD=%s\nPF_NOMINAL_FPS=%s\nPF_RATIO=%s\nPF_RATIO_HYP=%s\nPF_PPF=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_NOPTS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\n' \
+  printf 'PF_CODEC=%s\nPF_FIELD=%s\nPF_CODED_RATE=%s\nPF_CODED_RATE_SPAN=%s\nPF_RATE_METHOD=%s\nPF_NOMINAL_FPS=%s\nPF_RATIO=%s\nPF_RATIO_HYP=%s\nPF_PPF=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_NOPTS=%s\nPF_NOPTS_N=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\n' \
     "${pf_codec:-na}" "${pf_field:-na}" "${pf_cr:-0}" "${pf_crspan:-0}" "${pf_rmeth:-span}" \
     "${pf_nf:-0}" "${pf_ratio:-0}" "$pf_hyp" "$pf_ppf" "$pf_paff" "$pf_fr" "$pf_ts" \
-    "${pf_miss:-0}" "${pf_frac:-0}" "$pf_half"
+    "${pf_miss:-0}" "${pf_tot:-0}" "${pf_frac:-0}" "$pf_half"
 }
 
 # pf_hyp_note HYP RATIO PPF NOMINAL_FPS FIELD_RATE — the one human announcement

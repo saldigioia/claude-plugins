@@ -112,10 +112,56 @@ eval "$(printf '%s\n' "$dd_raw" | awk -F, 'NF{
   } END{ printf "DD_N=%d DD_NA=%d DD_DUP=%d\n", n+0, na+0, dup+0 }')"
 echo "   packets=$DD_N  N/A-PTS=$DD_NA  duplicate-PTS values=$DD_DUP"
 [ "${DD_N:-0}" -gt 0 ] || { echo "no video packets read" >&2; exit 3; }
-if [ "${DD_NA:-1}" -ne 0 ]; then
+# WO-1.15.20 S0: MEASURE the timestamp profile here rather than read a global
+# nothing in this script sets. The F9 routing branches on half_ts, and an unset
+# PF_HALF_TS defaulted to `no` — so the "this IS the pairfill class" arm could
+# never fire and every refusal asserted half_ts=no and nopts_frac=? as if they
+# had been measured. These come from THIS script's own window scan; an
+# exported value from a parent that already probed still wins, because that one
+# is measured over the head window pf_coded_rate uses and is no worse.
+DD_FRAC=$(awk "BEGIN{printf \"%.3f\", ${DD_NA:-0}/${DD_N}}")
+DD_HALF_TS="${PF_HALF_TS:-$(pf_half_ts_frac "$DD_FRAC")}"
+DD_NOPTS_FRAC="${PF_NOPTS_FRAC:-$DD_FRAC}"
+echo "   timestamp profile (this window): nopts_frac=$DD_FRAC  half_ts=$DD_HALF_TS"
+# WO-1.15.20 S2: an unstamped packet is no longer an automatic refusal here.
+# When the window's unstamped fraction is inside the SPARSE band and the pair
+# signature is absent, this is the isolated-hole class the python pre-pass
+# reconstructs from pair-mate evidence — so the window PROCEEDS and the
+# whole-file census decides. This window is a hint (PF_SCAN_WINDOW packets);
+# refusing here on a hint would be the 1.15.2 Item-C shape in reverse: a
+# foregone refusal of a file the authoritative pass would have repaired.
+DD_SPARSE=0
+if [ "${DD_NA:-1}" -ne 0 ] && [ "$DD_HALF_TS" != yes ] && [ "${DD_N:-0}" -gt 0 ]; then
+  awk "BEGIN{exit !(${DD_NA}/${DD_N} <= ${RTM_SPARSE_NOPTS_MAX:-0.01}+0)}" && DD_SPARSE=1
+fi
+if [ "${DD_NA:-1}" -ne 0 ] && [ "$DD_SPARSE" -eq 1 ]; then
+  echo "   $DD_NA of $DD_N windowed packet(s) carry data but no PTS — inside the sparse"
+  echo "   band (bound ${RTM_SPARSE_NOPTS_MAX:-0.01}) with half_ts=$DD_HALF_TS: the isolated-hole class."
+  echo "   Proceeding to the whole-file pre-pass, which stamps each hole from its"
+  echo "   pair-mate or REFUSES the file — this window does not decide it."
+elif [ "${DD_NA:-1}" -ne 0 ]; then
   echo ">> SIGNATURE REFUSED: $DD_NA packet(s) with no PTS in the window — a PTS-complete"
-  echo "   stream is the precondition (PF_NOPTS_FRAC must be 0.000). Packets with data but"
-  echo "   no PTS are the half-timestamped PAFF class: scripts/pairfill-paff.sh."
+  echo "   stream is the precondition (PF_NOPTS_FRAC must be 0.000): this derivation indexes"
+  echo "   the sorted PTS column, and an unstamped packet has no position in it."
+  # F9 (2026-08-28): the route is CONDITIONAL. Sending every unstamped-packet
+  # source to pairfill was circular for the half_ts=no class — pairfill's own
+  # precondition is equally absent there, so the operator is handed a tool that
+  # will spend a full pass and then fail its timeline gates (2024-VMA, 26.8 GB).
+  if [ "$DD_HALF_TS" = yes ]; then
+    echo "   half_ts=yes — this IS the half-timestamped PAFF class: scripts/pairfill-paff.sh"
+    echo "   (it KEEPS the real PTS and fills each pair-mate)."
+  else
+    # WO-1.15.20 S2/S5: the pre-pass exists now, so the old "no rung composes
+    # fill -> derive" claim is retired. What is left is the class the pre-pass
+    # itself refuses: too many holes to be isolated, but too few to be the pair
+    # signature — an empty band with no rung on either side of it.
+    echo "   half_ts=$DD_HALF_TS (nopts_frac=$DD_NOPTS_FRAC) — this is NOT the pairfill"
+    echo "   class either: pair-fill assumes ~half the packets unstamped and imposes a"
+    echo "   pair-cadence DTS ramp a reorder pyramid violates. The sparse pre-pass (which"
+    echo "   DOES compose 'stamp the isolated holes' -> 'derive DTS') is bounded at"
+    echo "   ${RTM_SPARSE_NOPTS_MAX:-0.01} and $DD_NA of $DD_N windowed packets is past it. NO AUTOMATIC ROUTE:"
+    echo "   diagnose first (scripts/diagnose.sh) and keep the source as the master."
+  fi
   exit 3
 fi
 if [ "${DD_DUP:-1}" -ne 0 ]; then
@@ -192,6 +238,11 @@ dp_line=$(printf '%s\n' "$py_out" | grep '^DERIVE_PY ' | head -1)
 DP_PACKETS=$(printf '%s\n' "$dp_line" | sed -n 's/.*packets=\([0-9][0-9]*\).*/\1/p')
 DP_DEPTH=$(printf '%s\n' "$dp_line"   | sed -n 's/.*depth=\([0-9][0-9]*\).*/\1/p')
 DP_SHIFT_MS=$(printf '%s\n' "$dp_line" | sed -n 's/.*shift_ms=\([0-9.]*\).*/\1/p')
+# WO-1.15.20 S2: how many of those PTS are RECONSTRUCTIONS rather than carried
+# timestamps. Rides every DERIVE_DTS row so the artifact's provenance records
+# it; absent from an older python (or a bench build) reads 0, never blank.
+DP_STAMPED=$(printf '%s\n' "$dp_line" | sed -n 's/.*stamped=\([0-9][0-9]*\).*/\1/p')
+case "$DP_STAMPED" in ''|*[!0-9]*) DP_STAMPED=0;; esac
 PLAN_N=$(printf '%s\n' "$py_out" | sed -n 's/^DERIVE_PLAN n=\([0-9][0-9]*\).*/\1/p' | head -1)
 PLAN_C=$(printf '%s\n' "$py_out" | sed -n 's/^DERIVE_PLAN n=[0-9]* codecs=\(.*\)$/\1/p' | head -1)
 { [ -n "$DP_PACKETS" ] && [ -n "$PLAN_N" ]; } || { echo ">> python summary lines missing — not blessing."; exit 1; }
@@ -199,7 +250,7 @@ PLAN_C=$(printf '%s\n' "$py_out" | sed -n 's/^DERIVE_PLAN n=[0-9]* codecs=\(.*\)
 if [ -n "$LIMIT" ]; then
   echo ">> REVIEW: --limit bench artifact kept at $PYOUT — partial by design, NOT blessed"
   echo "   (identity/census gates need the whole file; rerun without --limit to deliver)."
-  echo "DERIVE_DTS depth=$DP_DEPTH shift_ms=$DP_SHIFT_MS packets=$DP_PACKETS census=skipped verdict=bench$DD_ATTESTED"
+  echo "DERIVE_DTS depth=$DP_DEPTH shift_ms=$DP_SHIFT_MS packets=$DP_PACKETS census=skipped stamped=$DP_STAMPED verdict=bench$DD_ATTESTED"
   exit 10
 fi
 
@@ -259,24 +310,42 @@ echo "-- output gate 2/4: PTS multiset identity vs source (offset-normalized) --
 # each side to microseconds relative to its own minimum PTS. The uniform shift
 # is applied to ALL streams identically, so a global rebase cancels out of
 # both the video identity and A/V sync.
-pts_norm () {
+# WO-1.15.20 S2: the source side is its carried PTS PLUS the values the sparse
+# pre-pass reconstructed. The output legitimately presents instants the source
+# had no timestamp for — that is the whole repair — so this gate is told
+# exactly WHICH extra values to expect (the DERIVE_STAMP rows, one per
+# reconstruction) rather than loosened to tolerate any surplus. A build that
+# invents one more PTS than it declared still fails here, and so does one that
+# declares a stamp it did not write.
+pts_norm () {  # pts_norm FILE [EXTRA_TICKS_FILE]
   local tb; tb=$(ffp1 -v error -select_streams v:0 -show_entries stream=time_base -of default=nw=1:nk=1 "$1" 2>/dev/null)
-  ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$1" 2>/dev/null | \
+  # an `if` and not `[ -n ] && [ -s ] && cat`: the && chain returns NONZERO
+  # when there is nothing to append, and this group is the left side of a pipe
+  # under pipefail — the no-stamps call (the ordinary one) died there.
+  { ffp -v error -select_streams v:0 -show_entries packet=pts -of csv=p=0 "$1" 2>/dev/null
+    if [ -n "${2:-}" ] && [ -s "$2" ]; then cat "$2"; fi; } | \
     awk -F, -v tb="$tb" 'BEGIN{ split(tb,a,"/"); if(a[2]+0==0){a[1]=1;a[2]=1} }
       NF && $1!="N/A" { v[++n]=$1+0; if(n==1||$1+0<mn) mn=$1+0 }
       END{ for(i=1;i<=n;i++) printf "%.0f\n", (v[i]-mn)*a[1]/a[2]*1000000 }' | LC_ALL=C sort -n
 }
-PN_S="$(mktemp)"; PN_O="$(mktemp)"
-pts_norm "$IN"   > "$PN_S"
-pts_norm "$PART" > "$PN_O"
+PN_S="$(mktemp)"; PN_O="$(mktemp)"; PN_X="$(mktemp)"
+printf '%s\n' "$py_out" | sed -n 's/.*DERIVE_STAMP idx=[0-9]* pts=\([0-9-][0-9]*\).*/\1/p' > "$PN_X"
+PN_XN=$(grep -c . "$PN_X" || true)
+[ "$PN_XN" -eq "$DP_STAMPED" ] || {
+  echo ">> the pre-pass announced $DP_STAMPED reconstruction(s) but emitted $PN_XN stamp row(s)"
+  echo "   — the provenance record and the census disagree; NOT blessing. Kept: $PART"
+  rm -f "$PN_S" "$PN_O" "$PN_X"; exit 1; }
+[ "$PN_XN" -eq 0 ] || echo "   ($PN_XN reconstructed PTS added to the source side — see the DERIVE_STAMP rows)"
+pts_norm "$IN" "$PN_X" > "$PN_S"
+pts_norm "$PART"        > "$PN_O"
 if cmp -s "$PN_S" "$PN_O"; then
   echo "   PASS: sorted PTS multisets identical ($(grep -c . "$PN_S") values; every real"
   echo "   presentation instant preserved)"
-  rm -f "$PN_S" "$PN_O"
+  rm -f "$PN_S" "$PN_O" "$PN_X"
 else
   echo ">> PTS MULTISET GATE FAILED — the output does not present the source's timeline."
   diff "$PN_S" "$PN_O" | head -6 | sed 's/^/   /'
-  rm -f "$PN_S" "$PN_O"
+  rm -f "$PN_S" "$PN_O" "$PN_X"
   echo "   NOT blessing. Kept: $PART"; exit 1
 fi
 
@@ -291,7 +360,28 @@ echo "-- output gate 3/4: video packet-hash identity (verify gate (a) method) --
 # (REVIEW), which is NOT a licence to bless: the remaining gate still runs
 # (C7's lesson — a REVIEW must never skip the battery, and gate 4 may still
 # find a REAL breach worth exit 1), and the .part is kept for re-judging.
+# WO-1.15.20 S2 (found running this rung's own new fixture end-to-end): the
+# raw streamhash is CONTAINER-SENSITIVE, and this gate had no second arm.
+# H.264 rides mpegts as Annex-B with in-band SPS/PPS and MOV as length-prefixed
+# avcC, so a byte-perfect TS -> MOV copy hashes differently every time. This
+# gate therefore FAILed exit 1 — a positive claim that "the copied bitstream is
+# not identical" — on every .ts source, which is the whole motivating class of
+# the rung. Measured on tests/fixtures/sparse-nopts.ts with stamped=0 (the
+# no-holes control), so it long predates the pre-pass.
+# verify.sh gate (a) has always had the answer and this now mirrors it: try the
+# exact hash first, and only when it disagrees fall back to the VCL arbiter,
+# which strips SEI/SPS/PPS/AUD and normalizes Annex-B so parameter-set
+# PLACEMENT cannot masquerade as an essence change. What remains is the coded
+# picture data — the correct lossless arbiter for H.264.
 phash () { ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null; }
+vcl_hash () { local b=""
+  [ "$(ffp1 -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$1" 2>/dev/null)" = true ] && b="h264_mp4toannexb,"
+  ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$1" -map 0:v:0 -c:v copy \
+    -bsf:v "${b}filter_units=remove_types=6|7|8|9" -f streamhash -hash md5 - 2>/dev/null; }
+DD_BSFS=$(ffmpeg -hide_banner -bsfs 2>/dev/null || true)
+DD_HAVE_VCL=0
+{ grep -qw filter_units <<<"$DD_BSFS" && grep -qw h264_mp4toannexb <<<"$DD_BSFS"; } && DD_HAVE_VCL=1
+[ "${RTM_FORCE_NO_VCL:-0}" = 1 ] && DD_HAVE_VCL=0
 sp_rc=0; sp=$(phash "$IN")   || sp_rc=$?
 op_rc=0; op=$(phash "$PART") || op_rc=$?
 G3_UNPROVEN=0
@@ -303,11 +393,32 @@ if [ "$sp_rc" -ne 0 ] || [ "$op_rc" -ne 0 ] || [ -z "$sp" ] || [ -z "$op" ]; the
   echo "   non-empty hashes. Fix the read/decode problem and re-run; gate 4 still runs."
 elif [ "$sp" = "$op" ]; then
   echo "   PASS: video packets bit-identical (demux-only streamhash match)"
+elif [ "$DD_HAVE_VCL" -ne 1 ]; then
+  G3_UNPROVEN=1
+  echo ">> PACKET-HASH GATE UNPROVEN — the raw hashes differ, but this ffmpeg lacks"
+  echo "   filter_units/h264_mp4toannexb, so the container-neutral VCL comparison that"
+  echo "   would tell an essence change from a parameter-set REPACKAGING cannot run."
+  echo "   Not an accusation: a TS->MOV copy differs here by construction."
 else
-  echo ">> PACKET-HASH GATE FAILED — the copied bitstream is not identical."
-  echo "     src=$sp"
-  echo "     out=$op"
-  echo "   NOT blessing. Kept: $PART"; exit 1
+  echo "   raw hashes differ — trying the container-neutral VCL arbiter (Annex-B"
+  echo "   normalized, SEI/SPS/PPS/AUD stripped: parameter-set placement is not essence)"
+  sv_rc=0; sv=$(vcl_hash "$IN")   || sv_rc=$?
+  ov_rc=0; ov=$(vcl_hash "$PART") || ov_rc=$?
+  if [ "$sv_rc" -ne 0 ] || [ "$ov_rc" -ne 0 ] || [ -z "$sv" ] || [ -z "$ov" ]; then
+    G3_UNPROVEN=1
+    echo ">> PACKET-HASH GATE UNPROVEN — the VCL pass produced no evidence"
+    echo "   (src rc=$sv_rc$([ -z "$sv" ] && echo ', empty'), out rc=$ov_rc$([ -z "$ov" ] && echo ', empty'))."
+  elif [ "$sv" = "$ov" ]; then
+    echo "   PASS: VCL payload identical ($sv) — the coded pictures are bit-identical;"
+    echo "   only parameter-set placement differs, which is the container's business."
+  else
+    echo ">> PACKET-HASH GATE FAILED — the copied bitstream is not identical."
+    echo "     src=$sp"
+    echo "     out=$op"
+    echo "     src VCL=$sv"
+    echo "     out VCL=$ov"
+    echo "   NOT blessing. Kept: $PART"; exit 1
+  fi
 fi
 
 echo "-- output gate 4/4: post-mux census (D5) --"
@@ -327,12 +438,12 @@ if [ "${G3_UNPROVEN:-0}" -eq 1 ]; then
   echo "   Re-judge: ffmpeg -i \"$IN\" -map 0:v:0 -c copy -f streamhash -hash md5 -"
   echo "             ffmpeg -i \"$PART\" -map 0:v:0 -c copy -f streamhash -hash md5 -"
   echo "   Then bless by hand (mv) if they match, or delete: rm -f \"$PART\""
-  echo "DERIVE_DTS depth=$DP_DEPTH shift_ms=$DP_SHIFT_MS packets=$DP_PACKETS census=ok verdict=unproven why=packet_hash$DD_ATTESTED"
+  echo "DERIVE_DTS depth=$DP_DEPTH shift_ms=$DP_SHIFT_MS packets=$DP_PACKETS census=ok stamped=$DP_STAMPED verdict=unproven why=packet_hash$DD_ATTESTED"
   exit 10
 fi
 mv -f "$PART" "$OUT"
 echo "wrote: $OUT"
-echo "DERIVE_DTS depth=$DP_DEPTH shift_ms=$DP_SHIFT_MS packets=$DP_PACKETS census=ok verdict=ok$DD_ATTESTED"
+echo "DERIVE_DTS depth=$DP_DEPTH shift_ms=$DP_SHIFT_MS packets=$DP_PACKETS census=ok stamped=$DP_STAMPED verdict=ok$DD_ATTESTED"
 echo "sign-off: scripts/verify.sh \"$IN\" \"$OUT\""
 echo "  (these gates prove the container timeline and packet identity; verify.sh's scrub"
 echo "   gate + A/V parity complete the archival proof set)"

@@ -125,7 +125,11 @@ vnative () {
 # accounts for the depth, so a plain copy is not provably wrong.
 pr_derive_sig () {
   [ "${PF_REORDER:-no}" = yes ] || return 1
-  awk "BEGIN{exit !((${PF_NOPTS_FRAC:-1})+0 <= 0.001)}" || return 1
+  # WO-1.15.20 S2: PTS-complete outright OR sparse enough for the rung's
+  # pre-pass to make it so (lib-paff.sh pf_derive_routable). probe, diagnose
+  # and auto share the one predicate so the recommendation, the diagnostic's
+  # route and the ladder's escalation cannot disagree on one measurement.
+  pf_derive_routable || return 1   # F9/WO-1.15.20: shared bounds (lib-paff.sh)
   case "${PF_DEPTH_CLASS:-unknown}" in match-field|understated) return 0;; esac
   [ "${PF_DTS_SHORT:-unknown}" = yes ]
 }
@@ -241,8 +245,8 @@ probe_struct () {
       "$PF_CODED_RATE_SPAN" "$PF_RATE_METHOD" "$PF_RATIO" "$PF_RATIO_HYP" "$PF_PPF" "$PF_DEPTH_PICS" "$PF_DEPTH_TS" "$PF_DECL_DEPTH" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_CLASS" "${PF_DTS_SHORT:-unknown}" "$PF_DTS_SOURCE" "$nprog" "$tagadv_json"
   else
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
-    printf 'PR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_VNATIVE=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
-      "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf 'PR_PLUGIN_VERSION=%s\nPR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_VNATIVE=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
+      "$(rtm_plugin_version)" "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
     # P1.1/P1.2/P1.5 — additive only: the unit-aware reorder depth, which ratio
     # hypothesis decided PAFF, the essence-measured pictures-per-frame, and the
     # legacy span-derived rate beside the modal one. Nothing above was renamed.
@@ -459,7 +463,13 @@ DTSQ=""
 echo "field_order=$PF_FIELD  (tt/bb = interlaced; progressive/unknown = usually no field concern)"
 echo "coded-picture rate=${PF_CODED_RATE}/s  vs  container rate=${PF_NOMINAL_FPS}/s  (ratio=${PF_RATIO}, method=${PF_RATE_METHOD}, legacy span-derived rate=${PF_CODED_RATE_SPAN}/s)"
 echo "coded pictures per frame (essence probe)=${PF_PPF}   DTS provenance=${PF_DTS_SOURCE}"
-echo "untimestamped packets: fraction=${PF_NOPTS_FRAC} (half_ts=$PF_HALF_TS)   reorder pyramid: $PF_REORDER (max PTS-DTS ${PF_MAXOFF_TICKS} ticks${DTSQ})"
+# WO-1.15.20 S3 (the scanner-jurisdiction rule, 1.15.7, applied to this
+# number): the fraction alone hid its own resolution. It is measured over a
+# head window of PF_PPF_WINDOW packets, so its quantum is 1/window — on the
+# 2024-VMA capture a whole-file 24/424,645 = 5.65e-5 printed as 0.004, a 70x
+# overread that pushed the file across a routing cutoff. Print the raw counts
+# and name the window; the whole-file count is settled at the rung, not here.
+echo "untimestamped packets: ${PF_NOPTS}/${PF_NOPTS_N} = fraction ${PF_NOPTS_FRAC} (head window; whole-file count decided at the rung) (half_ts=$PF_HALF_TS)   reorder pyramid: $PF_REORDER (max PTS-DTS ${PF_MAXOFF_TICKS} ticks${DTSQ})"
 echo "reorder depth: ${PF_DEPTH_PICS} coded picture(s) vs declared ${PF_DECL_DEPTH} frame(s) x ${PF_PPF} = ${PF_DEPTH_EXPECTED}  -> ${PF_DEPTH_CLASS}  (dts-short=${PF_DTS_SHORT:-unknown})"
 pf_depth_note "$PF_DEPTH_CLASS" "$PF_DEPTH_PICS" "$PF_DECL_DEPTH" "$PF_PPF" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_TS"
 pf_hyp_note "${PF_RATIO_HYP:-none}" "${PF_RATIO:-0}" "${PF_PPF:-unknown}" "${PF_NOMINAL_FPS:-0}" "${PF_FIELD_RATE:-unknown}"
