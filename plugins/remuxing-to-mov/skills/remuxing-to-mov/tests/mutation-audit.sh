@@ -307,6 +307,25 @@ mut_output_forecast_gate () {  # a refusal on a forecast about the OUTPUT grows 
 pro_output_forecast_gate () {  # prose describing the retired reasoning stays CLEAN
   printf '\n# never: refuse because "the write would be full-length" — that is a forecast,\n# not a cached deterministic attempt (TIERS.md Tier 3)\n' >> "$1/scripts/auto.sh"
 }
+mut_unguard_derived_names () {  # the sibling guard forgets the names derived from OUT
+  # THE 2026-08-29 INCIDENT, restored: pre-1.16.0 the guard caught only
+  # OUT == IN, so a source named like the ladder's own park file
+  # (x.autobest.mov) was deleted by its opening `rm -f` — under a run that then
+  # printed "Source untouched."
+  perl -0pi -e 's/(  if rtm_same_file "\$in" "\$out"; then what="the output itself"; cand="\$out"; fi\n).*?(  \[ -n "\$what" \] \|\| return 0)/$1$2/s' \
+    "$1/scripts/lib-mux.sh"
+}
+pro_unguard_derived_names () {  # prose naming the derived-name class stays CLEAN
+  printf '\n# never: a sibling guard that tests only OUT == IN — the sidecar and .part\n# names derived from OUT are source-deletion shapes too (test 110)\n' >> "$1/scripts/clock.sh"
+}
+mut_unregistered_inline_scratch () {  # a scratch name built inline, outside the guard's table
+  # How the idrtrim.tmp shape stayed deletable through the round that closed
+  # the class: a name the guard never hears about cannot be guarded.
+  printf '\nSCRATCH_UNREGISTERED="${OUT%%.*}.sneaky.$ext"\n' >> "$1/scripts/mov.sh"
+}
+pro_unregistered_inline_scratch () {  # prose quoting the shape stays CLEAN
+  printf '\n# never: TMP="${OUT%%.*}.sneaky.$ext" without adding the tag to RTM_SIDECAR_TAGS\n' >> "$1/scripts/mov.sh"
+}
 mut_unask_trim () {   # the trim-to-idr CALL stops asking (clean.sh's prose still says --preflight-only)
   perl -pi -e 's/--preflight-only/--dry-run-only/ if /trim-to-idr\.sh"/' "$1/scripts/clean.sh"
 }
@@ -409,6 +428,10 @@ G41|defect|94-rot-sweep.sh|no builder carries a private copy of the source-vs-ou
 P41|prose|94-rot-sweep.sh|no builder carries a private copy of the source-vs-output identity test|pro_private_sibling_test
 G42|defect|109-attempt-not-predicted.sh|no script refuses on a forecast about its own output|mut_output_forecast_gate|output-quality forecasts still gate an attempt
 P42|prose|109-attempt-not-predicted.sh|no script refuses on a forecast about its own output|pro_output_forecast_gate
+G43|defect|110-park-name-collision.sh|the source survives auto.sh|mut_unguard_derived_names|THE SOURCE WAS DELETED BY THE PARK-FILE COLLISION
+P43|prose|110-park-name-collision.sh|the source survives auto.sh|pro_unguard_derived_names
+G44|defect|110-park-name-collision.sh|every inline-derived scratch name is in RTM_SIDECAR_TAGS|mut_unregistered_inline_scratch|inline scratch names the sibling guard cannot see
+P44|prose|110-park-name-collision.sh|every inline-derived scratch name is in RTM_SIDECAR_TAGS|pro_unregistered_inline_scratch
 '
 
 # --------------------------------------------------------------------- runner

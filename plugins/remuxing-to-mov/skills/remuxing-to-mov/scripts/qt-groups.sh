@@ -237,7 +237,11 @@ TARGET=1
 for g in $NONAUD_CLAIMS; do [ "$g" -eq 1 ] && TARGET=$((MAXGRP + 1)); done
 echo "   grouping needed: audio tkhds ->${AUD_GRPS} (want all = $TARGET, nonzero + shared)"
 
-PART="${OUT%.*}.part.${OUT##*.}"   # real extension kept (the trim-to-idr lesson)
+# rtm_part, not a private copy (Constitution IV.1). The hand-built name here
+# was BOTH a second definition of the part-name fact AND a shape the sibling
+# guard could not see: `x.part.mov` does not match the `.part-<pid>-<epoch>.`
+# pattern, so a source with that name was outside T1.11 entirely.
+PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 cp "$IN" "$PART"
 
 PATCHED=0; ALLOWED=""

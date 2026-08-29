@@ -224,20 +224,51 @@ rtm_same_file () {
   [ "$(rtm_canon "$a")" = "$(rtm_canon "$b")" ]
 }
 
+# RTM_OWN_SCRATCH — colon-separated canonical paths THIS RUN created and then
+# handed on as an input (mov.sh's IDR-trim intermediate is the only one today).
+# The derived-name arms below skip those: they are this plugin's own two-stage
+# build, not an operator handing us a file named like our scratch.
+#
 # rtm_sibling_guard IN OUT — every path this builder may write must be a
 # SIBLING of the source, never the source. Covers OUT itself, the deterministic
 # sidecars derived from OUT (autobest / premeta / derive), and the atomic part
 # NAME SHAPE (`<stem>.part-<pid>-<epoch>.<ext>`, matched as a pattern because
 # the pid is not knowable in advance). Returns 1 and announces; callers exit 2.
-RTM_SIDECAR_TAGS="autobest premeta derive"
+# Every scratch name the tree derives from OUT. `idrtrim.tmp` is built INLINE
+# by mov.sh (with the SOURCE's extension, not OUT's, which is why it cannot
+# just call rtm_sidecar) and is `rm -f`d on success — so it was still a live
+# source-deletion shape after the round that closed the class. Test 110 §5
+# fails the bench on any inline-derived name missing from this list.
+RTM_SIDECAR_TAGS="autobest premeta derive idrtrim.tmp"
 rtm_sibling_guard () {
   local in="${1:?rtm_sibling_guard needs IN}" out="${2:?rtm_sibling_guard needs OUT}"
-  local tag cand what="" stem ext inbase
+  local tag cand what="" stem ext inbase own=0
+  # A PATH THIS RUN CREATED IS NOT A COLLISION. mov.sh's IDR trim writes an
+  # intermediate and then ADOPTS IT as the input for the build that follows, so
+  # that file matches the derived-name pattern by construction. Refusing it
+  # would refuse the plugin's own legitimate two-stage build — measured
+  # 2026-08-29, when registering the idrtrim.tmp tag broke tests 11/12/22.
+  # The caller declares what it made; nothing is inferred.
+  case ":${RTM_OWN_SCRATCH:-}:" in
+    *":$(rtm_canon "$in"):"*) own=1 ;;
+  esac
+  # IN == OUT is refused even for a path this run created: nothing may write
+  # onto the file it is reading, whoever made it.
   if rtm_same_file "$in" "$out"; then what="the output itself"; cand="$out"; fi
+  if [ -z "$what" ] && [ "$own" -eq 1 ]; then
+    return 0
+  fi
   if [ -z "$what" ]; then
+    stem="$out"; case "$(basename "$out")" in *.*) stem="${out%.*}";; esac
     for tag in $RTM_SIDECAR_TAGS; do
       cand="$(rtm_sidecar "$out" "$tag")"
       if rtm_same_file "$in" "$cand"; then what="this builder's '$tag' sidecar"; break; fi
+      # …and the same tag under ANY extension: mov.sh derives its idrtrim.tmp
+      # intermediate with the SOURCE's extension, not the output's, so the
+      # exact-name test above cannot see it.
+      case "$(rtm_canon "$in")" in
+        "$(rtm_canon "$stem")"."$tag".*) what="this builder's '$tag' intermediate"; cand="$in"; break;;
+      esac
     done
   fi
   if [ -z "$what" ]; then

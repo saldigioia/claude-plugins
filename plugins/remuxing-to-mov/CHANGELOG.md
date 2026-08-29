@@ -4,6 +4,55 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.16.1 — the park-name collision, swept as a class (2026-08-29)
+
+1.16.0 found and fixed a Tier-1 breach: a SOURCE named `x.autobest.mov` was
+deleted by `auto.sh`'s own park-file cleanup, under a run that then printed
+">> FAIL … Source untouched." The fix landed inside the standing sweep, which
+pins that the guard has ONE WRITER and that every builder REACHES it. Neither
+is the same claim as *the source survives* — a guard can be present, called,
+and wrong about which names it covers.
+
+So this round pins the OUTCOME, over every name the tree derives, from the
+guard's own list rather than a hand-written copy of it. **Sweeping the class
+immediately found two names the 1.16.0 guard could not see** (Constitution
+V.1 — this is what the rule is for):
+
+- **`mov.sh`'s `idrtrim.tmp` intermediate.** Built INLINE as
+  `${OUT%.*}.idrtrim.tmp.$ext` — with the SOURCE's extension, not the
+  output's, which is why it could not simply call `rtm_sidecar` — and
+  `rm -f`d on success. A source with that name was still deletable *after*
+  the round that closed the class. Registered in `RTM_SIDECAR_TAGS`, and the
+  guard now matches a tag under ANY extension, not just the one
+  `rtm_sidecar` would mint.
+- **`qt-groups.sh`'s private part name.** `PART="${OUT%.*}.part.${OUT##*.}"`
+  was both a second definition of the part-name fact (Constitution IV.1) and
+  a shape outside T1.11 entirely: `x.part.mov` does not match the
+  `.part-<pid>-<epoch>.` pattern the guard checks. Now `rtm_part`, which
+  fixes both at once.
+
+**New: `tests/regression.d/110-park-name-collision.sh`.** Table-driven off
+`RTM_SIDECAR_TAGS`, so a new sidecar tag is covered the moment it is added —
+plus the `.part` shape, the writer-lock name, and the 2026-08-29 incident
+end to end through `auto.sh`. §5 is the half that found the two gaps above:
+every INLINE-derived scratch name must be registered in the guard's table, or
+the bench fails.
+
+**And the fix over-reached, which the bench caught.** Registering `idrtrim.tmp`
+made the guard refuse `mov.sh`'s own two-stage build: the IDR trim writes that
+intermediate and then ADOPTS IT as the input for the build that follows, so it
+matches the derived-name shape by construction. Tests 11, 12 and 22 went red
+together. A path THIS RUN created is not a collision — so the caller now
+DECLARES it (`RTM_OWN_SCRATCH`, canonical paths, colon-separated) and the
+derived-name arms skip it. The escape hatch has a floor, pinned in §6:
+`IN == OUT` is refused even for a declared path, because nothing may write onto
+the file it is reading, whoever made it.
+
+Seen to fail (V.2): on a throwaway copy with the derived-name coverage
+reverted to its pre-1.16.0 shape, the test reports
+`THE SOURCE WAS DELETED BY THE PARK-FILE COLLISION` — the incident itself,
+reproduced. Mutation guards G43/G44 with their prose lanes.
+
 ## 1.16.0 — "gate the assertion, not the attempt" (2026-08-29)
 
 The gates in this plugin were built to stop hallucination-driven damage

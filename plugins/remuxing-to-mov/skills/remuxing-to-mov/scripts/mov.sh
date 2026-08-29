@@ -442,6 +442,10 @@ if [ "${PREKEY:-0}" -gt 0 ]; then
     set +e; bash "$SELF_DIR/trim-to-idr.sh" "$IN" "$TRIMTMP" | sed 's/^/   /'; trc=${PIPESTATUS[0]}; set -e
     if [ "$trc" -eq 0 ] && [ -s "$TRIMTMP" ]; then
       IN="$TRIMTMP"; IDRTRIM=$PREKEY
+      # Declare it: this file matches the `idrtrim.tmp` derived-name shape the
+      # sibling guard refuses, and it must, because THIS RUN made it. Children
+      # (auto.sh/remux.sh) re-enter the guard with it as their input.
+      export RTM_OWN_SCRATCH="${RTM_OWN_SCRATCH:+$RTM_OWN_SCRATCH:}$(rtm_canon "$TRIMTMP")"
       # the pre-roll skewed every windowed probe fact (untimestamped fractions,
       # PAFF ratios measured across undecodable garbage) -> re-probe the input
       # the build will actually consume. Same EMPTY ≠ ABSENT capture as the
