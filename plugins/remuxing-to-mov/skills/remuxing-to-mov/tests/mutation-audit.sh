@@ -451,6 +451,18 @@ pro_alias_ffp_head () {  # prose naming the aliased shape stays CLEAN
   printf '\n# never: q="ffp -v error -select_streams" and then $q … | head -1 — behind an\n# alias or not, a two-line ffprobe write into an early-exit reader is the\n# 1.15.2 SIGPIPE class; use ffp1 (test 115)\n' >> "$1/scripts/clock.sh"
 }
 
+mut_unmeasured_version_reader () {  # a new tool joins the -version exemption unmeasured
+  # 115 §3 exempts `<tool> -version | head` on a MEASURED premise: the block
+  # fits the pipe buffer, so the writer finishes. An unmeasured tool inherits
+  # the exemption by resemblance, which is how a size argument turns into a
+  # habit. Never called — the shape is what is under test, not the run.
+  printf '\n_zz_ver () {\n  _v=$(zzprobe -version 2>/dev/null | head -1)\n}\n' >> "$1/scripts/clock.sh"
+}
+pro_unmeasured_version_reader () {  # prose naming the exemption stays CLEAN
+  printf '\n# never: add a new tool -version | head -1 without measuring its block against\n# the pipe buffer — the exemption is size, and size is re-taken (115 §3)\n' \
+    >> "$1/scripts/clock.sh"
+}
+
 # --------------------------------------------------------------------- roster
 # ID|LANE|TEST|MARKER|MUTATION[|FAILMARK]        LANE: defect | prose | new
 # MARKER is a substring UNIQUE to the guard's own PASS line.
@@ -547,6 +559,8 @@ G49|defect|90-harness-honesty.sh|the durable channel|mut_suppress_ma_verdict
 P49|prose|90-harness-honesty.sh|the durable channel|pro_suppress_ma_verdict
 G50|defect|91-flags-parsers-docs.sh|the class swept one alias deep|mut_alias_ffp_head
 P50|prose|91-flags-parsers-docs.sh|the class swept one alias deep|pro_alias_ffp_head
+G51|defect|115-probe-head-race.sh|one this section measures|mut_unmeasured_version_reader
+P51|prose|115-probe-head-race.sh|one this section measures|pro_unmeasured_version_reader
 '
 
 # --------------------------------------------------------------------- runner

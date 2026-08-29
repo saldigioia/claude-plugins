@@ -106,5 +106,53 @@ nsites=$(printf '%s\n' "$psrc" | grep -cE '^\s*[a-z]+=\$\(\$q [va]:0 ' || true)
   || no "only ${nsites:-0} \$q query sites left in probe_struct, want >= 9"
 
 echo
+echo "== 3. the -version exemption, re-measured (never asserted) =="
+# Seven sites in scripts/ still read a tool's -version through a pipe, and they
+# are RIGHT to: the class above is about an UNBOUNDED WRITER, not about head.
+# An ffprobe -select_streams query writes one line per matching view and grows
+# with the source; a `-version` block is fixed and fits the pipe buffer whole,
+# so the writer completes and exits before the reader's close can reach it.
+# Measured 2026-08-29 on this bench: ffmpeg 1488 B, MP4Box 598 B, against a
+# 65536 B pipe capacity, and 0 of 312 `ffmpeg -version | head -1` samples lost
+# the race at 24-way concurrency under four spinners.
+#
+# That is a claim with a shelf life, so it is re-taken here rather than left in
+# a comment: if a future ffmpeg grows its -version block past the floor, or an
+# UNMEASURED tool joins the list, the bench says so instead of the plugin
+# quietly re-arming seven sites. The floor is 16 KiB — a quarter of this
+# bench's measured capacity, and the classic small-pipe size on the platforms
+# this plugin has run on.
+VER_FLOOR=16384
+KNOWN_VER_TOOLS="ffmpeg MP4Box"
+vsites=""
+for _f in "$SC"/*.sh; do
+  vsites="$vsites $(rtm_strip_comments "$_f" | grep -E -- '-version' | grep -E '\|[[:space:]]*(head|awk)' \
+    | sed -E 's/.*\$\(//; s/^[[:space:]]*//; s/^([A-Za-z_][A-Za-z0-9_.-]*).*/\1/')"
+done
+vtools=$(printf '%s\n' $vsites | sort -u)
+nsites=$(printf '%s\n' $vsites | grep -c . || true)
+# non-vacuity first: a section that enumerates nothing proves nothing, and
+# would read green forever if the extraction regex silently stopped matching
+# (the G45 lesson — a pattern that goes stale is worse than no pattern).
+[ "${nsites:-0}" -ge 1 ] && ok "the enumeration is live: $nsites piped -version site(s) found in scripts/" \
+  || no "no piped -version site found — this section's extraction has gone stale, not the tree"
+unmeasured=""
+for _t in $vtools; do
+  case " $KNOWN_VER_TOOLS " in *" $_t "*) ;; *) unmeasured="$unmeasured $_t";; esac
+done
+[ -z "$unmeasured" ] && ok "every tool read this way is one this section measures ($(printf '%s' "$vtools" | tr '\n' ' '))" \
+  || no "unmeasured tool(s) reading -version through a pipe:$unmeasured — measure it here or convert the site"
+for _t in $KNOWN_VER_TOOLS; do
+  if ! command -v "$_t" >/dev/null 2>&1; then
+    echo "  (SKIP: $_t is not on this bench — its -version size is unmeasurable here)"
+    continue
+  fi
+  vb=$("$_t" -version 2>&1 | wc -c | tr -d ' ')
+  [ "${vb:-0}" -gt 0 ] && [ "${vb:-0}" -lt "$VER_FLOOR" ] \
+    && ok "$_t -version is ${vb} B, under the ${VER_FLOOR} B floor (the writer finishes into the buffer)" \
+    || no "$_t -version is ${vb} B against a ${VER_FLOOR} B floor — the exemption no longer holds; convert its readers"
+done
+
+echo
 echo "probe-head-race: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

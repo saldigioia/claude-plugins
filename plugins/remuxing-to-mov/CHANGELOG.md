@@ -4,6 +4,43 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.16.6 — the exemption is size, and size is re-taken (2026-08-29)
+
+The 1.16.5 review caught the one `| head -1` the round did not touch:
+`probe.sh`'s `ffmpeg -version` read, plus six siblings across `scripts/`. They
+are **not** the 1.15.2 SIGPIPE class, and the difference is the WRITER, not the
+reader. An ffprobe `-select_streams` query writes one line per matching view
+and grows with the source; a `-version` block is fixed and fits the pipe buffer
+whole, so the writer completes and exits before the reader's close can reach
+it. Converting these to `ffp1` would be wrong twice over — `ffp1` is *ffprobe*,
+and it carries `FF_INPUT_OPTS` a version query must not have.
+
+Measured on this bench (2026-08-29) rather than argued:
+
+```
+ffmpeg -version                    1488 B      MP4Box -version    598 B
+pipe capacity                     65536 B      margin             44x
+ffmpeg -version | head -1          0 of 312 samples lost the race
+  (24-way concurrency, four CPU spinners; PIPESTATUS[0] checked, not the tail's)
+```
+
+**But a size argument decays into a habit the moment it stops being taken.** So
+the exemption is not left in prose: new `115-probe-head-race.sh` §3 enumerates
+every tool whose `-version` is read through a pipe **from the tree**, refuses to
+pass on an empty enumeration (a stale extraction regex is the G45 lesson, and
+would read green forever), fails on any tool it has not measured, and re-takes
+each installed tool's block against a 16 KiB floor — a quarter of the measured
+capacity. If a future ffmpeg grows its `-version` past that, or a new tool joins
+by resemblance, the bench says so instead of the plugin quietly re-arming seven
+sites. `probe.sh` carries the why-comment and points at the guard (V.3).
+
+Guard G51 adds an unmeasured tool's `-version | head -1` to a throwaway tree and
+§3 names it; the prose case stays CLEAN.
+
+Suite 311/311 — unchanged, and deliberately so: 115 gained four assertions,
+not a new sub-suite (the banner counts sub-suites). Mutation audit 91/91
+(was 89), read from `$OUTDIR/VERDICT`.
+
 ## 1.16.5 — the verdict that survives being observed (2026-08-29)
 
 Two verdicts were misread in the 1.16.4 round, and neither was the harness's

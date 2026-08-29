@@ -567,6 +567,18 @@ if [ "$MS_TB" = yes ]; then
 fi
 
 echo "-- ffmpeg version & behavior deltas --"
+# `| head -1` here is NOT the 1.15.2 SIGPIPE class, and the difference is the
+# WRITER, not the reader. An ffprobe -select_streams query writes one line per
+# matching view and is unbounded by the source; `ffmpeg -version` writes a
+# fixed block that fits the pipe buffer whole, so the writer completes and
+# exits before head's close can reach it. Measured 2026-08-29 on this bench:
+# 1488 bytes against a 65536-byte pipe capacity (44x margin), and 0 of 312
+# samples lost the race at 24-way concurrency under four CPU spinners.
+# Converting it to ffp1 would be wrong twice over — ffp1 is ffprobe, and it
+# carries FF_INPUT_OPTS this query must not have. The exemption is not left as
+# prose: 115 §3 re-measures every tool whose -version is read through a pipe
+# and fails the bench if one outgrows the buffer, or if an unmeasured tool
+# joins the list.
 ver=$(ffmpeg -version 2>/dev/null | head -1 | grep -oE "[0-9]+\.[0-9]+" | head -1 || true)
 major=${ver%%.*}
 echo "ffmpeg $ver"

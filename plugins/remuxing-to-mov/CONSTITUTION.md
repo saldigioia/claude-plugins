@@ -324,9 +324,26 @@ MA_OUTDIR=/tmp/ma bash tests/mutation-audit.sh
 cat /tmp/ma/VERDICT                    # expect: MA_SUMMARY total=N bad=0 verdict=pass
 cd ../../.. && claude plugin validate ./plugins/remuxing-to-mov --strict
                 claude plugin validate . --strict
-diff -rq --exclude=__pycache__ --exclude=fixtures \
-  plugins/remuxing-to-mov ~/.claude/plugins/marketplaces/rare-data-club/plugins/remuxing-to-mov
+# THE INSTALLED COPY IS NOT THE MARKETPLACE CLONE. Push, let the CLI
+# materialize it, then restart Claude Code:
+git push
+claude plugin marketplace update rare-data-club
+claude plugin update remuxing-to-mov@rare-data-club
+claude plugin list                     # expect: the version just pushed
 ```
+**Measured 2026-08-29, while answering "does the installed copy match what I
+pushed".** `~/.claude/plugins/marketplaces/<name>/` is the marketplace's own git
+clone — the SOURCE an install reads from. What Claude Code actually loads is
+`~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, recorded in
+`~/.claude/plugins/installed_plugins.json`. Hand-copying files into the clone
+updates neither: on this machine the clone's `plugin.json` read `1.16.5` while
+`claude plugin list` reported the loaded plugin as **1.16.2** — three releases
+behind. And the hand-copies do not even persist: run against that clone (14
+files modified, 5 untracked), `claude plugin marketplace update rare-data-club`
+printed *"Found stale directory, cleaning up and re-cloning…"*, deleted the
+tree and re-cloned it from `origin` — so a `cp` there is not a sync, it is a
+third copy that answers V.5's integrity check with a number nothing is running
+and that the next update silently discards. Push, then let the CLI do it.
 An exit code read through a pipe is the LAST command's, not the audit's:
 measured 2026-08-29, `bash tests/mutation-audit.sh | tail` reported green on a
 run whose own table said MUTATE-NOOP, and a guard that had been audited zero
