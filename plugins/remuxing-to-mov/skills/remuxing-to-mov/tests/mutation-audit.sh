@@ -337,6 +337,19 @@ mut_single_poc_modulus () {  # the lattice checker goes back to ONE modulus for 
 pro_single_poc_modulus () {  # prose naming the retired assumption stays CLEAN
   printf '\n# never: one global MaxPicOrderCntLsb for a whole file — a POC scope opens at\n# an SPS activation that changes the modulus, not only at an IDR (test 111)\n' >> "$1/scripts/clock.sh"
 }
+mut_hardcoded_frame_num_width () {  # the slice reader goes back to a constant width
+  # The ported original carried FRAME_NUM_BITS = 8. It is right for most of a
+  # capture and wrong at every program change, where the SPS declares four
+  # bits — and the misread returns true*16 plus stray bits rather than
+  # failing, so nothing downstream notices (measured 2026-08-29: 17 phantom
+  # field pictures and 42 wrong frame_num values on feed.ts).
+  perl -0pi -e 's/frame_num = br\.u\(sps\["log2_max_frame_num"\]\)/frame_num = br.u(8)/' \
+    "$1/scripts/h264poc.py"
+}
+pro_hardcoded_frame_num_width () {  # prose naming the retired constant stays CLEAN
+  printf '\n# never: FRAME_NUM_BITS = 8 — the width comes from the ACTIVE SPS (test 112)\n' \
+    >> "$1/scripts/clock.sh"
+}
 mut_unask_trim () {   # the trim-to-idr CALL stops asking (clean.sh's prose still says --preflight-only)
   perl -pi -e 's/--preflight-only/--dry-run-only/ if /trim-to-idr\.sh"/' "$1/scripts/clean.sh"
 }
@@ -445,11 +458,18 @@ G44|defect|110-park-name-collision.sh|every inline-derived scratch name is in RT
 P44|prose|110-park-name-collision.sh|every inline-derived scratch name is in RTM_SIDECAR_TAGS|pro_unregistered_inline_scratch
 G45|defect|111-poc-scopes.sh|both scopes on-slot under their OWN modulus|mut_single_poc_modulus|the l2 change did not open a new scope
 P45|prose|111-poc-scopes.sh|both scopes on-slot under their OWN modulus|pro_single_poc_modulus
+G46|defect|112-sps-aware-slice-reader.sh|the true value|mut_hardcoded_frame_num_width|want 3
+P46|prose|112-sps-aware-slice-reader.sh|the true value|pro_hardcoded_frame_num_width
 '
 
 # --------------------------------------------------------------------- runner
-code_digest () {  # cksum of every *.sh under $1, comments and blank lines removed
-  find "$1" -name "*.sh" -type f | sort | while IFS= read -r _f; do rtm_strip_comments "$_f"; done \
+# MEASURED 2026-08-29: this scanned *.sh ONLY, so a mutation that edited a .py
+# file changed nothing it could see and every such case reported MUTATE-NOOP —
+# i.e. no guard over the plugin's five Python scripts could ever be audited,
+# and the harness said so in a word that reads like the mutator's fault.
+# `#` starts a comment in both languages, so rtm_strip_comments serves both.
+code_digest () {  # cksum of every *.sh and *.py under $1, comments and blanks removed
+  find "$1" \( -name "*.sh" -o -name "*.py" \) -type f | sort | while IFS= read -r _f; do rtm_strip_comments "$_f"; done \
     | sed '/^[[:space:]]*$/d' | cksum
 }
 run_one () {  # run_one ID LANE TEST MARKER MUTATION [FAILMARK]
@@ -457,10 +477,10 @@ run_one () {  # run_one ID LANE TEST MARKER MUTATION [FAILMARK]
   local sk out rc verdict
   sk="$(new_sandbox "$id")" || { echo "SANDBOX-FAIL" > "$OUTDIR/$id.verdict"; return; }
   local before after cbefore cafter
-  before=$(find "$sk" -name "*.sh" -type f -exec cksum {} + | cksum)
+  before=$(find "$sk" \( -name "*.sh" -o -name "*.py" \) -type f -exec cksum {} + | cksum)
   cbefore=$(code_digest "$sk")
   if ! "$mutfn" "$sk"; then echo "MUTATE-FAIL" > "$OUTDIR/$id.verdict"; return; fi
-  after=$(find "$sk" -name "*.sh" -type f -exec cksum {} + | cksum)
+  after=$(find "$sk" \( -name "*.sh" -o -name "*.py" \) -type f -exec cksum {} + | cksum)
   cafter=$(code_digest "$sk")
   # measured: the BEGIN{n=0} regex matched nothing, perl exited 0, and the guard
   # read MISSED — a harness bug dressed as a finding. Never again.

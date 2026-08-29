@@ -4,6 +4,61 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.16.3 — the census breakdown was right; the reference was wrong (2026-08-29)
+
+A carry-forward from 1.16.0 read: *the census classifies feed.ts's 8,617
+leftover pictures as frame pictures where the workshop's framemux reported
+8,600 frames + 17 unpaired fields; same sample total, breakdown differs.* The
+obvious reading is that the classifier folds "not in a pair" into "frame"
+instead of reading `field_pic_flag`. **It does not, and this round closes the
+item by falsifying that reading rather than acting on it.**
+
+**What was measured.** The plugin's census (ffmpeg's CBS via `trace_headers`)
+and `h264poc.py` were run over the whole 25.38 GB capture and compared to the
+workshop's cache row by row: **17 `field_pic_flag` disagreements and 42
+`frame_num` disagreements, at exactly the disputed positions.** The pattern
+names the cause:
+
+| picture | workshop cache | both SPS-aware readers |
+|---|---|---|
+| 63685 | frame_num 32, field_pic 1 | frame_num 2, field_pic 0 |
+| 63687 | frame_num 48, field_pic 1 | frame_num 3, field_pic 0 |
+| 217880 | frame_num 16, field_pic 1 | frame_num 1, field_pic 0 |
+
+32 = 2×16, 48 = 3×16, 16 = 1×16 — the workshop's values are the true ones
+shifted left by four bits. Its parser hardcodes `FRAME_NUM_BITS = 8`, and one
+SPS in feed.ts declares `log2_max_frame_num_minus4 = 0` (frame_num is **four**
+bits) with `log2_max_pic_order_cnt_lsb_minus4 = 2` (poc_lsb **six**), activated
+at the program changes. Reading eight bits where four exist consumes four
+extra, and every field after `frame_num` is then read from the wrong bit
+offset — manufacturing `field_pic_flag = 1` on 17 frame pictures.
+
+So `frames=8617 unpaired_fields=0` is correct and the 8,600/17 reference is a
+parsing artifact. **The classifier was not changed.** Making a correct reader
+agree with a broken one would have been the whole point of this plugin,
+inverted.
+
+**The failure mode is the lesson**, and it is why `h264poc.py` parses the SPS
+rather than assuming it: the hardcoded parser did not crash and did not return
+nothing. It returned confident, plausible, wrong values. New
+`tests/regression.d/112-sps-aware-slice-reader.sh` mints a synthetic bitstream
+with those unusual widths — no media, no external capture — and pins that the
+reader recovers the true `frame_num`, `field_pic_flag`, `bottom_field_flag` and
+`poc_lsb`, that it does not produce the ×16 signature, that the ordinary and
+progressive SPS shapes still parse, and structurally that no constant-width
+literal has come back. Mutation guard G46 restores `br.u(8)` and the fixture
+reports `frame_num=62, want 3`.
+
+**And the audit could not have caught it before.** `tests/mutation-audit.sh`
+detected "did the mutation change anything?" by hashing `*.sh` only, so a
+mutation editing a `.py` file changed nothing it could see and reported
+MUTATE-NOOP — meaning **no guard over the plugin's five Python scripts could
+ever be audited**, in a word that reads like the mutator's fault. Both its
+change detector and `code_digest` now cover `*.py` as well.
+
+`references/paff-poc.md` §6 records the finding with the measurement, and §5
+notes that two counts of the capture exist and which is right.
+
 ## 1.16.2 — per-SPS-activation POC scopes (2026-08-29)
 
 Gate (k) reported UNPROVEN on the 2024 VMA deliverable because the capture

@@ -76,12 +76,52 @@ After pairing, a bottom field's carried PTS is discarded — the frame takes the
 one: 23 were bottom fields whose timestamps are discarded on merge, leaving a
 single frame-coded picture to solve from its own POC.
 
-Counting in **field** units also invents gaps that are not there: 8,600
+Counting in **field** units also invents gaps that are not there: the
 frame-coded pictures legitimately occupy two field rungs each, and a field-unit
 census reads them as **8,632 forward "gaps"**. The genuine loss on that capture
 is **11 frames = 0.44 s**, not the 177.8 s that figure implies.
 
-## 6. Duplicate display slots are adjudicable, and the asymmetry is why
+**A note on that capture's breakdown, because two counts of it exist.** The
+plugin's census reads **8,617 frame pictures and 0 unpaired fields**; the
+workshop's cache reads 8,600 frames + 17 unpaired field singles. Same sample
+total (216,631), and gate (h) passes either way. The plugin's is the correct
+one, and the 17 are a parsing artifact — see §6.
+
+## 6. A parser that hardcodes one capture's SPS reads plausible nonsense
+
+Measured 2026-08-29, and it is the reason `h264poc.py` parses the SPS instead
+of assuming it. The workshop tool this module was ported from carried:
+
+    FRAME_NUM_BITS = 8      POC_LSB_BITS = 8      FRAME_MBS_ONLY = 0
+
+Those are right for most of feed.ts. One SPS in that file declares
+`log2_max_frame_num_minus4 = 0` (frame_num is **four** bits) and
+`log2_max_pic_order_cnt_lsb_minus4 = 2` (poc_lsb is **six**) — it is activated
+at the program changes, which is exactly where the discontinuities are.
+
+Reading eight bits where four exist consumes four extra, so the value comes
+back as `true × 16 + four stray bits`:
+
+| picture | hardcoded reader | SPS-aware readers |
+|---|---|---|
+| 63685 | frame_num 32, field_pic 1 | frame_num 2, field_pic 0 |
+| 63687 | frame_num 48, field_pic 1 | frame_num 3, field_pic 0 |
+| 217880 | frame_num 16, field_pic 1 | frame_num 1, field_pic 0 |
+
+32 = 2×16, 48 = 3×16, 16 = 1×16. And because every field AFTER `frame_num` is
+then read from the wrong bit offset, the misread manufactures
+`field_pic_flag = 1` on 17 frame pictures — which is the whole of the 8,600/17
+vs 8,617/0 discrepancy. ffmpeg's own CBS (`trace_headers`) and this module's
+SPS-aware reader agree with each other and disagree with the hardcoded one on
+exactly those 17 pictures, and on 42 `frame_num` values.
+
+**The failure mode worth remembering:** the parser did not crash, and did not
+return nothing. It returned confident, plausible, wrong values. That is what a
+constant standing in for a measurement looks like from the outside.
+`tests/regression.d/112-sps-aware-slice-reader.sh` mints a synthetic bitstream
+with those unusual widths and pins that the reader recovers the true values.
+
+## 7. Duplicate display slots are adjudicable, and the asymmetry is why
 
 Where two packets claim one rung, the later holder is carrying a timestamp
 across a transport discontinuity. Measured **10 of 10**: the earlier holder
@@ -94,7 +134,7 @@ Holes and duplicates are usually **one** phenomenon, not two: on that capture 2
 of the 10 duplicates bracketed an unstamped burst exactly.
 `scripts/diagnose.sh` reports the straddle count for this reason.
 
-## 7. Anchor on the earliest DISPLAYED frame
+## 8. Anchor on the earliest DISPLAYED frame
 
 A MOV anchored on the first **coded** packet declares a presentation start above
 its own earliest composition time, and the frames before it fall outside the
@@ -103,7 +143,7 @@ first displayed one, so this is the normal case, not an edge case. Subtract
 `min(PTS)` from every stream — the same constant everywhere, so A/V sync is
 untouched. `verify.sh` gate (l) reports the condition.
 
-## 8. Traps that cost real time
+## 9. Traps that cost real time
 
 - **PyAV opens MP2 with the `mp3float` DECODER.** `codec_context.name` reads
   `"mp3float"`, so `add_stream_from_template` inherits codec id MP3 and the MOV
@@ -132,7 +172,7 @@ untouched. `verify.sh` gate (l) reports the condition.
   and the rest is parsed as shell. Hit twice while writing the pairing census
   for this round; `tests/regression.d/94-rot-sweep.sh` §1 is the guard.
 
-## 9. QuickTime and MP2, from Apple's own spec
+## 10. QuickTime and MP2, from Apple's own spec
 
 The complete sound sample description list is:
 
@@ -146,7 +186,7 @@ Apple-documented format — it round-trips as `codec_name=mp2` and plays, but it
 is not in the spec, and this plugin's own doctrine is that MP2 ships as
 dual-track's *preserved original* with a PCM access track alongside.
 
-## 10. What reads all this
+## 11. What reads all this
 
 | | |
 |---|---|
