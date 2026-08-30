@@ -27,6 +27,7 @@
 #
 # Usage: scripts/poc-remux.sh INPUT OUTPUT.mov [--audio all|first|none]
 #                                              [--dry-run] [--limit N] [--full]
+#                                              [--no-faststart]
 # Exit: 0 verified-clean | 1 built but an output gate failed | 2 usage/pre-flight
 #       3 REFUSED (no trusted evidence — nothing written) | 10 REVIEW (PyAV
 #       venv absent, or verify wants a look) | 11 REFUSED (unroutable codec)
@@ -42,12 +43,13 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 RTM_EXIT_OK="0 1 2 3 10 11" # + this rung's documented pre-contract 3 (REFUSED; family consistency with pairfill/rebuild/derive)
 IN="${1:?usage: poc-remux.sh INPUT OUTPUT.mov [--audio all|first|none] [--dry-run] [--limit N] [--full]}"
 OUT="${2:?need OUTPUT.mov}"; shift 2
-AUDIO=all; DRY=0; LIMIT=""; FULL=""
+AUDIO=all; DRY=0; LIMIT=""; FULL=""; NOFS=""
 while [ $# -gt 0 ]; do case "$1" in
   --audio)   AUDIO="${2:?--audio needs all|first|none}"; shift 2;;
   --dry-run) DRY=1; shift;;
   --limit)   LIMIT="${2:?--limit needs a value}"; shift 2;;
   --full)    FULL="--full"; shift;;
+  --no-faststart) NOFS="--no-faststart"; shift;;   # 1.16.7 (announced opt-out)
   *) echo "unknown opt: $1" >&2; exit 2;;
 esac; done
 case "$AUDIO" in all|first|none) ;; *) echo "bad --audio: $AUDIO (all|first|none)" >&2; exit 2;; esac
@@ -89,7 +91,7 @@ fi
 if [ "$DRY" -eq 1 ]; then
   set +e
   "$VENV_PY" "$SELF_DIR/poc-remux.py" "$IN" "$OUT" --audio "$AUDIO" --dry-run \
-    ${LIMIT:+--limit "$LIMIT"}
+    ${LIMIT:+--limit "$LIMIT"} ${NOFS:+"$NOFS"}
   prc=$?
   set -e
   case "$prc" in
@@ -121,7 +123,7 @@ echo "-- building (video bits copied untouched; frames paired per 14496-15, time
 set +e
 "$VENV_PY" "$SELF_DIR/poc-remux.py" "$IN" "$PART" --audio "$AUDIO" \
   ${PC_ACODECS:+--acodecs "$PC_ACODECS"} \
-  ${LIMIT:+--limit "$LIMIT"} 2>&1 | tee "$PART.log" | sed 's/^/   /'
+  ${LIMIT:+--limit "$LIMIT"} ${NOFS:+"$NOFS"} 2>&1 | tee "$PART.log" | sed 's/^/   /'
 prc=${PIPESTATUS[0]}
 set -e
 case "$prc" in

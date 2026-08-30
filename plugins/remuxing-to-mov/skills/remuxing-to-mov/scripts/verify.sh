@@ -1009,9 +1009,12 @@ else
     else printf 'ambiguous\n%s; output signature %s\n%s\n' "$label" "$osig" "$cand"; fi
   }
   # D3 (1.13) inverse-error inputs: an mp4a/.mp2 track carrying MPEG Layer II
-  # is the configuration that produces NO AUDIO in AVFoundation, and the old
-  # gate PASSED it (allowlisted on the rationale that a PCM access track
-  # guarantees playback — true only when one EXISTS). ffmpeg declares MP2 at
+  # measured SILENT on the D3 bench (2026-08-15) and PLAYING on this machine
+  # (2026-08-29) — a per-OS empirical split, not a categorical (1.16.7; the
+  # C56/C72 4:2:2 demotion is the in-house precedent). What the old gate got
+  # wrong is unaffected by the reversal: it PASSED this configuration
+  # (allowlisted on the rationale that a PCM access track guarantees playback —
+  # true only when one EXISTS) while failing configurations that work. ffmpeg declares MP2 at
   # >24 kHz with OTI 0x6B (MPEG-1 Part 3), the formally correct value, and the
   # demuxer maps 0x69/0x6B to AV_CODEC_ID_MP3 first-match — so ffprobe LABELS
   # 48 kHz Layer II as 'mp3'. The source is the discriminator this gate has and
@@ -1257,14 +1260,19 @@ else
     [ "$verdict" = FAIL ] || verdict=REVIEW
     g_gate_flagged=1
     echo "   >> MP2 audio with NO PCM access track — the configuration this gate used to"
-    echo "      PASS while failing the ones that work (D3, 1.13). AVFoundation has no"
-    echo "      MPEG Layer II path for mp4a/.mp2 tracks: no positive report of Layer II"
-    echo "      decode in QuickTime X/AVFoundation exists in any container, and this"
-    echo "      bench measured silence. The allowlist entry for .mp2 is legal ONLY as"
-    echo "      dual-track's preserved original, where the PCM access track is what"
-    echo "      plays. Rebuild: scripts/mov.sh (routes MP2 to dual-track automatically)"
-    echo "      or scripts/remux.sh --audio pcm."
-    note="${note:+$note }Output carries MP2 audio with no PCM access track — AVFoundation has no Layer II path, so this file has no playable audio in QuickTime (D3, 1.13); rebuild via mov.sh (dual-track) or remux.sh --audio pcm."
+    echo "      PASS while failing the ones that work (D3, 1.13). Whether .mp2 PLAYS is"
+    echo "      a PER-OS EMPIRICAL question, and this gate no longer asserts an answer:"
+    echo "        measured PLAYING in QuickTime on this machine 2026-08-29"
+    echo "          (plugin-doctor/README.md; that day's bench line records macOS 26.6.1)"
+    echo "        measured SILENT on the D3 bench 2026-08-15 (1.13, macOS 26.6.1)"
+    echo "      Both measurements stand; decode support drifts by OS in BOTH directions"
+    echo "      (C63), so PROVE IT ON YOUR TARGET MACHINE before shipping this file."
+    echo "      Note also that .mp2 is ffmpeg's convention, not an Apple-documented"
+    echo "      sample entry — the spec lists no framed Layer II format — which is"
+    echo "      worth a line in any sidecar. The works-everywhere option (not a"
+    echo "      mandatory rebuild) stays dual-track: scripts/mov.sh routes MP2 there"
+    echo "      automatically, or scripts/remux.sh --audio pcm."
+    note="${note:+$note }Output carries MP2 audio with no PCM access track. Playability is per-OS empirical, not categorical: measured playing in QuickTime on this machine 2026-08-29, measured silent on the D3 bench 2026-08-15 (1.13) — prove it on your target machine. .mp2 is not an Apple-documented sample entry (worth a sidecar line). Works-everywhere option: mov.sh (dual-track) or remux.sh --audio pcm."
   fi
 fi
 

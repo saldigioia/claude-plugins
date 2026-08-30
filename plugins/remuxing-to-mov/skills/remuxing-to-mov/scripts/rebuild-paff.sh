@@ -134,14 +134,17 @@ done
 
 # 3) rebuild from zero at the field rate
 cp=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
-MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
+CFLAG=""; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && CFLAG="+write_colr"
+MOVFLAGS=$(rtm_movflags "$CFLAG")   # 1.16.7: faststart by default, knob announced
+MOVF=(); [ -n "$MOVFLAGS" ] && MOVF=(-movflags "$MOVFLAGS")
+rtm_faststart_announce rebuild-paff.sh
 PART="$(rtm_part "$OUT")"; MUXLOG="$WORK/mux.log"   # extension-keeping (D6)
 # ${arr[@]+...} expansions keep bash 3.2 (macOS default) happy under set -u with empty arrays
 if ! ffmpeg -nostdin -y -hide_banner -nostats -fflags +genpts -r "$RATE" "${FF_INPUT_OPTS[@]}" -i "$WORK/v.h264" ${AIN[@]+"${AIN[@]}"} \
     -map 0:0 ${AMAP[@]+"${AMAP[@]}"} -c:v copy -c:a pcm_s16le \
     ${AMETA[@]+"${AMETA[@]}"} \
     -video_track_timescale "$TS" \
-    -movflags "$MOVFLAGS" -f mov \
+    ${MOVF[@]+"${MOVF[@]}"} -f mov \
     "$PART" 2>"$MUXLOG"; then
   echo ">> mux FAILED:"; sed 's/^/   /' "$MUXLOG" | tail -8
   exit 1

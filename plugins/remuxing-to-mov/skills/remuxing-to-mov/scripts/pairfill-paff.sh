@@ -412,7 +412,10 @@ case "$acodec" in
 esac
 
 cprim=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
-MOVFLAGS="+faststart"; { [ -n "$cprim" ] && [ "$cprim" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
+CFLAG=""; { [ -n "$cprim" ] && [ "$cprim" != unknown ]; } && CFLAG="+write_colr"
+MOVFLAGS=$(rtm_movflags "$CFLAG")   # 1.16.7: faststart by default, knob announced
+MOVF=(); [ -n "$MOVFLAGS" ] && MOVF=(-movflags "$MOVFLAGS")
+rtm_faststart_announce pairfill-paff.sh
 
 # The repair itself. lt(x,-8e18) is the unset test (INT64_MIN, not NaN); the DTS
 # ramp anchors to the FIRST REAL PTS (domain-relative) and alternates A/B ticks.
@@ -442,7 +445,7 @@ pf_mux () {  # pf_mux INPUT_OPT... — one attempt; only the probe window varies
   ffmpeg -nostdin -y -hide_banner -nostats ${DRC[@]+"${DRC[@]}"} "$@" -i "$IN" \
     -map 0:v:0 ${AARGS[@]+"${AARGS[@]}"} \
     -c:v copy -bsf:v "$SETTS" \
-    -movflags "$MOVFLAGS" -f mov "$PART" 2>"$MUXLOG"
+    ${MOVF[@]+"${MOVF[@]}"} -f mov "$PART" 2>"$MUXLOG"
 }
 pf_mux_fail () {  # pf_mux_fail [LABEL] — report + exit 1 (contract), keeping the log
   echo ">> mux FAILED${1:+ ($1)}:"; sed 's/^/   /' "$MUXLOG" | tail -8

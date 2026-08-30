@@ -98,9 +98,12 @@ case "$OUT" in *.mov|*.MOV) FMT=mov;; *.mp4|*.m4v|*.MP4) FMT=mp4;; *) FMT=$([ "$
 trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
 rtm_writer_preflight "$OUT" "$IN" || exit 2
 PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
+R4MOVFLAGS=$(rtm_movflags "+use_metadata_tags"); R4MOVF=()
+[ -n "$R4MOVFLAGS" ] && R4MOVF=(-movflags "$R4MOVFLAGS")
+rtm_faststart_announce rung4.sh
 if ! ffmpeg -nostdin -y -v error "${FF_INPUT_OPTS[@]}" -i "$IN" \
     "${VARGS[@]}" ${AARGS[@]+"${AARGS[@]}"} \
-    "${PROV[@]}" -movflags use_metadata_tags+faststart -f "$FMT" "$PART"; then
+    "${PROV[@]}" ${R4MOVF[@]+"${R4MOVF[@]}"} -f "$FMT" "$PART"; then
   echo ">> encode FAILED; partial output kept at $PART for inspection." >&2
   exit 1
 fi

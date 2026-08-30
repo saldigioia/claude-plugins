@@ -175,6 +175,72 @@ rtm_disk_preflight () {
   return 0
 }
 
+# --- faststart is the default, everywhere (WO-1.16.7 Item 2) ------------------
+# Apple's recommended creation order puts the movie atom before the sample data
+# ("the atom containing the movie resource should precede any atoms containing
+# the movie's sample data" — quicktime-file-format-complete.md), so front-moov
+# is proper form, not merely a streaming nicety. Every .mov-writing route in
+# this tree defaults to it, the POC rung included: until 1.16.7 poc-remux.py
+# set no movflags at all and diverged from mov.sh without announcing it.
+#
+# The opt-out is MANUAL and ANNOUNCED: RTM_FASTSTART=0, or a route's
+# --no-faststart. Nothing turns faststart off on the file's behalf — not the
+# output's size, not "this one looks like a shelf master". An automatic opt-out
+# would be a new instance of the unannounced divergence this item removes.
+#
+# COST, measured on this bench 2026-08-29 (ffmpeg 9.0.1 / libavformat 63.1.101,
+# macOS 26.6.1, 3.93 GiB output on an external APFS SSD): the relocation is a
+# second pass libavformat performs IN PLACE. It reopens the finished output for
+# READING (lsof: one 'w' and one 'r' descriptor on the same path; no temp file
+# appeared in 50 directory samples) and shifts the media data forward. Peak disk
+# was 1.000x the output size — so rtm_disk_preflight's one-source-size budget
+# already covers a faststart build, and this item leaves it UNCHANGED. The cost
+# is TIME: the mux pass took 8.1 s, the relocation a further 10.9 s (19.0 s
+# wall) — the ~2x write I/O the docs warn about, and what the knob is for.
+#
+#   rtm_faststart_on          predicate: true when faststart is in force
+#   rtm_movflags [EXTRA...]   the movflags VALUE for this run ("" when none)
+#   rtm_faststart_announce R  the announced choice + machine line, for route R
+#
+# Each EXTRA carries its OWN leading '+' (rtm_movflags "+write_colr"), because
+# the value is a concatenation: "+faststart+write_colr".
+#
+# rtm_movflags returns EMPTY when the opt-out leaves nothing to set, because
+# `-movflags ""` is a hard ffmpeg parse error ("Unable to parse movflags option
+# value" — measured on this bench). Callers therefore build an ARRAY and pass it
+# with the tree's absent-safe idiom, so "no flags" means "no option":
+#
+#   MOVF=(); v=$(rtm_movflags "+write_colr"); [ -n "$v" ] && MOVF=(-movflags "$v")
+#   ffmpeg ... ${MOVF[@]+"${MOVF[@]}"} ...
+rtm_faststart_on () { [ "${RTM_FASTSTART:-1}" != 0 ]; }
+
+rtm_movflags () {
+  local v="" f
+  if rtm_faststart_on; then v="+faststart"; fi
+  for f in "$@"; do
+    [ -n "$f" ] || continue
+    v="${v}${f}"
+  done
+  printf '%s' "$v"
+}
+
+rtm_faststart_announce () {
+  local route="${1:-build}"
+  if rtm_faststart_on; then
+    echo "   faststart: ON — moov first, Apple's recommended creation order. The"
+    echo "   relocation is a second IN-PLACE pass: ~2x write I/O, no extra disk"
+    echo "   (measured peak 1.000x the output, 2026-08-29). Opt out with"
+    echo "   RTM_FASTSTART=0 (announced, never automatic)."
+    echo "RTM_FASTSTART state=on route=$route"
+  else
+    echo "   faststart: OFF (RTM_FASTSTART=0) — moov is written LAST. The file is"
+    echo "   valid and durable, but it is not in Apple's recommended creation"
+    echo "   order and progressive/network playback stalls until the whole file"
+    echo "   has arrived. Operator opt-out; nothing chose this for you."
+    echo "RTM_FASTSTART state=off route=$route"
+  fi
+}
+
 # rtm_writer_preflight OUT SRC [STAGE_DIR] — what every builder owes BEFORE
 # its first write: the writer lock, then the disk check. Callers install
 # `trap 'rtm_unlock' EXIT` first (extending an existing cleanup trap where

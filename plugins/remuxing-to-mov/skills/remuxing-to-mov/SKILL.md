@@ -96,8 +96,9 @@ REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
    probe** (it used to be skipped there) and a clean decode is an advisory
    REVIEW, not a FAIL — `ipcm` was condemned unwaivably on evidence never
    gathered — while **MP2 with no PCM access track** is now the REVIEW it always
-   should have been (AVFoundation has no Layer II path; the gate passed the
-   configuration that fails and failed the one that works).
+   should have been — advisory, because .mp2 playability is per-OS empirical
+   (measured playing here 2026-08-29, silent on the D3 bench 2026-08-15), and
+   because the gate passed this configuration while failing ones that work.
 
 ## The escalation ladder — stop at the first rung that works
 
@@ -300,7 +301,7 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 | HEVC file won't open in QuickTime | Retag, don't re-encode: `ffmpeg -i IN -c copy -tag:v hvc1 OUT.mov` |
 | MPEG-2 4:2:2 glitches/smears in QuickTime but plays clean in IINA/VLC (the built `.mov` carries stsd `m2v1`) | Decoder **dispatch**, not damage — and a **two-step**, narrowed 2026-08-15 (D8, 1.13; the 1.12 row claimed the retag WAS the remedy). **1. Retag** (free, 4 bytes, bitstream bit-identical): `ffmpeg -i IN -map 0 -c copy -tag:v xd5b -movflags +faststart OUT.mov` — works when the stream matches the fourcc's profile contract (measured 2026-08-15 on the VMA 1080i59.94 pair: garbage as `m2v1`, frame-for-frame identical to the ffmpeg reference as `xd5b`; CBR not enforced). **2. If the retag does not fix it, swap the container:** `scripts/mp4-swap.sh IN` — same bitstream, `.mp4`, sample entry `mp4v`+`esds` (measured the same day on a 21 GB 1080i29.97 capture where **all five** tags — `m2v1`/`mp2v`/`hdv3`/`xd5b`/`xd5c` — corrupted **identically**, because movenc gives every MPEG-2 fourcc the same generic sample-description body: `glbl`+`fiel`+`colr`. The swap scored SSIM 0.9175+ on the very timestamps that failed). ffmpeg cannot write `mp4v` into a `.mov` (`Tag mp4v incompatible with output codec id '2'`) — that is a **muxer tag-table artifact**, not QTFF: Apple lists `esds` among the legal video sample-description extensions, so the entry is spec-legal in MOV and only `stsd` surgery (MP4Box/Bento4, unbenched) could put it there. Rung 4 is step 3, not step 1. `probe.sh` fires the advisory on **.ts sources too** since 1.13 (D7 — it was dead on every TS before). |
 | A stream you mapped is missing from the output (or came out as another codec) | **Post-mux census** (D5, 1.13): every builder now reconciles its own plan against the finished file BEFORE blessing it — `RMX_CENSUS stage=… planned=N written=M codecs=ok\|mismatch\|na match=ok\|MISMATCH`, run on the `.part` file, and a mismatch is a loud exit 1 with nothing under the real name. Motive: `ffmpeg -c copy -f mov` was measured dropping 1 of 3 streams at `-v warning` — silently — and every downstream gate passed, because they only ever examined the streams that survived. `RMX_PLAN … unmapped=N` is still a plan *printed before the mux*; the census is the half that looks at the file |
-| Output has MP2 audio and no PCM access track | **No audio in QuickTime** — AVFoundation has no MPEG Layer II path for `mp4a`/`.mp2` tracks (no positive report of Layer II decode in QuickTime X/AVFoundation exists in any container; ffmpeg's `mov_write_esds_tag` already declares the formally-correct OTI `0x6B`, so there is nothing to fix on the write side). `verify.sh` gate (g) REVIEWs this configuration since 1.13 (D3) — before that it *passed* it while FAILing configurations that work. Rebuild: `scripts/mov.sh` (routes MP2 to dual-track automatically) or `remux.sh --audio pcm`. The `.mp2` allowlist entry is legal only as dual-track's **preserved original**, where the PCM access track is what plays |
+| Output has MP2 audio and no PCM access track | **Prove it on your target machine** — `.mp2` playability is per-OS empirical, not categorical: measured PLAYING in QuickTime here 2026-08-29, measured SILENT on the D3 bench 2026-08-15 (both stand; C63 drift runs both ways). ffmpeg's `mov_write_esds_tag` already declares the formally-correct OTI `0x6B`, so the declaration was never the variable. `.mp2` is ffmpeg's convention, not an Apple-documented sample entry — worth a sidecar line. `verify.sh` gate (g) REVIEWs this configuration since 1.13 (D3) — before that it *passed* it while FAILing configurations that work. Rebuild: `scripts/mov.sh` (routes MP2 to dual-track automatically) or `remux.sh --audio pcm`. The `.mp2` allowlist entry is legal only as dual-track's **preserved original**, where the PCM access track is what plays |
 | Verify FAILs an audio sample entry it doesn't recognize (e.g. `ipcm`) | The allowlist is a **prior, not a verdict** since 1.13 (D3): an off-list tag now runs the bounded decode probe (pre-1.13 the probe was deliberately *skipped* there — the one measurement that could falsify the claim), and a clean decode downgrades the FAIL to an advisory REVIEW. `ipcm` is explicitly allowlisted: it is the ISO-registered PCM entry (ISO/IEC 23003-5 + `pcmC`, MP4RA-registered, written by ffmpeg since 6.1, read by VLC/GPAC, shipped by Sony XAVC since 2021) and it is exactly what `-c:a pcm_s16le -f mp4` produces — i.e. what the container-swap rung's access track is. The old text ("a sample entry no decoder claims") was factually false about it |
 | Plays locally, slow start over network | `ffmpeg -i IN -c copy -movflags +faststart OUT.mov` (moov was at EOF) |
 | Video plays, audio silent in QuickTime | Audio QT can't play (AC-3/DTS/MP2) → dual-track default, or `remux.sh --audio pcm`. **E-AC-3 (Dolby Digital Plus) plays natively — just copy it** |
@@ -338,10 +339,30 @@ recognizes properly-stamped rung4 derivatives by their mdta provenance.
 ## House defaults (baked into the scripts)
 
 - Video: **always `-c copy`**. HEVC tagged **`hvc1`** (default `hev1` won't play
-  in QuickTime). `-movflags +faststart` — knowing its cost: moov is still
-  written last, then a second full-file pass relocates it (~2× write I/O per
-  output; dominates multi-GB batches on external SSDs). The access copy is
-  what needs faststart; a shelved archival master does not.
+  in QuickTime).
+- **`-movflags +faststart` on EVERY `.mov`-writing route, archival masters
+  included** (1.16.7 — this reverses the older "the access copy is what needs
+  faststart; a shelved archival master does not"). Apple states a recommended
+  creation order: *"the atom containing the movie resource should precede any
+  atoms containing the movie's sample data"* — so front-moov is proper form,
+  not merely a streaming nicety, and the format's own history moved the global
+  movie information from the end of the file to the beginning. The one real
+  hazard Apple names is the offset rewrite (*"the size of the movie atom
+  affects the chunk offsets to the media data"*), which is exactly what gates
+  (h)/(k)/(m) prove harmless on the finished file.
+  - **The opt-out is manual and announced**, never automatic: `RTM_FASTSTART=0`
+    or a route's `--no-faststart`. Nothing turns it off on the file's behalf —
+    not size, not "this looks archival". The choice is printed either way
+    (`RTM_FASTSTART state=on|off route=…`).
+  - **Cost: time, not space.** moov is still written last and a second pass
+    relocates it — ~2× write I/O, which dominates multi-GB batches on external
+    SSDs. Measured 2026-08-29 (ffmpeg 9.0.1, macOS 26.6.2, 3.93 GiB output on
+    an external APFS SSD): libavformat does the relocation **in place** — no
+    temp copy, peak disk **1.000×** the output — so the disk pre-flight budget
+    is unchanged; the mux took 8.1 s and the relocation 10.9 s more.
+  - One writer per language: `rtm_movflags`/`rtm_faststart_announce`
+    (`lib-mux.sh`) and `lib_faststart.py` (the PyAV rungs). No route decides
+    for itself — that divergence is what shipped the 2024 VMA build end-moov.
 - Audio under `--audio auto` (WO 3.2, **per kept track**): QT-DECODABLE codecs
   copy bit-exact — AAC / ALAC / MP3 / **raw** PCM / E-AC-3 — and **everything
   else lands as a PCM access track, announced per track with its reason**:

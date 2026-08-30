@@ -64,7 +64,10 @@ rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the sourc
 vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
 cp=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null)
-MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
+CFLAG=""; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && CFLAG="+write_colr"
+MOVFLAGS=$(rtm_movflags "$CFLAG")   # 1.16.7: faststart by default, knob announced
+MOVF=(); [ -n "$MOVFLAGS" ] && MOVF=(-movflags "$MOVFLAGS")
+rtm_faststart_announce resync.sh
 
 echo "== resync: $IN -> $OUT =="
 echo "   video=$vcodec -> -c:v copy (bit-identical); audio -> $PCM, gaps filled (aresample async)"
@@ -181,7 +184,7 @@ PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 ffmpeg -nostdin -v error -fflags +genpts "${FF_INPUT_OPTS[@]}" -i "$IN" \
   -map 0:v:0 -c:v copy $VTAG \
   $AMAP -af "aresample=async=1:first_pts=0" -c:a "$PCM" \
-  -movflags "$MOVFLAGS" -f mov "$PART"
+  ${MOVF[@]+"${MOVF[@]}"} -f mov "$PART"
 # POST-MUX CENSUS (D5, 1.13): ASPECS above IS the audio plan this run mapped —
 # reconcile it against the file before blessing. Every re-timed track lands as
 # $PCM by construction, so the identity half is assertable too.

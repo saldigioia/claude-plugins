@@ -272,9 +272,12 @@ fi
 CEN_N="$PLAN_N"; CEN_C="$PLAN_C"
 if [ "$NCHAP" -gt 0 ]; then
   echo "-- re-attaching $NCHAP chapter(s) from the source (-map_chapters pass; PyAV cannot write them) --"
+  CHMOVFLAGS=$(rtm_movflags); CHMOVF=()
+  [ -n "$CHMOVFLAGS" ] && CHMOVF=(-movflags "$CHMOVFLAGS")
+  rtm_faststart_announce derive-dts.sh
   MUXLOG="$(mktemp)"
   if ! ffmpeg -nostdin -y -hide_banner -nostats "${FF_INPUT_OPTS[@]}" -i "$PYOUT" -i "$IN" \
-         -map 0 -map_chapters 1 -c copy -movflags +faststart -f mov "$PART" 2>"$MUXLOG"; then
+         -map 0 -map_chapters 1 -c copy ${CHMOVF[@]+"${CHMOVF[@]}"} -f mov "$PART" 2>"$MUXLOG"; then
     echo ">> chapter re-attach FAILED:"; sed 's/^/   /' "$MUXLOG" | tail -6
     echo "   derived (chapterless) intermediate kept at $PYOUT; mux log: $MUXLOG"; exit 1
   fi

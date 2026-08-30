@@ -114,7 +114,13 @@ case "$acodec" in
 esac
 
 VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
-MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
+CFLAG=""; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && CFLAG="+write_colr"
+MOVFLAGS=$(rtm_movflags "$CFLAG")   # 1.16.7: faststart by default, knob announced
+MOVF=(); [ -n "$MOVFLAGS" ] && MOVF=(-movflags "$MOVFLAGS")
+rtm_faststart_announce dual-track.sh
+# the copy-cut intermediate is a .mov write too, so it follows the same policy
+CUTMOVFLAGS=$(rtm_movflags); CUTMOVF=()
+[ -n "$CUTMOVFLAGS" ] && CUTMOVF=(-movflags "$CUTMOVFLAGS")
 trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
 rtm_writer_preflight "$OUT" "$IN" || exit 2
 PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
@@ -135,7 +141,7 @@ build_from () {  # build_from SRC  -- decode a:0 to PCM (track1, default) + copy
       -disposition:a:0 default -disposition:a:1 0 \
       -metadata:s:a:0 title="$T1" -metadata:s:a:0 language=eng \
       -metadata:s:a:1 title="$T2" -metadata:s:a:1 language=eng \
-      -movflags "$MOVFLAGS" -f mov "$PART" 2>"$MUXLOG"
+      ${MOVF[@]+"${MOVF[@]}"} -f mov "$PART" 2>"$MUXLOG"
   }
   if ! bf_mux "${FF_INPUT_OPTS[@]}"; then
     # probe-shaped failure = window undershot, not a mux defect -> retry ONCE at
@@ -182,7 +188,7 @@ if [ -n "$SS" ] || [ -n "$TO" ]; then
     # shellcheck disable=SC2086
     ffmpeg -nostdin -y -hide_banner -nostats ${SS:+-ss "$SS"} ${TO:+-to "$TO"} "$@" -i "$IN" \
       -map 0:v:0 -map 0:a:0 -c copy \
-      -avoid_negative_ts make_zero -movflags +faststart -f mov "$TMP" 2>"$CUTLOG"
+      -avoid_negative_ts make_zero ${CUTMOVF[@]+"${CUTMOVF[@]}"} -f mov "$TMP" 2>"$CUTLOG"
   }
   if ! cut_mux "${FF_INPUT_OPTS[@]}"; then
     if probe_shaped_failure "$CUTLOG"; then

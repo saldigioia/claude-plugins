@@ -4,6 +4,81 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.16.7 — one policy, and a claim that became a measurement (2026-08-30)
+
+Two items from `plugin-doctor/FOLLOWUP-1.16.6.md`, both of which had the plugin
+asserting something the bench had already contradicted.
+
+**Item 2 — faststart is the default on every `.mov`-writing route, archival
+masters included.** The defect was three writers with three policies: five shell
+rungs each carried `MOVFLAGS="+faststart"`, `derive-dts.py` hardcoded the same
+string again in a PyAV options dict, and `poc-remux.py` set **no movflags at
+all**. So the POC rung shipped end-moov while every other rung shipped
+front-moov, and nothing in any log said so — which is exactly how the 24 GB 2024
+VMA deliverable came to have `moov` trailing its `mdat` without anyone deciding
+that. Apple states a recommended creation order ("the atom containing the movie
+resource should precede any atoms containing the movie's sample data"), so
+front-moov is proper form rather than a streaming nicety; the operator's policy
+resolution for this round makes it the default everywhere, with a **manual,
+announced** opt-out (`RTM_FASTSTART=0` / `--no-faststart`) and **never** an
+automatic one. Ten routes converted to one writer per language (`rtm_movflags` /
+`rtm_faststart_announce` in `lib-mux.sh`; new `lib_faststart.py` for the PyAV
+rungs), each announcing `RTM_FASTSTART state=on|off route=<name>`.
+
+The disk pre-flight budget hung on an unmeasured question, so it was measured
+first (2026-08-29, ffmpeg 9.0.1 / libavformat 63.1.101, macOS 26.6.2, 3.93 GiB
+output on an external APFS SSD):
+
+```
+second pass runs                Starting second pass: moving the moov atom …
+descriptors during the pass     3r input, 4w output, 5r the SAME output
+temp files, 50 samples          none — no stage-and-rename anywhere
+peak disk                       4,224,974,848 B / 4,224,596,893 B  = 1.000x
+wall                            8.1 s mux + 10.9 s relocation = 19.0 s
+PyAV triggers the relocation    yes — ftyp moov wide mdat, no fallback needed
+```
+
+**The relocation is in place.** So the cost is time, not space, and
+`rtm_disk_preflight`'s one-source-size budget already covers it — **unchanged**
+by this round. `batch.sh`'s comment teaching the opposite ("faststart is an
+access-copy need, not a shelved-master need") is superseded and rewritten.
+
+New `116-faststart-policy.sh` (20 assertions) pins the helper, both opt-outs,
+the ffmpeg error that forces the array idiom (`-movflags ""` is a hard parse
+failure, so "no flags" must mean "no option"), real front-moov and end-moov
+builds, the class sweep, and — reading the DECISION rather than an output, since
+a size threshold is invisible on small fixtures — that the opt-out can never
+become automatic. Guards **G52/P52** (suppress the announcement) and **G53/P53**
+(make the opt-out automatic on size).
+
+**Item 1 — gate (g)'s MP2 claim demoted from categorical to per-OS empirical.**
+The gate asserted that no positive report of Layer II decode in
+QuickTime/AVFoundation exists in any container. One does, from this project:
+the feed.ts deliverable — `avc1` plus a `.mp2` Layer II track, no PCM access
+track — plays in QuickTime, audio included, measured 2026-08-29. Demoted the way
+the categorical 4:2:2 refusal was demoted in 1.11 (C56/C72, WO 4.1): the D3
+silence measurement is **dated and kept**, the new one is dated beside it, and
+C63's two-way OS drift is why both stand. Swept as a class across `verify.sh`,
+`SKILL.md`, `ingest-compatibility.md`, `verification-safety.md` and
+`qtff-claims.md` (C102 marked REVERSED, playability half). The spec objection
+survives the reversal: `.mp2` is ffmpeg's convention, not an Apple-documented
+sample entry — now stated wherever the topic appears, as a sidecar line. The
+verdict **class** is unchanged (advisory REVIEW): this round changed what is
+said, not what is scored, and `117-mp2-per-os-claim.sh` §5 pins that. Guard
+**G54/P54** re-adds one confident summarising sentence beside the dates.
+
+The optional audio-render probe was **not** built — a bounded AVFoundation
+Layer II decode probe is not cheap here, and the WO's own rule applies: do not
+build a flaky probe to avoid writing an honest sentence.
+
+Bench (macOS 26.6.2, ffmpeg 9.0.1, PyAV 18.1.0): suite **313/313**, mutation
+audit **97/97** (`MA_SUMMARY total=97 bad=0 verdict=pass`, 57 CAUGHT / 40
+CLEAN). The first run was red on this round's own test — 116 §8 used
+`printf | grep -q`, the shape 94 §10 forbids — which took `94-rot-sweep` red
+and, through it, 29 guards to BASE-RED and `90-harness-honesty` §7 (its clean
+probe is G03, whose test is 94) to `bad=1`. One defect, 32 bad cases; fixed by
+grepping a file instead of a pipe.
+
 ## 1.16.6 — the exemption is size, and size is re-taken (2026-08-29)
 
 The 1.16.5 review caught the one `| head -1` the round did not touch:

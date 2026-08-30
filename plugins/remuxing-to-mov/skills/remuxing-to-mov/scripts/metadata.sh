@@ -57,9 +57,12 @@ PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 # CHAP controls chapter metadata; +bitexact suppresses the generic encoder tag;
 # use_metadata_tags writes the proper QuickTime mdta keys.
 # ${arr[@]+...} keeps bash 3.2 (macOS default) happy under set -u with empty arrays
+MDMOVFLAGS=$(rtm_movflags "+use_metadata_tags"); MDMOVF=()
+[ -n "$MDMOVFLAGS" ] && MDMOVF=(-movflags "$MDMOVFLAGS")
+rtm_faststart_announce metadata.sh
 ffmpeg -nostdin -y -v error -fflags +bitexact "${FF_INPUT_OPTS[@]}" -i "$IN" \
   -map 0 -map -0:d? -map_metadata 0 ${CHAP[@]+"${CHAP[@]}"} \
-  -c copy ${VTAG[@]+"${VTAG[@]}"} -movflags use_metadata_tags+faststart \
+  -c copy ${VTAG[@]+"${VTAG[@]}"} ${MDMOVF[@]+"${MDMOVF[@]}"} \
   ${MD[@]+"${MD[@]}"} -f mov "$PART"
 # POST-MUX CENSUS (D5, 1.13): this pass REWRITES the container of a finished
 # deliverable — losing a track HERE would silently narrow a file that already

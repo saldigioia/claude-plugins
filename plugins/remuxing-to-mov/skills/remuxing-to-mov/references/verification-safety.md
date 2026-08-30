@@ -152,7 +152,7 @@ A correct mux can still fail to play; don't chase a phantom "bad mux".
 | AC-3 | Yes | Yes on modern macOS (older: spotty) |
 | E-AC-3 (Dolby Digital Plus) | Yes | Yes — native in modern QuickTime |
 | DTS / DTS-HD MA | Yes | No |
-| MP2 | Yes (non-standard) | **No** — AVFoundation has no MPEG Layer II path (1.13, D3: measured silent; the `esds` OTI ffmpeg writes is already the correct `0x6B`). A PCM access track is not optional for this source class; `verify.sh` gate (g) REVIEWs an MP2 track with none |
+| MP2 | Yes (non-standard) | **Per-OS empirical** — measured playing in QuickTime here 2026-08-29, measured silent on the D3 bench 2026-08-15 (1.13); the `esds` OTI ffmpeg writes is already the correct `0x6B`, so the declaration was never the variable. Prove it on your target machine; a PCM access track is the works-everywhere option; `verify.sh` gate (g) REVIEWs an MP2 track with none |
 
 For genuine playback of the "no/unverified" rows: first the lossless rungs —
 a sample-entry retag where the class allows it, then the **container swap**

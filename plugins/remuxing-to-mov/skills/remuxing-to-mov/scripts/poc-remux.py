@@ -116,12 +116,17 @@ def main():
     if "--dry-run" in args:
         dry = True
         args.remove("--dry-run")
+    no_faststart = False
+    if "--no-faststart" in args:
+        no_faststart = True
+        args.remove("--no-faststart")
     if audio not in ("all", "first", "none"):
         sys.stderr.write("--audio must be all|first|none\n")
         return 2
     if len(args) != 2:
         sys.stderr.write("usage: poc-remux.py IN OUT [--audio all|first|none] "
-                         "[--tag FOURCC] [--limit N] [--dry-run]\n")
+                         "[--tag FOURCC] [--limit N] [--dry-run] "
+                         "[--no-faststart]\n")
         return 2
     src, dst = args
 
@@ -135,6 +140,7 @@ def main():
 
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import h264poc
+    import lib_faststart
 
     # ------------------------------------------------------------ pass 1 ---
     # One demux, every fact: the timestamp column, the slice headers, the POC.
@@ -338,7 +344,11 @@ def main():
         ains = []
     elif audio == "first":
         ains = ains[:1]
-    out = av.open(dst, "w", format="mov")
+    # 1.16.7: this rung wrote no movflags at all, so its output was end-moov
+    # while every shell rung wrote front-moov — an unannounced divergence.
+    fs_on = lib_faststart.resolve(no_faststart)
+    lib_faststart.announce("poc-remux.py", fs_on)
+    out = av.open(dst, "w", format="mov", options=lib_faststart.options(fs_on))
     try:
         vout = out.add_stream_from_template(vin)
     except AttributeError:

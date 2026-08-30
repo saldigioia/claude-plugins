@@ -828,7 +828,13 @@ def main():
     )
     print("DERIVE_PLAN n=%d codecs=%s" % (len(mapped), codecs))
 
-    out = av.open(dst, "w", format="mov", options={"movflags": "+faststart"})
+    # 1.16.7: the policy is one writer now (lib_faststart), not a hardcoded
+    # string here and a different one in poc-remux.py.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import lib_faststart
+    fs_on = lib_faststart.resolve()
+    lib_faststart.announce("derive-dts.py", fs_on)
+    out = av.open(dst, "w", format="mov", options=lib_faststart.options(fs_on))
     omap = {}
     for st in mapped:
         o = out.add_stream_from_template(st)

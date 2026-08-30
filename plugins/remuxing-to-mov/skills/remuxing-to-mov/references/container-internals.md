@@ -62,15 +62,41 @@ copy ffmpeg writes `colr` by default but does **not** write `fiel`.
 - ≥1 `mdat` with payload
 - streaming: `moov` before `mdat` (`-movflags +faststart`)
 
-**faststart's cost (QTFF audit 5-5a):** ffmpeg still writes `moov` LAST, then a
-second pass relocates it to the front — the muxer's own log says so
-(`Starting second pass: moving the moov atom to the beginning of the file`,
-probed 2026-07-26 on 8.1.2) — and moving `moov` shifts every `mdat` byte, so
-the pass rewrites the whole file: **~2× write I/O per output**. Irrelevant on a
-small file; on multi-GB masters over external SSDs it dominates batch
-throughput. Faststart buys progressive/network start — which the **access
-copy** needs, not the archival master sitting on a shelf; consider scoping it
-accordingly on large batches.
+**Apple's recommended creation order.** Atom order is generally free and
+moov-at-end is legal — placement affects neither validity nor durability of a
+finished file. But the spec states a recommended order: *"the atom containing
+the movie resource should precede any atoms containing the movie's sample
+data"*, enabling playback while downloading, and the format's own history moved
+the global movie information from the end of the file to the beginning. The
+spec also names the one hazard of relocating it: *"be careful when constructing
+a self-contained QuickTime file with its metadata (movie atom) at the front
+because the size of the movie atom affects the chunk offsets to the media
+data"* — which is precisely what gates (h)/(k)/(m) prove harmless on the
+finished file. Since **1.16.7** faststart is therefore the default on every
+`.mov`-writing route, archival masters included, with a manual announced
+opt-out (`RTM_FASTSTART=0` / `--no-faststart`).
+
+**faststart's cost (QTFF audit 5-5a; measured again 1.16.7):** ffmpeg still
+writes `moov` LAST, then a second pass relocates it to the front — the muxer's
+own log says so (`Starting second pass: moving the moov atom to the beginning
+of the file`, probed 2026-07-26 on 8.1.2, again 2026-08-29 on 9.0.1) — and
+moving `moov` shifts every `mdat` byte, so the pass rewrites the whole file:
+**~2× write I/O per output**. Irrelevant on a small file; on multi-GB masters
+over external SSDs it dominates batch throughput.
+
+**The cost is TIME, not SPACE — measured, because the disk pre-flight budget
+hung on it.** 2026-08-29, ffmpeg 9.0.1 / libavformat 63.1.101, macOS 26.6.2,
+3.93 GiB output on an external APFS SSD: libavformat performs the relocation
+**in place**. It reopens the finished output for READING (`lsof` showed one
+`w` and one `r` descriptor on the same path) and shifts the media data forward;
+**no temp file appeared in 50 directory samples**, and peak disk was
+**1.000×** the output (4,224,974,848 B against a 4,224,596,893 B file). So
+`rtm_disk_preflight`'s one-source-size budget already covers a faststart build
+and 1.16.7 left it unchanged. What it costs is wall time: 8.1 s to mux, 10.9 s
+more to relocate (19.0 s total). The older advice here — that faststart is an
+access-copy need and a shelved master does not want it — is **superseded**: the
+order is Apple's recommendation for any finished file, and the operator, not
+the script, decides to trade it away.
 
 ## Validation checks
 

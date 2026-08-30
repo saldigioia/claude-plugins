@@ -463,6 +463,46 @@ pro_unmeasured_version_reader () {  # prose naming the exemption stays CLEAN
     >> "$1/scripts/clock.sh"
 }
 
+
+mut_suppress_faststart_announce () {  # the choice stops being announced
+  # 1.16.7's contract is that faststart is announced EITHER WAY. A build that
+  # silently front-moovs is still a divergence — just one nobody can read in
+  # the log, which is exactly how the POC rung's end-moov survived four rounds.
+  perl -pi -e 's{^rtm_faststart_announce remux\.sh$}{}' "$1/scripts/remux.sh"
+}
+pro_suppress_faststart_announce () {  # prose naming the announcement stays CLEAN
+  printf '\n# never: drop rtm_faststart_announce from a .mov-writing route — the atom\n# order a build chose is only a fact if the run log says which one (test 116)\n' \
+    >> "$1/scripts/remux.sh"
+}
+
+mut_auto_faststart_optout () {  # the opt-out becomes automatic, on size
+  # The policy resolution is explicit: never automatic. A size threshold is the
+  # tempting version (it even looks like a kindness on a 24 GB master) and it is
+  # invisible to every assertion that runs on a small fixture — only 116 §8,
+  # which reads the DECISION rather than an output, can see it.
+  # every $ in the REPLACEMENT is escaped: perl interpolates ${...} and $(...)
+  # there, so the unescaped form compiled to nothing and the case reported
+  # MUTATE-FAIL — a guard that mutates nothing audits nothing.
+  perl -0pi -e 's{rtm_faststart_on \(\) \{ \[ "\$\{RTM_FASTSTART:-1\}" != 0 \]; \}}{rtm_faststart_on () { [ "\$\{RTM_FASTSTART:-1\}" != 0 ] && [ "\$(stat -f%z "\$\{1:-/dev/null\}" 2>/dev/null || echo 0)" -lt 4294967296 ]; }}' \
+    "$1/scripts/lib-mux.sh"
+}
+pro_auto_faststart_optout () {  # prose naming the automatic shape stays CLEAN
+  printf '\n# never: make rtm_faststart_on consult the file (size, name, "looks archival")\n# — the opt-out is an operator decision, announced, or it is not one (116 SS8)\n' \
+    >> "$1/scripts/lib-mux.sh"
+}
+
+mut_recategorize_mp2 () {  # the categorical silence claim comes back
+  # Item 1 demoted C102 to a per-OS empirical pair. The regression is not a
+  # deleted date — it is one confident sentence re-added beside them, which
+  # reads as a summary and silently restores the categorical the bench falsified.
+  perl -0pi -e 's{(    echo "   >> MP2 audio with NO PCM access track[^\n]*\n)}{$1    echo "      AVFoundation has no MPEG Layer II path for mp4a/.mp2 tracks."\n}' \
+    "$1/scripts/verify.sh"
+}
+pro_recategorize_mp2 () {  # prose naming the categorical stays CLEAN
+  printf '\n# never: restate "AVFoundation has no MPEG Layer II path" as a categorical —\n# it was measured playing here 2026-08-29 and silent on the D3 bench\n# 2026-08-15; both dates stand, neither summarises the other (test 117)\n' \
+    >> "$1/scripts/verify.sh"
+}
+
 # --------------------------------------------------------------------- roster
 # ID|LANE|TEST|MARKER|MUTATION[|FAILMARK]        LANE: defect | prose | new
 # MARKER is a substring UNIQUE to the guard's own PASS line.
@@ -561,6 +601,12 @@ G50|defect|91-flags-parsers-docs.sh|the class swept one alias deep|mut_alias_ffp
 P50|prose|91-flags-parsers-docs.sh|the class swept one alias deep|pro_alias_ffp_head
 G51|defect|115-probe-head-race.sh|one this section measures|mut_unmeasured_version_reader
 P51|prose|115-probe-head-race.sh|one this section measures|pro_unmeasured_version_reader
+G52|defect|116-faststart-policy.sh|remux.sh announced state=on|mut_suppress_faststart_announce
+P52|prose|116-faststart-policy.sh|remux.sh announced state=on|pro_suppress_faststart_announce
+G53|defect|116-faststart-policy.sh|consults nothing but the knob|mut_auto_faststart_optout
+P53|prose|116-faststart-policy.sh|consults nothing but the knob|pro_auto_faststart_optout
+G54|defect|117-mp2-per-os-claim.sh|AVFoundation has no MPEG Layer II path|mut_recategorize_mp2
+P54|prose|117-mp2-per-os-claim.sh|AVFoundation has no MPEG Layer II path|pro_recategorize_mp2
 '
 
 # --------------------------------------------------------------------- runner

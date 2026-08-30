@@ -17,11 +17,20 @@
 # dual-track PCM-access deliverable per file, run mov.sh on each instead;
 # `-- --audio pcm` here only changes the codec, not the track layout.
 #
-# THROUGHPUT (QTFF audit 5-5a): every output is written with +faststart, which
-# costs a second full-file pass (~2x write I/O per file — moov is written last,
-# then relocated). On multi-GB masters over external SSDs that second pass
-# dominates batch wall time; faststart is an access-copy need, not a
-# shelved-master need (see container-internals.md, "faststart's cost").
+# THROUGHPUT (QTFF audit 5-5a; policy settled 1.16.7). Every output is written
+# with +faststart — including a shelved master, which is a REVERSAL of this
+# comment's old advice that faststart was an access-copy need only. Apple's
+# recommended creation order puts moov before the sample data, and that is now
+# the default on every route with no automatic exception. The cost is real and
+# unchanged: a second full-file pass, ~2x write I/O per file, and on multi-GB
+# masters over external SSDs it dominates batch wall time.
+#
+# It costs TIME, not SPACE. Measured 2026-08-29 (ffmpeg 9.0.1, macOS 26.6.2,
+# 3.93 GiB output, external APFS SSD): libavformat relocates IN PLACE — no temp
+# copy, peak disk 1.000x the output — so a batch needs no extra headroom for it.
+# To trade the order back for wall time on a whole batch, set RTM_FASTSTART=0;
+# every child announces the choice (see container-internals.md, "faststart's
+# cost", and references/knobs.md).
 # Exit: 0 if nothing FAILed, 1 otherwise. A REFUSED (auto.sh exit 11: the
 # unroutable-codec pre-flight — VC-1/VP9/AV1/Dolby E, shared gate since the
 # 1.11 fix round — or a child's own refusal like resync's layout guard) is the

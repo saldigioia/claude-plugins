@@ -386,7 +386,10 @@ VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
 
 # --- color: +write_colr is redundant on modern ffmpeg but harmless; include only if tagged ---
 cp=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)
-MOVFLAGS="+faststart"; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && MOVFLAGS="+faststart+write_colr"
+CFLAG=""; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && CFLAG="+write_colr"
+MOVFLAGS=$(rtm_movflags "$CFLAG")   # 1.16.7: faststart by default, knob announced
+MOVF=(); [ -n "$MOVFLAGS" ] && MOVF=(-movflags "$MOVFLAGS")
+rtm_faststart_announce remux.sh
 
 trap 'rtm_unlock' EXIT   # writer-lock release however this run ends (WO-1.15.6 A2)
 rtm_writer_preflight "$OUT" "$IN" || exit 2
@@ -399,7 +402,7 @@ mux_once () {  # mux_once INPUT_OPT... — one attempt; only the probe window va
     ${AARGS[@]+"${AARGS[@]}"} \
     -c:v copy $VTAG \
     ${TSCALE:+-video_track_timescale "$TSCALE"} \
-    -movflags "$MOVFLAGS" -f "$FMT" \
+    ${MOVF[@]+"${MOVF[@]}"} -f "$FMT" \
     "$PART" 2>"$MUXLOG"
 }
 if ! mux_once "${FF_INPUT_OPTS[@]}"; then
