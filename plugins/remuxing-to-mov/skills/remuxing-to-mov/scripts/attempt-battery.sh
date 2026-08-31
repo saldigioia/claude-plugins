@@ -109,7 +109,7 @@ run_variant () {
   nvar=$((nvar+1))
   [ "$KV" -eq 1 ] || {
     printf '   %-22s %-5s %-9s %-12s %-10s %s\n' "$name" "$rc" "${n:-0}" "${dur:--}" "$ess" "$confess"
-    [ -n "$err" ] && printf '%s\n' "$err" | sort -u | head -3 | sed 's/^/        | /'
+    [ -n "$err" ] && printf '%s\n' "$err" | sort -u | awk 'NR<=3' | sed 's/^/        | /'
   }
   echo "AB_ROW name=$name rc=$rc pkts=${n:-0} dur=${dur:--} vhash=$ess confess=$confess" >> "$OUTDIR/rows.kv"
 }
@@ -146,7 +146,7 @@ echo "AB_SCOPE=$SCOPE"
   else
     echo ">> 0 of $nvar variants muxed this source (scope $SCOPE) — a CACHED DETERMINISTIC"
     echo "   ATTEMPT (TIERS.md Tier 3): a pre-flight refusal may cite this measurement,"
-    echo "   and must re-verify it when ffmpeg changes ($(ffmpeg -version 2>/dev/null | head -1))."
+    echo "   and must re-verify it when ffmpeg changes ($(ffmpeg -version 2>/dev/null | awk 'NR<=1'))."
   fi
   [ "$OWNED" -eq 1 ] && [ "${RTM_BATTERY_KEEP:-0}" != 1 ] \
     && echo "   (artifacts discarded; RTM_BATTERY_KEEP=1 or --out DIR keeps them)"

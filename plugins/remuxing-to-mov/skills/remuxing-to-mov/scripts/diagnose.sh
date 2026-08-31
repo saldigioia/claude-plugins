@@ -98,8 +98,9 @@ if [ "${DGC_DUPVALS:-0}" -gt 0 ]; then
   if [ "${DGC_STRADDLE:-0}" -gt 0 ]; then
     echo "     >> the holes and the repeated timestamps are ONE discontinuity event, not two:"
     echo "        ${DGC_STRADDLE} duplicate(s) bracket an unstamped run. A packet carried a stale"
-    echo "        timestamp across the break; the earlier holder fits its local lattice and the"
-    echo "        later one does not, which is what makes them adjudicable from the bitstream."
+    echo "        timestamp across the break; exactly one of the two holders fits its own local"
+    echo "        POC lattice — which one is measured, not assumed — and that is what makes them"
+    echo "        adjudicable from the bitstream rather than guessable from their neighbours."
   fi
 fi
 DGC_ANY=0; { [ "${DGC_NA:-0}" -gt 0 ] || [ "${DGC_DUPPKTS:-0}" -gt 0 ]; } && DGC_ANY=1
@@ -170,7 +171,13 @@ if pf_poc_routable; then
   # headers and the display positions from pic_order_cnt, which is where both
   # facts were stated all along.
   REPAIR="$POCMUX"
-  REPAIR_WHY="paff=$PF_PAFF reorder=yes half_ts=no, and the slice headers show ${DIAG_PAIRS} complementary field pair(s) with pic_order_cnt readable (poc_type=${PCAP_POC_TYPE:--1}): the structure is paired even though the timestamps are not +1 field apart. Rung 3-POC pairs per ISO/IEC 14496-15 and times every frame from its own POC (k = POC + C, C per IDR-epoch and field parity, >=99.9% unanimous), then gates its own output through the full verify suite"
+  if [ "${DIAG_PAIRS:-0}" -gt 0 ] 2>/dev/null; then
+    REPAIR_WHY="paff=$PF_PAFF reorder=yes half_ts=no, and the slice headers show ${DIAG_PAIRS} complementary field pair(s) with pic_order_cnt readable (poc_type=${PCAP_POC_TYPE:--1}): the structure is paired even though the timestamps are not +1 field apart. Rung 3-POC pairs per ISO/IEC 14496-15 and times every frame from its own POC (k = POC + C, C per IDR-epoch and field parity), then gates its own output through the full verify suite"
+  else
+    # 1.17.0 — the PROGRESSIVE arm. No field pairs to find; the evidence is the
+    # contradiction itself, and it is a whole-file census, not a window.
+    REPAIR_WHY="reorder=yes half_ts=no, no field pairs, and the whole-file census finds ${DGC_DUPPKTS:-0} packet(s) on ${DGC_DUPVALS:-0} doubled display slot(s) of ${DGC_N:-0} — while pic_order_cnt states every picture's display position outright (poc_type=${PCAP_POC_TYPE:--1}). The container's timestamps contradict the bitstream's own lattice, which is exactly what Rung 3-POC re-derives: k = POC + C, C per IDR-epoch and field parity, then the full verify suite judges the artifact"
+  fi
 elif [ "$PF_HALF_TS" = yes ] && [ "${PF_CODEC:-na}" = h264 ]; then
   REPAIR="$PFILL"
   REPAIR_WHY="half_ts=yes (nopts_frac=$PF_NOPTS_FRAC — the pair signature): keep every real PTS, fill the pair-mates"
@@ -338,7 +345,7 @@ else
   ndecode="$ndecode_raw"      # no video codec name to scope by -> the honest fallback is the raw count
 fi
 nmono=$(grep -ciE 'non.?monotonical' "$TMP/null.err" || true)
-sort "$TMP/null.err" | uniq -c | sort -rn | head -8 | sed 's/^/   /'
+sort "$TMP/null.err" | uniq -c | sort -rn | awk 'NR<=8' | sed 's/^/   /'
 # transport pass: demux-only -c copy of EVERY stream — ts-health.sh pass 1,
 # same commands, same grep patterns, so the two scanners define "transport
 # corruption" identically. Loss here is PERMANENT (bytes the capture never
@@ -376,7 +383,7 @@ if [ "${nreal_raw:-0}" -ne "${nreal:-0}" ]; then
   echo "   gate is never shown less than it had; the scoped figure is attribution only."
 fi
 echo "   transport counters: continuity=$cc corrupt(TEI)=$crp PES-mismatch=$pes scrambled=$scr"
-[ "$tloss" -gt 0 ] && sort "$TMP/transport.log" | uniq -c | sort -rn | head -4 | sed 's/^/   /'
+[ "$tloss" -gt 0 ] && sort "$TMP/transport.log" | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /'
 if [ "${scr:-0}" -gt 0 ] || [ "$tloss" -ge "${TSH_LOSS_FAIL:-100}" ]; then
   echo ">> VERDICT: SOURCE DAMAGED (dropped/corrupt packets: CC=$cc TEI=$crp PES=$pes scrambled=$scr)."
   echo "   Transport loss is PERMANENT — no remux repairs this. Re-capture."

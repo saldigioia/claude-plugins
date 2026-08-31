@@ -47,7 +47,14 @@ import collections
 import os
 import sys
 
-MIN_SAMPLES, MIN_AGREE = 100, 0.999      # the unforgiving bar, unchanged
+# THE SAMPLE FLOOR IS THE UNFORGIVING HALF, and it is the half that still
+# refuses. The UNANIMITY bar became an announced measurement in 1.17.0
+# (TIERS.md T3.4, Constitution I.3): it is a prediction about output
+# quality, it is capped at 1 - f on a systematic mis-stamp, and the
+# bijection onto the display lattice below is strictly stronger evidence.
+# RTM_POC_MIN_AGREE overrides it, announced; there is deliberately no such
+# knob for MIN_SAMPLES (h264poc.resolve_min_agree is the one writer).
+MIN_SAMPLES, MIN_AGREE = 100, 0.999
 LATTICE_MIN_AGREE = 0.999                # PTS must actually sit on a lattice
 
 
@@ -158,7 +165,20 @@ def main():
             "there is no equivalent to read here.\n"
             % getattr(vin.codec_context, "name", "unknown"))
         return 3
-    par = h264poc.Parser()
+    # THE CONTAINER'S OWN ANSWER ABOUT CARRIAGE, asked once and threaded, not
+    # inferred per packet (Constitution IV.2). MKV and MOV carry avcC: NALs are
+    # length-prefixed and the parameter sets live in extradata, not in the
+    # packets. A reader seeded from neither found no SPS on any Matroska source
+    # and answered "no SPS parsed" — measured 2026-08-30, 600 of 600 pictures
+    # unparsed on a file whose display positions the bitstream states exactly.
+    # h264poc's exact-tiling autodetect would carry most of this on its own; it
+    # is the safety net, and where the declared value exists it is the answer.
+    _extra = bytes(getattr(vin.codec_context, "extradata", b"") or b"")
+    _nls = h264poc.avcc_length_size(_extra)
+    par = h264poc.Parser(_nls)
+    _ps = h264poc.avcc_param_sets(_extra)
+    if _ps:
+        par.feed_parameter_sets(_ps)          # no-op on an Annex-B source
     unw = h264poc.PocUnwrapper()
     pts, poc, epoch, bottom, field, fnum = [], [], [], [], [], []
     n_empty = n_unparsed = 0
@@ -191,6 +211,10 @@ def main():
     # their POC parameters, and it is the PARAMETERS that scope the unwrap
     print("   POC scopes (SPS activations changing the POC parameters): %d"
           % (unw.scope + 1))
+    print("   NAL carriage: %s%s"
+          % ("avcC (%d-byte length prefixes, declared by the container)" % _nls
+             if _nls else "Annex-B start codes",
+             " — %d byte(s) of SPS/PPS read from extradata" % len(_ps) if _ps else ""))
     print("   SPS: %s" % "; ".join(
         "id=%d profile=%d %dx%d poc_type=%d max_poc_lsb=%d frame_mbs_only=%d"
         % (v["sps_id"], v["profile_idc"], v["width"], v["height"], v["poc_type"],
@@ -228,22 +252,57 @@ def main():
           "— %d complementary pair(s), %d unpaired single(s)"
           % (m, n, pairs, singles))
 
+    # ---- POC counts FIELDS; the lattice counts rungs ----------------------
+    # MEASURED, never assumed (h264poc.poc_advance is the one writer; Rung
+    # 3-DERIVE reads the same function). On a progressive stream POC advances 2
+    # per rung, so `rung - poc` is a different key for every picture and every
+    # class reads as unanimous at ~1/n — 0.01042 in the field, on a file whose
+    # repair is exact.
+    advance, adv_note = h264poc.poc_advance(poc, epoch)
+    if advance > 1:
+        print("   POC advance: %d per rung — normalising (%s)" % (advance, adv_note))
+        poc = [None if p is None else p // advance for p in poc]
+    else:
+        print("   POC advance: 1 per rung — no normalisation (%s)" % adv_note)
+
     # ---- k = POC + C, per (epoch, parity) --------------------------------
-    solver = h264poc.RungSolver(MIN_SAMPLES, MIN_AGREE)
+    min_agree, agree_src = h264poc.resolve_min_agree(MIN_AGREE)
+    solver = h264poc.RungSolver(MIN_SAMPLES, min_agree)
     for i in range(n):
         solver.vote(epoch[i], bottom[i], k[i], poc[i])
     solver.solve()
     print("-- POC classes (every class, trusted or not — a rule that never fired "
           "must say so) --")
+    print("   evidence bar in force: >=%d votes, >=%.5g unanimity (%s)"
+          % (MIN_SAMPLES, min_agree, agree_src))
     for row in solver.report():
         print("   %s" % row)
-    if not solver.trusted:
+    if not solver.usable():
         sys.stderr.write(
-            ">> REFUSED: no (IDR epoch, field parity) class cleared the evidence "
-            "bar (>=%d votes, >=%.4g unanimity). Without a trusted class no "
-            "picture's display position can be stated, and this rung fills "
-            "nothing it cannot evidence.\n" % (MIN_SAMPLES, MIN_AGREE))
+            ">> REFUSED: no (IDR epoch, field parity) class carries at least %d "
+            "votes, so no picture's display position can be stated and this rung "
+            "fills nothing it cannot evidence. (The UNANIMITY bar is announced "
+            "above and does not refuse on its own — the sample floor does, and "
+            "it is not overridable.)\n" % MIN_SAMPLES)
         return 3
+    if solver.provisional:
+        worst, wkey = solver.shortfall()
+        # TIER 3 T3.4 — an ANNOUNCED prediction, not a gate (Constitution I.3).
+        # Unanimity is capped at 1 - f on a systematic mis-stamp: a stream where
+        # a fraction f of pictures carry a wrong timestamp cannot reach the bar
+        # however exactly its repair is evidenced. The bijection below is
+        # strictly stronger evidence and is the authority.
+        sys.stderr.write(
+            "** WARNING: no class cleared %.5g unanimity — the weakest is "
+            "epoch=%d parity=%s at %.5f. Proceeding on the modal C for every "
+            "class, because unanimity is capped at 1 - f on a systematic "
+            "mis-stamp (f = the mis-stamped fraction) and this bar would refuse "
+            "exactly the class this rung exists to repair. Every class does "
+            "carry >=%d votes. A wrong C cannot survive the bijection onto the "
+            "display lattice below, and the full verify suite judges the "
+            "artifact after it.\n"
+            % (min_agree, wkey[0], "bottom" if wkey[1] else "top", worst,
+               MIN_SAMPLES))
 
     # ---- one rung per FRAME; fill the holes from POC ----------------------
     rk = [k[g[0]] for g in groups]      # each frame takes its FIRST field's rung
@@ -256,16 +315,21 @@ def main():
             if d is None:
                 sys.stderr.write(
                     ">> REFUSED: frame %d (coded picture %d) carries no timestamp "
-                    "and its (epoch %s, parity %s) class is not trusted — there is "
-                    "no evidence for its display position, and a plausible-looking "
-                    "sum is not evidence.\n"
+                    "and its (epoch %s, parity %s) class yields no display position "
+                    "— too few votes to state one, or no POC read at all. There is "
+                    "no evidence for where it belongs, and a plausible-looking sum "
+                    "is not evidence.\n"
                     % (j, lead, epoch[lead], "bottom" if bottom[lead] else "top"))
                 return 3
             rk[j] = d
             nfill += 1
             fills.append((j, lead, d))
 
-    # ---- duplicates: the later holder carries a stale pre-discontinuity value
+    # ---- duplicates: one holder carries a timestamp that is not its own.
+    # Exactly one of them fits its own POC lattice; the loop MEASURES which
+    # (`agreeing`) rather than assuming the later one is wrong — on the 2024
+    # VMA capture it always was, on the 2026-08-30 file it is about half the
+    # time. TIERS.md T3.5.
     nmove = 0
     moves = []
     for _round in range(8):

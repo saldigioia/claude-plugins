@@ -237,8 +237,8 @@ if [ "$bitproven" -eq 0 ]; then
       verdict=FAIL; other_failed=1
     fi
     # TS sources list the stream under its program AND top-level -> dedupe to one line
-    pkts () { ffp -v error -select_streams v:0 -count_packets \
-                -show_entries stream=nb_read_packets -of default=nw=1:nk=1 "$1" 2>/dev/null | head -n1; }
+    pkts () { ffp1 -v error -select_streams v:0 -count_packets \
+                -show_entries stream=nb_read_packets -of default=nw=1:nk=1 "$1" 2>/dev/null; }
     spk=$(pkts "$SRC"); opk=$(pkts "$OUT")
     echo "   video packets: source=$spk output=$opk"
     if [ "$spk" != "$opk" ] && [ "$verdict" = PASS ]; then
@@ -1620,14 +1620,14 @@ else
   i_rc=0
   set +e; i_out=$(python3 "$SELF_DIR/codec-id.py" "$OUT" 2>&1); i_rc=$?; set -e
   printf '%s\n' "$i_out" | sed -n 's/^CI_ROW /   /p'
-  i_mis=$(printf '%s\n' "$i_out" | sed -n 's/^CI_MISMATCH=//p' | head -1)
-  i_unp=$(printf '%s\n' "$i_out" | sed -n 's/^CI_UNPROVEN=//p' | head -1)
-  i_read=$(printf '%s\n' "$i_out" | sed -n 's/^CI_READ=//p' | head -1)
+  i_mis=$(printf '%s\n' "$i_out" | sed -n 's/^CI_MISMATCH=//p' | awk 'NR<=1')
+  i_unp=$(printf '%s\n' "$i_out" | sed -n 's/^CI_UNPROVEN=//p' | awk 'NR<=1')
+  i_read=$(printf '%s\n' "$i_out" | sed -n 's/^CI_READ=//p' | awk 'NR<=1')
   case "${i_mis:-}" in ''|*[!0-9]*) i_mis=-1;; esac
   case "${i_unp:-}" in ''|*[!0-9]*) i_unp=0;; esac
   if [ "${i_read:-no}" != yes ] || [ "$i_mis" -lt 0 ]; then
     [ "$verdict" = FAIL ] || verdict=REVIEW
-    i_why=$(printf '%s\n' "$i_out" | sed -n 's/^CI_WHY=//p' | head -1)
+    i_why=$(printf '%s\n' "$i_out" | sed -n 's/^CI_WHY=//p' | awk 'NR<=1')
     echo "   the identity pass could not read this output (${i_why:-rc=$i_rc}) — UNPROVEN."
     note="${note:+$note }Gate (i): sample-entry-vs-payload identity could not be evaluated (${i_why:-rc=$i_rc})."
     led i unproven "${i_why:-the identity pass failed, rc=$i_rc}"
@@ -1665,8 +1665,8 @@ if [ "${VCL_MISMATCH:-0}" -eq 1 ]; then
     [ "$(ffp1 -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$SRC" 2>/dev/null || true)" = true ] && m_sb="h264_mp4toannexb,"
     [ "$(ffp1 -v error -select_streams v:0 -show_entries stream=is_avc -of default=nw=1:nk=1 "$OUT" 2>/dev/null || true)" = true ] && m_ob="h264_mp4toannexb,"
     set +e
-    m_s=$(python3 "$SELF_DIR/nalhash.py" "$SRC" --bsf "${m_sb}filter_units=pass_types=1-5" --kv 2>/dev/null | sed -n 's/^NH_MD5=//p' | head -1)
-    m_o=$(python3 "$SELF_DIR/nalhash.py" "$OUT" --bsf "${m_ob}filter_units=pass_types=1-5" --kv 2>/dev/null | sed -n 's/^NH_MD5=//p' | head -1)
+    m_s=$(python3 "$SELF_DIR/nalhash.py" "$SRC" --bsf "${m_sb}filter_units=pass_types=1-5" --kv 2>/dev/null | sed -n 's/^NH_MD5=//p' | awk 'NR<=1')
+    m_o=$(python3 "$SELF_DIR/nalhash.py" "$OUT" --bsf "${m_ob}filter_units=pass_types=1-5" --kv 2>/dev/null | sed -n 's/^NH_MD5=//p' | awk 'NR<=1')
     set -e
     echo "   src NAL payload md5=${m_s:-EMPTY}"
     echo "   out NAL payload md5=${m_o:-EMPTY}"
@@ -2156,7 +2156,7 @@ case "$verdict" in
       if [ -f "$WVR" ]; then
         wv () { awk -F'"' -v k="$1" '$2==k{print $4; exit}' "$WVR"; }
         rgate=$(wv gate); rsig=$(wv signature); ratt=$(wv attestation); rvh=$(wv video_streamhash)
-        rsize=$(sed -n 's/^[[:space:]]*"file_size":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$WVR" | head -1)
+        rsize=$(sed -n 's/^[[:space:]]*"file_size":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$WVR" | awk 'NR<=1')
         if [ "$rgate" = "$wgate" ] && [ "$rsig" = "$wsig" ] && [ "$rsize" = "$osize" ] && \
            [ "$rvh" = "$vh" ] && [ "$ratt" = "$RTM_WAIVER_ATTEST" ]; then
           echo ">> WAIVED($wgate): this exact gate failure is covered by the operator-attested"

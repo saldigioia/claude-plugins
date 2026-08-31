@@ -88,7 +88,7 @@ tags=$(ffp -v error -show_entries format_tags -of default=noprint_wrappers=1 "$O
 miss=0
 for kv in "${KV[@]}"; do
   k="${kv%%=*}"; v="${kv#*=}"
-  got=$(printf '%s\n' "$tags" | sed -n "s/^TAG:${k}=//p" | head -1)
+  got=$(printf '%s\n' "$tags" | sed -n "s/^TAG:${k}=//p" | awk 'NR<=1')
   if [ "$got" = "$v" ]; then echo "   ok  $k = $got"
   else echo "   !!  $k did not round-trip (got '${got:-<none>}', want '$v')"; miss=1; fi
 done

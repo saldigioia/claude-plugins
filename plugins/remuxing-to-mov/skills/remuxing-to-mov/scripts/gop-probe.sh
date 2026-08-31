@@ -66,7 +66,7 @@ if [ -z "$T" ]; then
     echo "   This source has OPEN-GOP cut points. A copy-cut/concat that lands on one"
     echo "   can glitch at the seam. Pass a CUT_TIME to check a specific point, and"
     echo "   verify any join with scripts/seam-check.sh."
-    echo "   first open keyframes (s): $(printf '%s\n' "$TBL" | awk '$2=="open"{print $1}' | head -5 | tr '\n' ' ')"
+    echo "   first open keyframes (s): $(printf '%s\n' "$TBL" | awk '$2=="open"{print $1}' | awk 'NR<=5' | tr '\n' ' ')"
   else
     echo "   All keyframes are closed/full-sync — copy-cuts on keyframes are seam-safe."
   fi

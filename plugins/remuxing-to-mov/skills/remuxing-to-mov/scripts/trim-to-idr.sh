@@ -230,7 +230,7 @@ fi
 # (b) the ts-health counter itself must read 0 pre-keyframe packets — the same
 #     counter that diagnosed the finding proves the fix (whole-file, demux-only).
 set +e; thkv=$(bash "$SELF_DIR/ts-health.sh" "$PART" --kv 2>/dev/null); thrc=$?; set -e
-OUT_PREKEY=$(printf '%s\n' "$thkv" | sed -n 's/^TSH_PREKEY=//p' | head -1)
+OUT_PREKEY=$(printf '%s\n' "$thkv" | sed -n 's/^TSH_PREKEY=//p' | awk 'NR<=1')
 if [ -z "$OUT_PREKEY" ]; then
   echo ">> FAIL: ts-health.sh could not scan the cut (rc=$thrc). NOT blessing; kept at $PART." >&2
   exit 1

@@ -22,6 +22,19 @@
 # from the bitstream here, because a constant that happens to be right for one
 # source is indistinguishable from a constant that is right.
 #
+# BOTH STANDARD CARRIAGES ARE READ (1.17.0, and the omission cost a field job).
+# H.264 travels two ways and this module understood one of them:
+#   * ANNEX-B — start-code delimited, parameter sets in-band. MPEG-TS, .h264.
+#   * avcC    — ISO/IEC 14496-15 length-prefixed NALs, parameter sets in the
+#               container's extradata (AVCDecoderConfigurationRecord). MKV, MOV,
+#               MP4.
+# Until 1.17.0 `iter_nals` scanned only for start codes, so on MKV/MOV it
+# yielded ZERO NALs and `capability()` answered "no SPS parsed" — total
+# blindness, on the identical bitstream. Measured 2026-08-30, one encode, two
+# containers: reord.ts parsed 120 of 120 slice headers and reord.mkv parsed 0
+# of 120. That is not a POC defect and not a math defect; it is a reader that
+# could not see the bytes it was handed, and three rungs sat on top of it.
+#
 # Scope, stated (Constitution III.2 — a scanner states its jurisdiction):
 #   * pic_order_cnt_type 0: fully supported (the broadcast case).
 #   * pic_order_cnt_type 2: supported — the spec defines display order to
@@ -33,6 +46,7 @@
 #     paired: MBAFF frames are whole frames already, one sample each.
 
 import collections
+import os
 
 # ---------------------------------------------------------------- bit reader
 
@@ -77,8 +91,102 @@ class BitReader:
 
 # ------------------------------------------------------------- NAL iteration
 
-def iter_nals(buf):
-    """Yield (nal_unit_type, nal_ref_idc, payload_start) over an Annex-B buffer."""
+def avcc_length_size(extradata):
+    """The NAL length-prefix width an avcC box declares, or 0 when `extradata`
+    is not an avcC box at all.
+
+    ZERO IS THE POINT, not 4. ISO/IEC 14496-15 defaults the field to 4 when it
+    is unreadable, but a caller threading this value into `iter_nals` needs to
+    know the difference between "this container declared 4" and "this container
+    declared nothing, because it is Annex-B". Forcing a length-prefixed walk on
+    a start-code stream is the mirror image of the bug this whole section
+    fixes. Callers that genuinely want the ISO default write
+    `avcc_length_size(e) or 4`.
+    """
+    e = bytes(extradata or b"")
+    if len(e) < 7 or e[0] != 1:
+        return 0
+    return (e[4] & 0x03) + 1
+
+
+def avcc_param_sets(extradata):
+    """The SPS/PPS an avcC box carries, re-emitted as an ANNEX-B buffer that
+    `feed_parameter_sets` can read; b"" when `extradata` is not avcC.
+
+    THIS IS WHERE MKV AND MOV KEEP THE PARAMETER SETS. A TS re-sends them in
+    band at every IDR, so a reader that only ever looks inside packets works
+    there and finds nothing here — the second half of the same blindness.
+    A truncated record yields whatever whole sets precede the truncation: a
+    partial parameter set is not evidence and is never invented.
+    """
+    e = bytes(extradata or b"")
+    if len(e) < 7 or e[0] != 1:
+        return b""
+    out = bytearray()
+    i = 5
+    for count_bits in (0x1F, 0xFF):          # numOfSPS is 5 bits, numOfPPS is 8
+        if i >= len(e):
+            break
+        count = e[i] & count_bits
+        i += 1
+        for _ in range(count):
+            if i + 2 > len(e):
+                return bytes(out)
+            ln = (e[i] << 8) | e[i + 1]
+            i += 2
+            if ln <= 0 or i + ln > len(e):
+                return bytes(out)
+            out += b"\x00\x00\x00\x01" + e[i:i + ln]
+            i += ln
+    return bytes(out)
+
+
+def _avcc_nals(buf, nls):
+    """The length-prefixed walk: a list of (type, ref_idc, payload_start), or
+    None when `buf` is not an avcC buffer with this length size.
+
+    EXACT TILING IS THE DISCRIMINATOR, and it has to be, because the first four
+    bytes of an Annex-B buffer can always be read as *some* length. What a
+    start-code buffer cannot do is have every subsequent length field land
+    exactly on the next one and the last NAL end exactly on the final byte.
+    Anything short of that returns None and the Annex-B scan gets the buffer
+    instead.
+    """
+    n = len(buf)
+    i = 0
+    out = []
+    while i + nls <= n:
+        ln = 0
+        for k in range(nls):
+            ln = (ln << 8) | buf[i + k]
+        i += nls
+        if ln <= 0 or i + ln > n:
+            return None
+        out.append((buf[i] & 0x1F, (buf[i] >> 5) & 3, i + 1))
+        i += ln
+    if i != n or not out:
+        return None
+    return out
+
+
+def iter_nals(buf, nal_length_size=None):
+    """Yield (nal_unit_type, nal_ref_idc, payload_start) over an H.264 buffer in
+    EITHER standard carriage — Annex-B start codes, or avcC length prefixes.
+
+    `nal_length_size` is the container's own declared lengthSizeMinusOne+1
+    (`avcc_length_size(extradata)`). PASS IT WHERE YOU HAVE IT. The autodetect
+    below is the safety net, not the mechanism: it is strong (exact tiling) but
+    it is not a proof, and a caller holding the declared value has no reason to
+    rely on an inference.
+    """
+    starts_annexb = (buf[:3] == b"\x00\x00\x01" or buf[:4] == b"\x00\x00\x00\x01")
+    if nal_length_size or not starts_annexb:
+        for nls in ((nal_length_size,) if nal_length_size else (4, 2, 1, 3)):
+            got = _avcc_nals(buf, nls)
+            if got is not None:
+                for triple in got:
+                    yield triple
+                return
     n = len(buf)
     i = 0
     while i + 3 < n:
@@ -212,18 +320,30 @@ class Parser:
     capture re-sends them at every IDR); a changed SPS replaces the old one, so
     a stream that switches parameters mid-file is followed rather than
     misread.
+
+    `nal_length_size` is the container's declared avcC length width — pass
+    `avcc_length_size(stream.codec_context.extradata)`; 0/None means Annex-B or
+    unknown, and the carriage is then autodetected per buffer. On an MKV/MOV
+    source the parameter sets live in that same extradata and NOT in the
+    packets, so seed the parser once with `feed_parameter_sets(
+    avcc_param_sets(extradata))` or every slice header will parse to None.
     """
 
-    def __init__(self):
+    def __init__(self, nal_length_size=None):
         self.sps = {}
         self.pps = {}
         self.sps_changes = 0
         self.unparsed_sps = 0
+        self.nal_length_size = nal_length_size or None
 
     def feed_parameter_sets(self, buf):
         """Collect every SPS/PPS in a buffer. NOT used by parse_slice, which
         collects them inline within its own bounded pass — calling this on a
-        whole packet walks the entire essence in Python."""
+        whole packet walks the entire essence in Python.
+
+        The extradata path is the exception and is what this is FOR: an avcC
+        record is tens of bytes, and `avcc_param_sets` hands it over already
+        converted to Annex-B."""
         for ntype, _nri, off in iter_nals(buf):
             if ntype == 7:
                 s = parse_sps(buf[off:off + 512])
@@ -252,8 +372,13 @@ class Parser:
         sets, once for the slice — which on a 23.8 GB video track is a
         byte-by-byte Python walk of the entire essence: measured at over eight
         minutes for a pass that has no reason to read past the slice header.
+
+        NOTE ON avcC: the length-prefixed walk is not early-exitable the way
+        the start-code scan is — the only way to the second NAL is past the
+        first — but it is a walk over NAL BOUNDARIES, not bytes, so it is
+        cheaper than the scan it replaces, not dearer.
         """
-        for ntype, nri, off in iter_nals(buf):
+        for ntype, nri, off in iter_nals(buf, self.nal_length_size):
             if ntype == 7:
                 sps = parse_sps(buf[off:off + 512])
                 if sps is None:
@@ -443,6 +568,92 @@ def pair_fields(field_pic, bottom, frame_num):
     return groups, singles
 
 
+# ------------------------------------------------ POC units per display rung
+
+def poc_advance(poc, epoch):
+    """(A, note) — how many POC units one display rung is worth on this stream.
+    MEASURED per epoch, never assumed.
+
+    WHY THIS EXISTS (measured 2026-08-30). H.264 counts pic_order_cnt in
+    FIELDS. A field-coded stream codes one picture per field, so POC advances
+    ONE per coded picture and one per rung, and `k = POC + C` works directly —
+    which is the only class this module had ever been pointed at. A PROGRESSIVE
+    stream codes one picture per FRAME, two fields, so POC advances TWO per
+    rung while the container's lattice advances one. `RungSolver.vote` records
+    `rung - poc`, so on such a stream the key is `-k`: a different value for
+    every picture, and every class reads as unanimous at about 1/n. Field
+    measurement on the Reading Festival capture: 0.01042 unanimity, 2 votes of
+    192, on a file whose display positions the bitstream states exactly.
+
+    THE GUARD IS THE WHOLE DESIGN. A is adopted only when the per-epoch modal
+    positive delta of the sorted POC values AGREES across every epoch **and**
+    divides EVERY POC value exactly. Either failing yields A = 1 and no
+    normalisation at all, because an odd POC divided away is a display position
+    invented rather than read — and this rung's entire claim is that it never
+    invents one. `note` says which happened, for the caller to announce.
+    """
+    by_epoch = {}
+    n = 0
+    for i, p in enumerate(poc):
+        if p is None:
+            continue
+        n += 1
+        by_epoch.setdefault(epoch[i] if i < len(epoch) else None, []).append(p)
+    if n == 0:
+        return 1, "no POC values to measure"
+    advances = set()
+    for values in by_epoch.values():
+        s = sorted(set(values))
+        deltas = [s[i] - s[i - 1] for i in range(1, len(s))]
+        deltas = [d for d in deltas if d > 0]
+        if not deltas:
+            continue                       # a one-picture epoch states nothing
+        advances.add(collections.Counter(deltas).most_common(1)[0][0])
+    if len(advances) != 1:
+        return 1, ("the modal POC advance is not consistent across epochs %s — "
+                   "not normalising" % sorted(advances))
+    a = advances.pop()
+    if a <= 1:
+        return 1, "POC already advances one unit per rung"
+    off = sum(1 for p in poc if p is not None and p % a != 0)
+    if off:
+        return 1, ("POC advances %d per rung but %d of %d value(s) are not "
+                   "divisible by it — not normalising, because an odd POC "
+                   "rounded away is a display position invented rather than "
+                   "read" % (a, off, n))
+    return a, "exact for all %d picture(s)" % n
+
+
+# ------------------------------------------------- the unanimity bar in force
+
+MIN_AGREE_DEFAULT = 0.999
+
+
+def resolve_min_agree(default=MIN_AGREE_DEFAULT):
+    """(value, note) — the class-unanimity bar in force, and where it came from.
+
+    ONE WRITER for a knob two rungs share (Article IV.1): `poc-remux.py` and
+    `derive-dts.py` both solve `k = POC + C` and both used to carry their own
+    0.999 literal. RTM_POC_MIN_AGREE overrides it; a value that will not parse,
+    or sits outside (0, 1], falls back to the default and SAYS so rather than
+    letting a garbage env value quietly decide a timeline repair.
+
+    THERE IS DELIBERATELY NO SUCH KNOB FOR MIN_SAMPLES. This round widens the
+    unanimity bar because unanimity is capped at 1 - f on a systematic
+    mis-stamp; the sample floor is not capped by anything and stays a constant.
+    """
+    raw = os.environ.get("RTM_POC_MIN_AGREE")
+    if not raw:
+        return default, "default"
+    try:
+        v = float(raw)
+    except ValueError:
+        return default, "RTM_POC_MIN_AGREE=%r is not a number — using the default" % raw
+    if not (0.0 < v <= 1.0):
+        return default, "RTM_POC_MIN_AGREE=%r is outside (0,1] — using the default" % raw
+    return v, "RTM_POC_MIN_AGREE"
+
+
 # ------------------------------------------- the POC -> rung constant, per class
 
 class RungSolver:
@@ -456,6 +667,25 @@ class RungSolver:
     A class is TRUSTED only when it has at least `min_samples` votes and at
     least `min_agree` of them agree. An untrusted class yields no value at
     all; it never falls back to the most popular guess.
+
+    THE UNANIMITY BAR IS A PREDICTION, AND SINCE 1.17.0 IT DOES NOT REFUSE ON
+    ITS OWN (Constitution I.3; TIERS.md T3.4). Unanimity is capped at 1 - f on
+    a systematic mis-stamp: a stream where a fraction f of pictures carry a
+    wrong timestamp CANNOT reach 0.999 however provable its repair is, so the
+    bar blocked exactly the class this rung was built for whenever that class
+    was systematic rather than sparse. Measured 2026-08-30: f = 0.174, so the
+    ceiling was 0.826 and the bar was 0.999 — structurally unreachable.
+
+    So when NO class clears the bar and EVERY class carries at least
+    `min_samples` votes, the modal C is offered as PROVISIONAL, loudly, and the
+    output gates judge the artifact: `poc-remux.py` refuses unless every frame
+    lands on its own slot (a wrong C cannot survive a bijection onto the
+    lattice), then asserts DTS monotonic and DTS <= PTS, then runs the whole
+    verify suite. That is strictly stronger evidence than the bar it replaces.
+
+    WHAT IS NOT WEAKENED: `min_samples`. A class with too little evidence still
+    yields nothing at all, and one class short of the floor withdraws the
+    provisional offer for the whole stream — a partial roster is not a roster.
     """
 
     def __init__(self, min_samples=100, min_agree=0.999):
@@ -464,6 +694,7 @@ class RungSolver:
         self.votes = collections.defaultdict(collections.Counter)
         self.C = {}
         self.trusted = set()
+        self.provisional = set()
         self.evidence = {}
 
     def vote(self, epoch, bottom, rung, poc):
@@ -479,11 +710,29 @@ class RungSolver:
             self.evidence[key] = (best, cnt, total, share)
             if total >= self.min_samples and share >= self.min_agree:
                 self.trusted.add(key)
+        if not self.trusted and self.votes and all(
+                total >= self.min_samples
+                for _c, _cnt, total, _s in self.evidence.values()):
+            self.provisional = set(self.evidence)
         return self
+
+    def usable(self):
+        """The classes a rung may read a display position from — trusted, or
+        provisional under the 1 - f argument above. Empty means refuse."""
+        return self.trusted or self.provisional
+
+    def shortfall(self):
+        """(worst_share, worst_key) over the provisional classes, for a warning
+        that names its own gap rather than gesturing at one. None when nothing
+        is provisional."""
+        if not self.provisional:
+            return None
+        key = min(self.provisional, key=lambda k: self.evidence[k][3])
+        return self.evidence[key][3], key
 
     def rung(self, epoch, bottom, poc):
         key = (epoch, bottom)
-        if key not in self.trusted or poc is None:
+        if poc is None or (key not in self.trusted and key not in self.provisional):
             return None
         return poc + self.C[key]
 
@@ -496,5 +745,7 @@ class RungSolver:
             rows.append("epoch=%d parity=%s C=%d unanimity=%d/%d (%.5f) %s"
                         % (key[0], "bottom" if key[1] else "top", c, cnt,
                            total, share,
-                           "TRUSTED" if key in self.trusted else "untrusted"))
+                           "TRUSTED" if key in self.trusted else
+                           "PROVISIONAL" if key in self.provisional else
+                           "untrusted"))
         return rows

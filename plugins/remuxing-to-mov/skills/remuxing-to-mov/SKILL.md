@@ -229,9 +229,12 @@ packets** (`0 < nopts_frac ≤ RTM_SPARSE_NOPTS_MAX`, 1.15.20) → the same rung
 bounded **pre-pass stamps each hole from its PAFF pair-mate** and the
 derivation then runs unchanged, refusing the WHOLE file (exit 3, nothing
 written) if any hole has no timestamped mate — the class between the two rungs,
-which used to have no route at all; half-timestamped → Rung 3-PAIR; **field-coded, reordered, structurally paired
-but not +1-field stamped** (the slice headers show complementary field pairs and
-pic_order_cnt is readable) → **Rung 3-POC (`poc-remux.sh`)**; no surviving
+which used to have no route at all; half-timestamped → Rung 3-PAIR; **reordered H.264 whose container timestamps
+contradict the display order the bitstream declares** — either *field-coded,
+structurally paired but not +1-field stamped* (the slice headers show
+complementary field pairs) or, since 1.17.0, *progressive with duplicate display
+slots* — with `pic_order_cnt` readable in either carriage (Annex-B or avcC, so
+.ts/.mkv/.mov alike) → **Rung 3-POC (`poc-remux.sh`)**; no surviving
 reorder → Rung 3; depth class `unknown` (unparseable SPS) ∧ reorder → **no
 automatic rung** — announced, with `derive-dts.sh --force` named as the
 operator's call;

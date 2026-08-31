@@ -131,7 +131,7 @@ there.
 | Rung | Fits | Does NOT fit |
 |---|---|---|
 | **3-PAIR** `pairfill-paff.sh` | half-timestamped PAFF: ~half the packets unstamped, strictly alternating, each hole one field duration from its own mate | a fully-timestamped stream (no mates to fill); a reorder pyramid deep enough to break the pair-cadence DTS ramp; runs of more than two unstamped packets at a junction |
-| **3-POC** `poc-remux.sh` | field-coded H.264, reordered, fields **coded-adjacent and sharing frame_num** but NOT stamped one field apart; `pic_order_cnt_type=0` readable | non-H.264 (POC is an H.264 fact); a stream whose POC classes miss the ≥99.9 %/≥100 bar; `pic_order_cnt_type=1` |
+| **3-POC** `poc-remux.sh` | reordered H.264 with `pic_order_cnt` readable, in **either** carriage (Annex-B or avcC — .ts, .mkv, .mov alike), and **either** shape: fields **coded-adjacent and sharing frame_num** but not stamped one field apart, **or** a progressive stream whose container timestamps contradict the display lattice the bitstream declares (duplicate display slots) | non-H.264 (POC is an H.264 fact); `pic_order_cnt_type=1`; a stream with fewer than 100 votes in some POC class; anything the bijection onto the lattice cannot settle |
 | **3-DERIVE** `derive-dts.sh` | PTS-complete (or sparsely holed) reordered stream, **any codec**, whose DTS is absent, demuxer-reconstructed or carried-but-rotten | a stream whose holes have no evidence — neither a provable pair-mate nor a trusted POC class; duplicates POC cannot adjudicate |
 | **3** `rebuild-paff.sh` | field-coded H.264 with **no surviving reorder** — a constant-rate rebuild is then arithmetic, not a guess | a reordered stream: PTS=DTS there plays fields in DECODE order (announced `--force` exists; gate (k) judges it either way) |
 

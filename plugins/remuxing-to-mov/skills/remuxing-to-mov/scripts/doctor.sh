@@ -23,7 +23,7 @@ has_mux  () { grep -qw "$1" <<<"$MUXERS" && echo yes || echo no; }
 has_bsf  () { grep -qw "$1" <<<"$BSFS"   && echo yes || echo no; }
 VER=""; MAJOR=0; MINOR=0
 if [ "$FFMPEG" = yes ]; then
-  VER=$(ffmpeg -version 2>/dev/null | head -1 | grep -oE "[0-9]+\.[0-9]+" | head -1 || true)
+  VER=$(ffmpeg -version 2>/dev/null | awk 'NR<=1' | grep -oE "[0-9]+\.[0-9]+" | awk 'NR<=1' || true)
   MAJOR=${VER%%.*}; MINOR=${VER#*.}; MAJOR=${MAJOR:-0}; MINOR=${MINOR:-0}
 fi
 MUX_MOV=no; MUX_NULL=no; MUX_SHASH=no; MUX_FMD5=no; MUX_MP4=no; ISO_PCM=no

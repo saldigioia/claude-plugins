@@ -114,7 +114,65 @@ else
 fi
 
 echo
-echo "== 7. the cost model is recorded (knobs.md) =="
+echo "== 7. TWO WRITERS OF \"POC PER PICTURE\", PINNED ON avcC (IV.1, Finding 8) =="
+# The tree has two readers of each picture's declared display position:
+#   * h264poc.Parser.parse_slice — Python, fast, used by Rungs 3-POC/3-DERIVE
+#   * pf_poc_extract             — ffmpeg trace_headers, ~20 min on 24 GB, used
+#                                  by the POC gate and verify gate (k)
+# They are NOT interchangeable (the cost is load-bearing, lib-paff.sh) so they
+# stay two, and Article IV.3 then requires them held in lockstep. Until 1.17.0
+# they disagreed on the one thing that matters most here — CARRIAGE. On this
+# very .mov the trace_headers arm read every picture and the Python arm read
+# NONE, which is exactly how verify gate (k) came to judge an artifact its own
+# BUILDER could not open. The sections above pin the two shell arms against
+# each other; this pins the Python arm against them, on avcC.
+E2E_PY=python3
+E2E_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/remuxing-to-mov}"
+if [ -x "$E2E_DATA/venv/bin/python" ] && "$E2E_DATA/venv/bin/python" -c 'import av' 2>/dev/null; then
+  E2E_PY="$E2E_DATA/venv/bin/python"
+fi
+if "$E2E_PY" -c 'import av' 2>/dev/null; then
+  "$E2E_PY" - "$SC" "$WORK/poc0.mov" > "$WORK/tbl.py" 2>"$WORK/py.err" <<'PYARM'
+import sys
+sys.path.insert(0, sys.argv[1])
+import av, h264poc
+c = av.open(sys.argv[2])
+v = c.streams.video[0]
+ex = bytes(getattr(v.codec_context, "extradata", b"") or b"")
+par = h264poc.Parser(h264poc.avcc_length_size(ex))
+ps = h264poc.avcc_param_sets(ex)
+if ps:
+    par.feed_parameter_sets(ps)
+for pkt in c.demux(v):
+    if pkt.size == 0:
+        continue
+    sh = par.parse_slice(bytes(pkt))
+    if sh is None:
+        print("unparsed")
+    else:
+        print("%d,%s" % (1 if sh["nal"] == 5 else 0,
+                         "" if sh["poc_lsb"] is None else sh["poc_lsb"]))
+c.close()
+PYARM
+  npy=$(grep -c . "$WORK/tbl.py" 2>/dev/null || true)
+  nun=$(grep -c '^unparsed$' "$WORK/tbl.py" 2>/dev/null || true)
+  { [ "${npy:-0}" -gt 0 ] && [ "${nun:-0}" -eq 0 ]; } \
+    && ok "the Python arm parses all $npy picture(s) of the avcC .mov (0 unparsed)" \
+    || { no "Python arm on avcC: $npy row(s), $nun unparsed"; sed 's/^/     /' "$WORK/py.err" | awk 'NR<=4'; }
+  # the trace_headers table is "idr,poc,l2,src"; reduce it to the same two columns
+  awk -F, '{ printf "%s,%s\n", $1, ($4=="lsb" ? $2 : "") }' "$WORK/tbl.mov" > "$WORK/tbl.mov2"
+  if cmp -s "$WORK/tbl.py" "$WORK/tbl.mov2"; then
+    ok "both writers agree picture-for-picture on (idr, pic_order_cnt_lsb) over avcC"
+  else
+    no "the two POC writers disagree on the avcC artifact"
+    diff "$WORK/tbl.mov2" "$WORK/tbl.py" 2>/dev/null | awk 'NR<=6' | sed 's/^/     /'
+  fi
+else
+  echo "  (SKIP: no interpreter on this bench has PyAV — the Python arm cannot be read here)"
+fi
+
+echo
+echo "== 8. the cost model is recorded (knobs.md) =="
 ksrc=$(cat "$TESTS/../references/knobs.md")
 has "$ksrc" "POC" "knobs.md records the POC-gate cost model"
 has "$ksrc" "census" "knobs.md names the census reuse"

@@ -61,13 +61,20 @@ o=$( cd "$WORK" && bash "$SC/mov.sh" "$S" -full 2>&1 ); rc=$?
 [ -f "$WORK/-full" ] && no "a file named '-full' was built" || ok "no file named '-full' exists"
 
 echo
-echo "== 2. F5: --mp4-swap and metadata are honoured on the PAFF path =="
+echo "== 2. F5: --mp4-swap and metadata are honoured on the ladder path =="
 msrc=$(rtm_strip_comments "$SC/mov.sh")
-has "$msrc" 'auto.sh" "$IN" "$OUT" $FULL $MSFLAG' "the PAFF branch passes --mp4-swap through to auto.sh (which owns the swap)"
+has "$msrc" 'auto.sh" "$IN" "$OUT" $FULL $MSFLAG' "the ladder branch passes --mp4-swap through to auto.sh (which owns the swap)"
 usage=$(grep -m1 'usage: mov.sh' "$SC/mov.sh")
 has "$usage" "mp4-swap" "the usage string names --mp4-swap"
-pblk=$(sed -n '/field-coded: hand the timeline repair/,/^fi$/p' "$SC/mov.sh")
-has "$pblk" '-eq 10' "PAFF metadata applies on REVIEW (rc=10) too, not only on 0 (the non-PAFF path applies unconditionally)"
+# ANCHORED ON THE BRANCH, NOT ON ITS HEADLINE. Until 1.17.0 this range started
+# at the comment "field-coded: hand the timeline repair" — so when that branch
+# gained its second ticket (a progressive stream whose timestamps contradict
+# its own declared display order) and the headline was rewritten to match, the
+# sed range matched NOTHING and every assertion over $pblk went vacuously
+# green. A guard keyed to prose is a guard the next edit switches off.
+pblk=$(sed -n '/^if \[ "$LADDER" -eq 1 \]; then/,/^fi$/p' "$SC/mov.sh")
+[ -n "$pblk" ] && ok "the ladder branch is locatable (the range is anchored on code, not on a comment)"   || no "the ladder-branch range matched nothing — this section's extraction has gone stale"
+has "$pblk" '-eq 10' "ladder metadata applies on REVIEW (rc=10) too, not only on 0 (the non-ladder path applies unconditionally)"
 
 echo
 echo "== 3. F2: the retired routing doctrine is gone from the teaching docs =="
@@ -123,6 +130,31 @@ for s in "$SC"/*.sh; do
 done
 [ -z "$d3_alias" ] && ok "no variable-aliased ffp query pipes into head either — the class swept one alias deep" \
   || no "aliased ffp|head sites remain:$d3_alias"
+# THE TWO ARMS ABOVE PIN `ffp` WRITERS, AND THE CLASS IS NOT ABOUT ffp
+# (1.17.0, Constitution V.1: a named class is enumerated immediately). Under
+# `set -o pipefail` ANY writer that outruns an early-exiting `head` returns 141
+# and kills the script — the writer's identity is irrelevant. Measured
+# 2026-08-30, no ffprobe anywhere in it:
+#     seq 1 200000 | sed 's/$/ x/' > big.err
+#     sort big.err | uniq -c | sort -rn | head -8 | sed 's/^/   /'; echo AFTER
+#   -> prints 8 lines, never prints AFTER, exits 141
+# diagnose.sh held two such pipelines over its own decode and transport logs —
+# so on any capture whose logs outgrew the pipe buffer, diagnose died silently
+# before printing a verdict at all, four rounds after this class was named.
+#
+# Two of the ffp sites the arms above claim to have converted were ALSO still
+# live, hidden from a per-line regex by a backslash continuation and by the
+# `head -n1` spelling. So the rule is now the simple one, and it is checkable
+# by eye: NOTHING in scripts/ pipes into `head`. The replacement idiom reads
+# the writer to EOF — `| awk 'NR<=8'` for `| head -8` — which is exactly what
+# ffp1 does, generalised, and it masks no error the way `|| true` would.
+d3_any=""
+for s in "$SC"/*.sh; do
+  n=$(rtm_strip_comments "$s" | grep -cE '\|[[:space:]]*head([[:space:]]|$)' || true)
+  [ "${n:-0}" -eq 0 ] || d3_any="$d3_any $(basename "$s"):$n"
+done
+[ -z "$d3_any" ] && ok "no writer of any kind pipes into head in scripts/ — the class swept whole, not just its ffp instances" \
+  || no "pipelines into head remain (any writer, 141 under pipefail):$d3_any"
 # the D1 sibling: dim-scan's FIRST_CH assignment no longer grep|head|awk's
 dsrc=$(rtm_strip_comments "$SC/dim-scan.sh")
 hasnt "$dsrc" "grep '^CHANGE ' \"\$TMP/scan\" | head -1" "dim-scan's assignment-position pipeline (D1 sibling) is gone"

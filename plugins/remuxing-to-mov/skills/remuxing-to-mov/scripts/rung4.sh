@@ -129,7 +129,7 @@ tags=$(ffp -v error -show_entries format_tags -of default=noprint_wrappers=1 "$O
 miss=0
 for k in "rung4.source=$(basename "$IN")" "rung4.date=$TODAY" "rung4.profile=$PROFILE" "rung4.reencoded-with-attestation=yes"; do
   key="com.apple.quicktime.${k%%=*}"; want="${k#*=}"
-  got=$(printf '%s\n' "$tags" | sed -n "s/^TAG:${key}=//p" | head -1)
+  got=$(printf '%s\n' "$tags" | sed -n "s/^TAG:${key}=//p" | awk 'NR<=1')
   if [ "$got" = "$want" ]; then echo "   ok  $key = $got"
   else echo "   !!  $key did not round-trip (got '${got:-<none>}', want '$want')"; miss=1; fi
 done

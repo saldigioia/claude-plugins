@@ -46,7 +46,7 @@ set +e; PKV=$(bash "$SELF_DIR/probe.sh" "$IN" --kv 2>/dev/null); prc=$?; set -e
 # a child rc 2 is its pre-flight "cannot read" — propagate it as OUR 2, never
 # relabeled 1 (= this contract's DAMAGED-adjacent FAIL; WO-1.15.4 C4)
 [ -n "$PKV" ] || { echo "probe.sh could not read the source (rc=$prc)" >&2; [ "$prc" -eq 2 ] && exit 2; exit 1; }
-pget () { printf '%s\n' "$PKV" | sed -n "s/^$1=//p" | head -1; }
+pget () { printf '%s\n' "$PKV" | sed -n "s/^$1=//p" | awk 'NR<=1'; }
 CONT=$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 ST=$(ffp1 -v error -show_entries format=start_time -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 case "$ST" in ''|N/A) ST=0;; esac
@@ -59,7 +59,7 @@ set +e; bash "$SELF_DIR/ts-health.sh" "$IN" --kv > "$TMP/tsh" 2>/dev/null; thrc=
 # ts-health's 2 is its announced "cannot read" pre-flight (WO-1.15.4 C4) —
 # propagate as 2; only a real scan failure stays this driver's 1
 [ -s "$TMP/tsh" ] || { echo "ts-health could not scan the source (rc=$thrc)" >&2; [ "$thrc" -eq 2 ] && exit 2; exit 1; }
-tget () { sed -n "s/^$1=//p" "$TMP/tsh" | head -1; }
+tget () { sed -n "s/^$1=//p" "$TMP/tsh" | awk 'NR<=1'; }
 echo "   transport: CC=$(tget TSH_CC) corrupt=$(tget TSH_CORRUPT) PES=$(tget TSH_PES) scrambled=$(tget TSH_SCRAMBLED)"
 echo "   timeline:  napts=$(tget TSH_NAPTS) nadts=$(tget TSH_NADTS) back=$(tget TSH_BACK) dup=$(tget TSH_DUP) gaps=$(tget TSH_GAPS) wrap=$(tget TSH_WRAP) prekey=$(tget TSH_PREKEY)"
 DAMAGED=0; [ "$(tget TSH_VERDICT)" = DAMAGED ] && DAMAGED=1
@@ -68,7 +68,7 @@ DAMAGED=0; [ "$(tget TSH_VERDICT)" = DAMAGED ] && DAMAGED=1
 echo "-- 3. lead-check (head luma + splice census, bounded decode) --"
 set +e; LC=$(bash "$SELF_DIR/lead-check.sh" "$IN" 2>&1); lcrc=$?; set -e
 LCLINE=$(printf '%s\n' "$LC" | grep '^LEADCHECK_SUMMARY ' || true)
-lget () { printf '%s\n' "$LCLINE" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1; }
+lget () { printf '%s\n' "$LCLINE" | tr ' ' '\n' | sed -n "s/^$1=//p" | awk 'NR<=1'; }
 case "$lcrc" in
   0)  echo "   head clean (first frame is program-bright)";;
   10) echo "   BLACK LEAD detected: $(lget black_secs)s (splice packet $(lget splice_idx), audio_hot=$(lget audio_hot))";;
@@ -80,7 +80,7 @@ DIMS_CH=na
 if [ "$DEEP" -eq 1 ]; then
   echo "-- 4. deep: dim-scan (whole-file decode) --"
   set +e; DS=$(bash "$SELF_DIR/dim-scan.sh" "$IN" 2>&1); dsrc=$?; set -e
-  DIMS_CH=$(printf '%s\n' "$DS" | grep '^DIMSCAN_SUMMARY ' | tr ' ' '\n' | sed -n 's/^changes=//p' | head -1)
+  DIMS_CH=$(printf '%s\n' "$DS" | grep '^DIMSCAN_SUMMARY ' | tr ' ' '\n' | sed -n 's/^changes=//p' | awk 'NR<=1')
   echo "   dimension changes: ${DIMS_CH:-?}"
   echo "-- 4b. deep: full decode-to-null (bitstream proof) --"
   ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$IN" -map 0 -f null - 2>"$TMP/dec.log" || true
@@ -138,7 +138,7 @@ if awk "BEGIN{exit !(($ST) > 0.05)}"; then
     # relayed without its warning is the 1.15.11 defect in the other direction:
     # the operator gets a ready-to-run command and none of the caveat the tool
     # attached to it. So the warning is relayed here, in zero-base's own words.
-    ZB_WARN=$(printf '%s\n' "$ZB_PF" | sed -n 's/^ZB_PREFLIGHT_WARN //p' | head -1 || true)
+    ZB_WARN=$(printf '%s\n' "$ZB_PF" | sed -n 's/^ZB_PREFLIGHT_WARN //p' | awk 'NR<=1' || true)
     if [ -n "${ZB_WARN:-}" ]; then
       finding timeline "timeline starts at ${ST}s, not zero (players rebase it; tools and clocks read it)" \
         "TIER 1 (structural), WITH A WARNING zero-base attached to it — $ZB_WARN: scripts/zero-base.sh \"$IN\" OUT.ts. It will BUILD and let its own gates judge the result (it no longer refuses this shape on a prediction); --preflight-only gives the verdict without the build. For a QuickTime deliverable from a field-coded source the route is scripts/mov.sh, and scripts/diagnose.sh picks the repair rung by measured profile."

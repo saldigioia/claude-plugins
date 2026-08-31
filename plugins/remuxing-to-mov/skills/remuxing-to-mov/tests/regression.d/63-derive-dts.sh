@@ -176,27 +176,58 @@ has "$o" "--force" "the refusal names the operator override"
 [ -f "$WORK/g.mov" ] && no "guard refusal wrote an output" || ok "guard refusal writes nothing"
 
 echo
-echo "== 5. end-to-end (PyAV) — announced SKIP when python3 lacks av =="
-if python3 -c 'import av' 2>/dev/null; then
-  # a REAL venv shape whose python is the system python3 (which has av) — the
-  # driver only requires $DATA/venv/bin/python to import av, which this does.
+echo "== 5. end-to-end (PyAV) — announced SKIP when no interpreter has av =="
+# THE INTERPRETER THIS RUNG ACTUALLY USES (1.17.0). derive-dts.sh runs on
+# $CLAUDE_PLUGIN_DATA/venv/bin/python and nothing else; gating this section on
+# the SYSTEM python3 skipped it on every bench where the venv is the only place
+# PyAV lives — which is the documented arrangement, and this bench. The section
+# below carries the assertion that should have caught the avcC blindness, so a
+# skip here is not a neutral outcome.
+E2E_PY=python3
+E2E_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/remuxing-to-mov}"
+if [ -x "$E2E_DATA/venv/bin/python" ] && "$E2E_DATA/venv/bin/python" -c 'import av' 2>/dev/null; then
+  E2E_PY="$E2E_DATA/venv/bin/python"
+fi
+if "$E2E_PY" -c 'import av' 2>/dev/null; then
+  # a REAL venv shape whose python is the one that has av — the driver only
+  # requires $DATA/venv/bin/python to import av, which this does.
   mkdir -p "$WORK/realdata/venv/bin"
   cat > "$WORK/realdata/venv/bin/python" <<SH
 #!/bin/sh
-exec "$(command -v python3)" "\$@"
+exec "$E2E_PY" "\$@"
 SH
   chmod +x "$WORK/realdata/venv/bin/python"
   o=$(CLAUDE_PLUGIN_DATA="$WORK/realdata" bash "$SC/derive-dts.sh" "$MKVCH" "$WORK/d.mov" --force 2>&1); rc=$?
   { [ "$rc" -eq 0 ] && [ -f "$WORK/d.mov" ]; } && ok "derive-dts --force on the minted MKV -> blessed, exit 0" \
     || { no "end-to-end rc=$rc"; printf '%s\n' "$o" | tail -12 | sed 's/^/   /'; }
   has "$o" "FORCED past the depth-class gate" "--force announces itself"
+  # THE ASSERTION THAT SHOULD HAVE CAUGHT DEFECT 7 AND DID NOT (added 1.17.0).
+  # This section has run derive-dts.sh on an MKV since it was written, and
+  # passed green the whole time while the slice reader was 100 % blind to it:
+  # avcC carries length-prefixed NALs and keeps SPS/PPS in extradata, the
+  # Annex-B scan found neither, every slice parsed to None — and because
+  # `len(structure) == len(column)` still held, the rung degraded silently to
+  # timestamp proxies and printed "0 of N picture(s) parsed" that nothing
+  # routed on. A green test over an evidence line nobody read is the shape of
+  # this defect; reading the number is the fix.
+  ev=$(printf '%s\n' "$o" | sed -n 's/.*slice-header evidence (H\.264): \([0-9]*\) of \([0-9]*\) picture.*/\1 \2/p' | awk 'NR<=1')
+  ev_p=${ev% *}; ev_n=${ev#* }
+  { [ -n "$ev" ] && [ "${ev_n:-0}" -gt 0 ] && [ "$ev_p" = "$ev_n" ]; } \
+    && ok "slice headers parsed on the MKV: $ev_p of $ev_n (avcC carriage is READ, not silently skipped)" \
+    || no "slice-header evidence on the MKV is '$ev' — want N of N, not 0 of N"
   has "$o" "re-attaching 2 chapter(s)" "the chapter re-attach pass is announced"
   has "$o" "PTS multiset" "the PTS identity gate is announced"
   has "$o" "bit-identical" "the packet-hash gate passed"
   has "$o" "census:" "mux_census ran on the finished part"
   dline=$(printf '%s\n' "$o" | grep '^DERIVE_DTS ' | head -1)
   case "$dline" in
-    "DERIVE_DTS depth="*" shift_ms="*" packets="*" census=ok verdict=ok")
+    "DERIVE_DTS depth="*" shift_ms="*" packets="*" census=ok "*"verdict=ok")
+      # ADDITIVE means additive: `stamped=` joined this line after the pattern
+      # was written, and the pattern pinned an EXACT field order instead — so it
+      # would have gone red on the first bench that reached it. None did: this
+      # whole section skipped on any bench where PyAV lives only in the plugin
+      # venv (fixed 1.17.0), so the mismatch sat unread. The glob now spans the
+      # optional middle, which is what "additive schema" was always claiming.
       ok "DERIVE_DTS machine line present with the additive schema";;
     *) no "DERIVE_DTS machine line wrong: '$dline'";;
   esac

@@ -144,6 +144,52 @@ s3 = par3.parse_slice(au3)
 print("PROG_FIELD_PIC=%d" % (-1 if s3 is None else s3["field_pic"]))
 print("PROG_FRAME_NUM=%d" % (-1 if s3 is None else s3["frame_num"]))
 print("PROG_POC_LSB=%d" % (-1 if s3 is None else s3["poc_lsb"]))
+
+# THE avcC TWIN (1.17.0). Everything above is an ANNEX-B bitstream, and until
+# 1.17.0 that was the only carriage this reader understood — so a suite that
+# minted only Annex-B could pin every bit-width in the SPS and still miss that
+# the reader was 100 % blind to MKV and MOV. The same access units, re-carried
+# as length-prefixed avcC with the parameter sets moved into an
+# AVCDecoderConfigurationRecord, must yield the SAME values.
+def to_avcc(au, nls=4):
+    """Split an Annex-B access unit and re-emit its NALs length-prefixed."""
+    parts, i = [], 0
+    while True:
+        j = au.find(b"\x00\x00\x01", i)
+        if j < 0:
+            break
+        st = j + 3
+        k = au.find(b"\x00\x00\x01", st)
+        end = len(au) if k < 0 else (k - 1 if au[k - 1:k] == b"\x00" else k)
+        parts.append(au[st:end])
+        i = st
+    return b"".join(len(p).to_bytes(nls, "big") + p for p in parts), parts
+
+def avcc_extradata(sps_nal, pps_nal, nls=4):
+    return (bytes([1, sps_nal[1], sps_nal[2], sps_nal[3], 0xFC | (nls - 1), 0xE1])
+            + len(sps_nal).to_bytes(2, "big") + sps_nal
+            + b"\x01" + len(pps_nal).to_bytes(2, "big") + pps_nal)
+
+_buf, _nals = to_avcc(au)                       # au = the UNUSUAL-SPS access unit
+_sps_nal, _pps_nal, _slice_nal = _nals[0], _nals[1], _nals[2]
+_extra = avcc_extradata(_sps_nal, _pps_nal)
+print("AVCC_NLS=%d" % h264poc.avcc_length_size(_extra))
+print("AVCC_PS_NALS=%d" % sum(1 for _t, _r, _o in
+                              h264poc.iter_nals(h264poc.avcc_param_sets(_extra))))
+# the realistic shape: parameter sets in extradata, ONLY the slice in the packet
+par4 = h264poc.Parser(h264poc.avcc_length_size(_extra))
+par4.feed_parameter_sets(h264poc.avcc_param_sets(_extra))
+s4 = par4.parse_slice(len(_slice_nal).to_bytes(4, "big") + _slice_nal)
+print("AVCC_FRAME_NUM=%d" % (-1 if s4 is None else s4["frame_num"]))
+print("AVCC_POC_LSB=%d" % (-1 if s4 is None else s4["poc_lsb"]))
+print("AVCC_FIELD_PIC=%d" % (-1 if s4 is None else s4["field_pic"]))
+print("AVCC_BOTTOM=%d" % (-1 if s4 is None else s4["bottom"]))
+print("AVCC_MAX_POC_LSB=%d" % (-1 if s4 is None else s4["max_poc_lsb"]))
+# and the in-band shape: every NAL in one length-prefixed buffer, no extradata
+par5 = h264poc.Parser(4)
+s5 = par5.parse_slice(_buf)
+print("AVCC_INBAND_FRAME_NUM=%d" % (-1 if s5 is None else s5["frame_num"]))
+print("AVCC_INBAND_POC_LSB=%d" % (-1 if s5 is None else s5["poc_lsb"]))
 PY
 ) || { echo "  the reader raised on a valid synthetic bitstream"; echo "$out" | tail -5; echo "sps-aware-slice-reader: 0 passed, 1 failed"; exit 1; }
 
@@ -186,7 +232,27 @@ echo "== 4. controls: the common SPS and a progressive one still parse =="
   || no "PROG_POC_LSB=$(get PROG_POC_LSB), want 33"
 
 echo
-echo "== 5. no constant-width literal survives in the reader =="
+echo "== 5. the SAME access unit in avcC carriage reads identically =="
+# The carriage must be invisible to every value above. A reader that is right
+# on Annex-B and blind on avcC is not a correct reader with a gap — it is a
+# reader whose jurisdiction was never stated, and three rungs sat on top of it.
+[ "$(get AVCC_NLS)" = 4 ] && ok "the minted avcC record declares a 4-byte NAL length" || no "AVCC_NLS=$(get AVCC_NLS), want 4"
+[ "$(get AVCC_PS_NALS)" = 2 ] && ok "both parameter sets come back out of extradata (SPS + PPS)" || no "AVCC_PS_NALS=$(get AVCC_PS_NALS), want 2"
+[ "$(get AVCC_FRAME_NUM)" = "$(get TRUE_FN)" ] && ok "frame_num=$(get AVCC_FRAME_NUM) — the same true value, from the length-prefixed slice" \
+  || no "AVCC_FRAME_NUM=$(get AVCC_FRAME_NUM), want $(get TRUE_FN)"
+[ "$(get AVCC_POC_LSB)" = "$(get TRUE_POC)" ] && ok "poc_lsb=$(get AVCC_POC_LSB) — read at the right bit offset in avcC too" \
+  || no "AVCC_POC_LSB=$(get AVCC_POC_LSB), want $(get TRUE_POC)"
+[ "$(get AVCC_MAX_POC_LSB)" = 64 ] && ok "…and the widths still come from the EXTRADATA SPS (MaxPicOrderCntLsb 64)" \
+  || no "AVCC_MAX_POC_LSB=$(get AVCC_MAX_POC_LSB), want 64"
+[ "$(get AVCC_FIELD_PIC)" = 1 ] && [ "$(get AVCC_BOTTOM)" = 1 ] \
+  && ok "field_pic_flag/bottom_field_flag survive the carriage change" \
+  || no "AVCC field flags: field=$(get AVCC_FIELD_PIC) bottom=$(get AVCC_BOTTOM), want 1/1"
+[ "$(get AVCC_INBAND_FRAME_NUM)" = "$(get TRUE_FN)" ] && [ "$(get AVCC_INBAND_POC_LSB)" = "$(get TRUE_POC)" ] \
+  && ok "in-band avcC (parameter sets inside the packet, no extradata) reads the same" \
+  || no "in-band avcC: fn=$(get AVCC_INBAND_FRAME_NUM) poc=$(get AVCC_INBAND_POC_LSB)"
+
+echo
+echo "== 6. no constant-width literal survives in the reader =="
 # The ported original carried FRAME_NUM_BITS/POC_LSB_BITS/FRAME_MBS_ONLY as
 # module constants. Their absence is the structural half of the claim above.
 bad=""

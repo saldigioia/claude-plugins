@@ -464,6 +464,31 @@ pro_unmeasured_version_reader () {  # prose naming the exemption stays CLEAN
 }
 
 
+mut_nonffp_head () {   # the SIGPIPE class, by a writer that is not ffprobe
+  # 91 Â§5's first two arms pin `ffp` writers, and the class was never about
+  # ffp: under pipefail ANY writer outrun by an early-exiting head returns 141.
+  # `sort` is the shape diagnose.sh actually held over its own decode log.
+  # Deliberately no ffp token anywhere, so only the general arm can catch it.
+  printf '\n_zz_top () {\n  sort "$1" | uniq -c | sort -rn | head -5 | sed %ss/^/   /%s\n}\n' "$Q" "$Q" \
+    >> "$1/scripts/clock.sh"
+}
+pro_nonffp_head () {   # prose naming the general shape stays CLEAN
+  printf '\n# never: sort "$f" | uniq -c | head -5 — under pipefail an early-exit reader\n# 141s ANY writer that outruns it, ffprobe or not (91 \xc2\xa75)\n' \
+    >> "$1/scripts/clock.sh"
+}
+
+mut_pipestatus_unheld () {   # PIPESTATUS read while the ERR trap is still armed
+  # The 2026-08-31 defect: the ERR trap runs between the pipeline and the read
+  # and rewrites PIPESTATUS, so `rc` is 0 for every non-zero child. `set +e`
+  # does NOT disarm the trap; only rtm_hold does.
+  printf '\n_zz_capture () {\n  set +e\n  cat "$1" | sed %ss/^/ /%s\n  _rc=${PIPESTATUS[0]}\n  set -e\n}\n' "$Q" "$Q" \
+    >> "$1/scripts/clock.sh"
+}
+pro_pipestatus_unheld () {   # prose naming the broken idiom stays CLEAN
+  printf '\n# never: set +e; child | sed; rc=${PIPESTATUS[0]}; set -e — the ERR trap fires\n# between the pipeline and the read and clobbers PIPESTATUS; use rtm_hold (94 \xc2\xa713)\n' \
+    >> "$1/scripts/clock.sh"
+}
+
 mut_suppress_faststart_announce () {  # the choice stops being announced
   # 1.16.7's contract is that faststart is announced EITHER WAY. A build that
   # silently front-moovs is still a divergence — just one nobody can read in
@@ -607,6 +632,10 @@ G53|defect|116-faststart-policy.sh|consults nothing but the knob|mut_auto_fastst
 P53|prose|116-faststart-policy.sh|consults nothing but the knob|pro_auto_faststart_optout
 G54|defect|117-mp2-per-os-claim.sh|AVFoundation has no MPEG Layer II path|mut_recategorize_mp2
 P54|prose|117-mp2-per-os-claim.sh|AVFoundation has no MPEG Layer II path|pro_recategorize_mp2
+G55|defect|91-flags-parsers-docs.sh|the class swept whole|mut_nonffp_head
+P55|prose|91-flags-parsers-docs.sh|the class swept whole|pro_nonffp_head
+G56|defect|94-rot-sweep.sh|inside an rtm_hold region|mut_pipestatus_unheld
+P56|prose|94-rot-sweep.sh|inside an rtm_hold region|pro_pipestatus_unheld
 '
 
 # --------------------------------------------------------------------- runner

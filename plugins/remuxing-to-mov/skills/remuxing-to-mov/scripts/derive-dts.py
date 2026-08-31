@@ -77,6 +77,14 @@ import os
 import sys
 import collections
 
+# h264poc is this tree's ONE reader of H.264 slice headers and its ONE writer of
+# the POC-derived facts two rungs share — the measured POC advance and the
+# unanimity bar in force (Constitution IV.1). It imports no third-party module,
+# so this is safe at module scope even where PyAV is absent; the PyAV import
+# stays lazy inside main().
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import h264poc                                            # noqa: E402
+
 
 class Refuse(Exception):
     """Signature refusal — the stream must not pass through this derivation."""
@@ -177,28 +185,46 @@ REFUSAL_POSITIONS_SHOWN = 12
 #             the naive version fails on a stream where it is provable to four
 #             nines.
 #
-# THE BAR IS NOT LOWERED. A class is trusted only at >= POC_MIN_AGREE over
-# >= POC_MIN_SAMPLES votes; an untrusted class yields nothing at all and never
-# falls back to the most popular guess. _pair_parity survives underneath for
+# THE SAMPLE FLOOR IS NOT LOWERED. A class with fewer than POC_MIN_SAMPLES
+# votes yields nothing at all and never falls back to the most popular guess,
+# and one class short of the floor withdraws the offer for the whole stream.
+# The UNANIMITY bar became announced-not-fatal in 1.17.0 (TIERS.md T3.4): it is
+# a prediction about output quality, capped at 1 - f on a systematic mis-stamp,
+# and the duplicate adjudication below plus the full verify suite are strictly
+# stronger evidence than it was. _pair_parity survives underneath for
 # the class it provably fits (simply-paired PAFF, where the delta rule IS the
 # structure) and for streams this engine cannot read at all.
+# THE SAMPLE FLOOR STILL REFUSES; THE UNANIMITY BAR ANNOUNCES (1.17.0,
+# TIERS.md T3.4, Constitution I.3). Unanimity is a prediction about output
+# quality and it is capped at 1 - f on a systematic mis-stamp, so on the class
+# these rungs exist to repair it is structurally unreachable however exact the
+# evidence is. RTM_POC_MIN_AGREE overrides it, announced; there is deliberately
+# no such knob for the sample floor. h264poc.resolve_min_agree is the ONE
+# writer of that decision — poc-remux.py reads the same function (IV.1).
 POC_MIN_SAMPLES, POC_MIN_AGREE = 100, 0.999
 
 
-def poc_classes(coded, structure, min_samples=POC_MIN_SAMPLES,
-                min_agree=POC_MIN_AGREE):
+def poc_classes(coded, structure, min_samples=POC_MIN_SAMPLES, min_agree=None):
     """Solve C per (epoch, bottom_field_flag) from the packets that DO carry a
     timestamp, on the rung lattice `coded` is expressed in.
 
     coded      the PTS column in coded order, None at each hole, ALREADY
                divided into rungs by the caller (see rung_lattice).
     structure  per coded index: (field_pic, bottom, frame_num, poc, epoch), or
-               None where the slice header did not parse.
+               None where the slice header did not parse. Its POC field is
+               expected ALREADY NORMALISED to one unit per rung by the caller
+               (h264poc.poc_advance; see pass 1) — a progressive stream counts
+               POC in fields and would otherwise key every picture differently.
 
-    Returns (C, trusted, report) — report is one line per class, trusted or
-    not, because a rule that never fires must say so and on what evidence
-    (Constitution III.2).
+    Returns (C, usable, report) — `usable` is the set of classes a display
+    position may be read from: those that cleared the bar, or, when NONE did
+    and every class carries at least `min_samples` votes, all of them on their
+    modal C (announced in the report as PROVISIONAL). `report` is one line per
+    class either way, because a rule that never fires must say so and on what
+    evidence (Constitution III.2).
     """
+    if min_agree is None:
+        min_agree, _src = h264poc.resolve_min_agree(POC_MIN_AGREE)
     votes = {}
     for i, s in enumerate(structure):
         if s is None or coded[i] is None or s[3] is None:
@@ -207,20 +233,35 @@ def poc_classes(coded, structure, min_samples=POC_MIN_SAMPLES,
         votes.setdefault(key, {})
         d = coded[i] - s[3]
         votes[key][d] = votes[key].get(d, 0) + 1
-    C, trusted, report = {}, set(), []
+    C, trusted, ev = {}, set(), {}
     for key in sorted(votes):
         v = votes[key]
         best = max(v, key=lambda k: v[k])
         cnt, total = v[best], sum(v.values())
         C[key] = best
         share = float(cnt) / total if total else 0.0
-        okc = total >= min_samples and share >= min_agree
-        if okc:
+        ev[key] = (cnt, total, share)
+        if total >= min_samples and share >= min_agree:
             trusted.add(key)
+    provisional = set()
+    if votes and not trusted and all(t >= min_samples for _c, t, _s in ev.values()):
+        provisional = set(ev)
+    prov_label = ("PROVISIONAL (no class reached %.5g; every class has >=%d "
+                  "votes, and the output gates judge the artifact)"
+                  % (min_agree, min_samples))
+    report = []
+    for key in sorted(ev):
+        cnt, total, share = ev[key]
+        if key in trusted:
+            verdict = "TRUSTED"
+        elif key in provisional:
+            verdict = prov_label
+        else:
+            verdict = "untrusted"
         report.append("epoch=%d parity=%s C=%d unanimity=%d/%d (%.5f) %s"
-                      % (key[0], "bottom" if key[1] else "top", best, cnt,
-                         total, share, "TRUSTED" if okc else "untrusted"))
-    return C, trusted, report
+                      % (key[0], "bottom" if key[1] else "top", C[key], cnt,
+                         total, share, verdict))
+    return C, trusted | provisional, report
 
 
 
@@ -236,14 +277,15 @@ def _evidence_digest(report, shown=4):
         head += "; ... (%d more class(es), same shape)" % (len(report) - shown)
     return head
 
-def poc_rung(i, coded, structure, C, trusted):
-    """The rung POC says coded picture i belongs on, or None when its class is
-    not trusted (never a guess)."""
+def poc_rung(i, coded, structure, C, usable):
+    """The rung POC says coded picture i belongs on, or None when its class
+    yields no display position at all (never a guess). `usable` is
+    poc_classes' second return value."""
     s = structure[i] if structure else None
     if s is None or s[3] is None:
         return None
     key = (s[4], s[1])
-    if key not in trusted:
+    if key not in usable:
         return None
     return s[3] + C[key]
 
@@ -271,12 +313,17 @@ def adjudicate_duplicates(coded, structure, step):
     """Move packets carrying a STALE timestamp off a rung another packet holds
     (TIERS.md T3.5).
 
-    THE MEASURED SHAPE (2024 VMA capture, 2026-08-29): all ten duplicate rungs
-    were a packet that carried a timestamp ACROSS a transport discontinuity.
-    The earlier holder always fits its local POC lattice; the later one never
-    does. That asymmetry is what makes them adjudicable at all — and it is
-    read from the bitstream's own declared display positions, not guessed from
-    neighbouring arithmetic.
+    THE ASYMMETRY THAT MAKES THEM ADJUDICABLE: exactly ONE holder fits its own
+    local POC lattice. This function measures which — it does not assume.
+
+    WHICH ONE IS NOT FIXED, and the 2024 VMA capture made it look as though it
+    were: all ten of its duplicate rungs were a timestamp carried FORWARD
+    across a transport discontinuity, so the earlier holder fit every time. The
+    2026-08-30 field file splits roughly 550 second-lower / 509 first-lower on
+    the same measurement. The code was always general; only its documentation
+    over-generalised (TIERS.md T3.5). Either way the answer is read from the
+    bitstream's own declared display positions, never guessed from neighbouring
+    arithmetic.
 
     Returns (column, moves, unresolved):
       moves       (index, old, new) per packet relocated, in coded order
@@ -292,7 +339,7 @@ def adjudicate_duplicates(coded, structure, step):
     if structure is None or len(structure) != n or step <= 0:
         return list(coded), [], [i for i in _dup_indices(coded)]
     lat = [None if v is None else v // step for v in coded]
-    C, trusted, _report = poc_classes(lat, structure)
+    C, usable, _report = poc_classes(lat, structure)
     out = list(coded)
     moves, unresolved = [], []
     where = {}
@@ -302,7 +349,7 @@ def adjudicate_duplicates(coded, structure, step):
     occupied = set(v for v in out if v is not None)
     for v in sorted(k for k, ix in where.items() if len(ix) > 1):
         holders = where[v]
-        fits = [i for i in holders if poc_rung(i, lat, structure, C, trusted) == v // step]
+        fits = [i for i in holders if poc_rung(i, lat, structure, C, usable) == v // step]
         if len(fits) != 1:
             # nobody fits, or several do: POC does not settle this one
             unresolved.extend(holders[1:] if not fits else
@@ -312,7 +359,7 @@ def adjudicate_duplicates(coded, structure, step):
         for i in holders:
             if i == keep:
                 continue
-            r = poc_rung(i, lat, structure, C, trusted)
+            r = poc_rung(i, lat, structure, C, usable)
             if r is None:
                 unresolved.append(i)
                 continue
@@ -464,10 +511,10 @@ def fill_sparse(coded, max_frac=RTM_SPARSE_NOPTS_MAX, structure=None):
     poc_report = []
     if structure is not None and len(structure) == n:
         lat = [None if v is None else v // step for v in coded]
-        C, trusted, poc_report = poc_classes(lat, structure)
-        if trusted:
+        C, usable, poc_report = poc_classes(lat, structure)
+        if usable:
             for j in holes:
-                r = poc_rung(j, lat, structure, C, trusted)
+                r = poc_rung(j, lat, structure, C, usable)
                 if r is not None:
                     poc_ev[j] = r * step
 
@@ -515,11 +562,12 @@ def fill_sparse(coded, max_frac=RTM_SPARSE_NOPTS_MAX, structure=None):
                    "mate) or a hole's mate falls off the end of the file." + poc_note)
         elif structure is not None and len(structure) == n and not poc_ev:
             why = ("neither rule has evidence here. The slice headers WERE read "
-                   "and no POC class cleared the bar (>=%d votes, >=%.4g "
-                   "unanimity), so no picture's display position can be stated; "
-                   "and no coded-index parity has adjacent pairs one field "
-                   "duration apart either.%s"
-                   % (POC_MIN_SAMPLES, POC_MIN_AGREE, poc_note))
+                   "and no POC class carries the >=%d votes a display position "
+                   "has to rest on (the unanimity bar is announced above and "
+                   "does not refuse on its own since 1.17.0 — the sample floor "
+                   "does, and it is not overridable); and no coded-index parity "
+                   "has adjacent pairs one field duration apart either.%s"
+                   % (POC_MIN_SAMPLES, poc_note))
         elif parity is None:
             why = ("the field pairing is not provable on this stream: no coded-"
                    "index parity has adjacent pairs one field duration apart at "
@@ -660,12 +708,24 @@ def main():
     # one, which is where the field pairing and the display position have been
     # stated all along. A packet whose header will not parse contributes None
     # and is simply not evidence — never a guess.
+    #
+    # AND IT MUST BE ABLE TO READ THE CARRIAGE IT IS HANDED (1.17.0). This
+    # reader was Annex-B-only and SILENT about it: every slice returned None,
+    # `len(structure) == len(column)` still held, so `structure` degraded to a
+    # list of Nones and the rung carried on with timestamp proxies while
+    # printing "0 of N picture(s) parsed" that nothing routed on. Rung 3-POC
+    # failed loudly on the same defect; this one failed quietly, which is
+    # worse. The container's declared avcC length size and its extradata
+    # parameter sets are the fix, threaded rather than inferred (IV.2).
     hp = None
     if str(getattr(vin.codec_context, "name", "")) == "h264":
         try:
-            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-            import h264poc
-            hp = (h264poc.Parser(), h264poc.PocUnwrapper())
+            _extra = bytes(getattr(vin.codec_context, "extradata", b"") or b"")
+            _par = h264poc.Parser(h264poc.avcc_length_size(_extra))
+            _ps = h264poc.avcc_param_sets(_extra)
+            if _ps:
+                _par.feed_parameter_sets(_ps)       # no-op on an Annex-B source
+            hp = (_par, h264poc.PocUnwrapper())
         except Exception:
             hp = None
     for pkt in inp.demux(vin):
@@ -690,6 +750,24 @@ def main():
     inp.close()
     if hp is None or len(structure) != len(column):
         structure = None
+
+    # POC COUNTS FIELDS; THE RUNG LATTICE COUNTS RUNGS. Normalised ONCE, here,
+    # so poc_classes / poc_rung / fill_sparse all read the same units and no
+    # two of them can disagree about the scale (Constitution IV.1). The measure
+    # and its guard live in h264poc.poc_advance — the same function Rung 3-POC
+    # uses. A stream that fails the guard is left at A = 1 and normalised not
+    # at all: an odd POC divided away is a display position invented.
+    if structure is not None:
+        _poc = [None if x is None else x[3] for x in structure]
+        _ep = [None if x is None else x[4] for x in structure]
+        _adv, _adv_note = h264poc.poc_advance(_poc, _ep)
+        if _adv > 1:
+            print("-- POC advance: %d per rung — normalising (%s) --"
+                  % (_adv, _adv_note), file=sys.stderr)
+            structure = [None if x is None else
+                         (x[0], x[1], x[2],
+                          None if x[3] is None else x[3] // _adv, x[4])
+                         for x in structure]
 
     n_nopts = sum(1 for v in column if v is None)
     # The whole-file census is the AUTHORITATIVE one. Every routing decision

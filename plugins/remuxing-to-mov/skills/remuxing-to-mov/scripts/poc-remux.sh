@@ -120,12 +120,12 @@ PC_ACODECS=$(ffp -v error -select_streams a -show_entries stream=index,codec_nam
 
 PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 echo "-- building (video bits copied untouched; frames paired per 14496-15, timed from POC) --"
-set +e
+rtm_hold   # the ERR trap must not run between the pipeline and PIPESTATUS
 "$VENV_PY" "$SELF_DIR/poc-remux.py" "$IN" "$PART" --audio "$AUDIO" \
   ${PC_ACODECS:+--acodecs "$PC_ACODECS"} \
   ${LIMIT:+--limit "$LIMIT"} ${NOFS:+"$NOFS"} 2>&1 | tee "$PART.log" | sed 's/^/   /'
 prc=${PIPESTATUS[0]}
-set -e
+rtm_resume
 case "$prc" in
   0) ;;
   3) echo ">> REFUSED: the evidence does not support a timeline for this stream (above)." >&2

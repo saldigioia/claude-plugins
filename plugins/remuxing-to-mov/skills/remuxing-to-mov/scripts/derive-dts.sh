@@ -248,7 +248,7 @@ case "$prc" in
   10) exit 10;;
   *) echo ">> derivation FAILED (python exit $prc); partial output removed."; rm -f "$PYOUT"; exit 1;;
 esac
-dp_line=$(printf '%s\n' "$py_out" | grep '^DERIVE_PY ' | head -1)
+dp_line=$(printf '%s\n' "$py_out" | grep '^DERIVE_PY ' | awk 'NR<=1')
 DP_PACKETS=$(printf '%s\n' "$dp_line" | sed -n 's/.*packets=\([0-9][0-9]*\).*/\1/p')
 DP_DEPTH=$(printf '%s\n' "$dp_line"   | sed -n 's/.*depth=\([0-9][0-9]*\).*/\1/p')
 DP_SHIFT_MS=$(printf '%s\n' "$dp_line" | sed -n 's/.*shift_ms=\([0-9.]*\).*/\1/p')
@@ -257,8 +257,8 @@ DP_SHIFT_MS=$(printf '%s\n' "$dp_line" | sed -n 's/.*shift_ms=\([0-9.]*\).*/\1/p
 # it; absent from an older python (or a bench build) reads 0, never blank.
 DP_STAMPED=$(printf '%s\n' "$dp_line" | sed -n 's/.*stamped=\([0-9][0-9]*\).*/\1/p')
 case "$DP_STAMPED" in ''|*[!0-9]*) DP_STAMPED=0;; esac
-PLAN_N=$(printf '%s\n' "$py_out" | sed -n 's/^DERIVE_PLAN n=\([0-9][0-9]*\).*/\1/p' | head -1)
-PLAN_C=$(printf '%s\n' "$py_out" | sed -n 's/^DERIVE_PLAN n=[0-9]* codecs=\(.*\)$/\1/p' | head -1)
+PLAN_N=$(printf '%s\n' "$py_out" | sed -n 's/^DERIVE_PLAN n=\([0-9][0-9]*\).*/\1/p' | awk 'NR<=1')
+PLAN_C=$(printf '%s\n' "$py_out" | sed -n 's/^DERIVE_PLAN n=[0-9]* codecs=\(.*\)$/\1/p' | awk 'NR<=1')
 { [ -n "$DP_PACKETS" ] && [ -n "$PLAN_N" ]; } || { echo ">> python summary lines missing — not blessing."; exit 1; }
 
 if [ -n "$LIMIT" ]; then
@@ -361,7 +361,7 @@ if cmp -s "$PN_S" "$PN_O"; then
   rm -f "$PN_S" "$PN_O" "$PN_X"
 else
   echo ">> PTS MULTISET GATE FAILED — the output does not present the source's timeline."
-  diff "$PN_S" "$PN_O" | head -6 | sed 's/^/   /'
+  diff "$PN_S" "$PN_O" | awk 'NR<=6' | sed 's/^/   /'
   rm -f "$PN_S" "$PN_O" "$PN_X"
   echo "   NOT blessing. Kept: $PART"; exit 1
 fi

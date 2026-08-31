@@ -146,8 +146,8 @@ fi
 
 # --- audio across the splice ------------------------------------------------------
 AHOT=na; ADISC=na
-FIRST_APTS=$(ffp -v error -select_streams a:0 -read_intervals '%+#1' \
-               -show_entries packet=pts_time -of csv=p=0 "$IN" 2>/dev/null | head -1 | tr -d ,)
+FIRST_APTS=$(ffp1 -v error -select_streams a:0 -read_intervals '%+#1' \
+               -show_entries packet=pts_time -of csv=p=0 "$IN" 2>/dev/null | tr -d ,)
 if [ -n "$FIRST_APTS" ] && [ "$FIRST_APTS" != N/A ]; then
   ADISC=$(awk "BEGIN{v=($splice_pts)-($FIRST_APTS); if(v<0)v=0; printf \"%.3f\", v}")
   SSREL=$(awk "BEGIN{v=($splice_pts)-($ST)-1; if(v<0)v=0; printf \"%.3f\", v}")

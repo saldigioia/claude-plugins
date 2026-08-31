@@ -53,9 +53,40 @@ non-unanimous, the class is discarded as unproven, and the file is refused.
 Four rungs apart, each perfectly unanimous within its own class. Pooled, the
 same data reads as two competing answers.
 
-The bar stays unforgiving: a class is trusted only at **≥ 99.9 % agreement over
-≥ 100 votes**, and an untrusted class yields nothing at all — never the most
-popular guess.
+**The sample floor stays unforgiving: a class with fewer than 100 votes yields
+nothing at all** — never the most popular guess — and one class short of the
+floor withdraws the offer for the whole stream. There is no env override for it.
+
+**The unanimity half became an announced measurement in 1.17.0** (TIERS.md
+T3.4, Constitution I.3), and the reason is arithmetic, not appetite. Unanimity
+is capped at **1 − f** where f is the mis-stamped fraction: a stream with 17.4 %
+of its pictures stamped one frame late tops out at 0.826 and can never reach
+0.999, however exactly the bitstream states its own display positions. The bar
+therefore refused precisely the class this rung exists to repair, whenever that
+class was systematic rather than sparse. So when no class clears it and every
+class carries its 100 votes, the modal C proceeds as **PROVISIONAL**, loudly,
+naming its shortfall — and the output gates decide, because they are strictly
+stronger: a wrong C cannot survive the bijection onto the display lattice
+(`poc-remux.py` refuses unless every frame lands on its own slot), and the full
+`verify.sh` suite judges the artifact after that. `RTM_POC_MIN_AGREE` sets the
+bar; its value is printed beside the per-class report either way.
+
+## 3a. POC counts FIELDS; the lattice counts RUNGS
+
+H.264 counts `pic_order_cnt` in fields. A field-coded stream codes one picture
+per field, so POC advances **1** per rung and `k = POC + C` works directly. A
+**progressive** stream codes one picture per *frame* — two fields — so POC
+advances **2** per rung while the container's lattice advances 1, and
+`rung − poc` is then a different key for every picture. Every class reads as
+unanimous at about 1/n: field-measured **0.01042**, 2 votes of 192, on a file
+whose repair is exact.
+
+`h264poc.poc_advance` MEASURES the advance and never assumes it: the per-epoch
+modal positive delta of the sorted POC values, adopted only when it agrees
+across every epoch **and** divides every POC value exactly. Either check
+failing yields A = 1 and no normalisation at all — an odd POC divided away is a
+display position invented rather than read, and this rung's whole claim is that
+it never invents one.
 
 ## 4. "Zero adjacent pairs one field apart" is true and means nothing
 
@@ -162,12 +193,20 @@ disagreement comes straight back.
 
 ## 7. Duplicate display slots are adjudicable, and the asymmetry is why
 
-Where two packets claim one rung, the later holder is carrying a timestamp
-across a transport discontinuity. Measured **10 of 10**: the earlier holder
-always fits its local POC lattice and the later one never does. That asymmetry
-is what makes them settleable from the bitstream rather than guessable from
-neighbouring arithmetic — and a duplicate POC cannot settle is refused, not
-quietly kept (`verify.sh` gate (j) exists for exactly that defect).
+Where two packets claim one rung, one of them is carrying a timestamp that does
+not belong to it. **Exactly one holder fits its local POC lattice** — that
+asymmetry is what makes the pair settleable from the bitstream rather than
+guessable from neighbouring arithmetic — and a duplicate POC cannot settle is
+refused, not quietly kept (`verify.sh` gate (j) exists for exactly that defect).
+
+**WHICH holder fits is not fixed, and an earlier draft of this section said it
+was.** On the 2024 VMA capture all 10 duplicates were a stale timestamp carried
+*forward* across a transport discontinuity, so the earlier holder fit every
+time, and "the later holder never fits" was written down as if it were the
+rule. It is one capture's shape. The 2026-08-30 Reading Festival file splits
+roughly **550 second-lower / 509 first-lower** on the same measurement. The
+code was always general — `adjudicate_duplicates` measures `fits` and does not
+care which side wins — and only the prose over-generalised.
 
 Holes and duplicates are usually **one** phenomenon, not two: on that capture 2
 of the 10 duplicates bracketed an unstamped burst exactly.
@@ -229,7 +268,7 @@ dual-track's *preserved original* with a PCM access track alongside.
 
 | | |
 |---|---|
-| `scripts/h264poc.py` | slice-header reader + §8.2.1.1 POC unwrapper + 14496-15 pairing. SPS is **parsed**, never assumed. |
+| `scripts/h264poc.py` | slice-header reader + §8.2.1.1 POC unwrapper + 14496-15 pairing + the measured POC advance. SPS is **parsed**, never assumed, and **both standard carriages are read** — Annex-B start codes and avcC length prefixes (MKV/MOV keep the parameter sets in extradata; `avcc_param_sets` seeds the parser from them). |
 | `scripts/poc-remux.sh` / `.py` | Rung 3-POC: the field-pair-aware, POC-timed lossless remux |
 | `scripts/nalhash.py` | the start-code-agnostic essence arbiter (gate (m)) |
 | `scripts/codec-id.py` | sample entry vs payload identity (gate (i)) |

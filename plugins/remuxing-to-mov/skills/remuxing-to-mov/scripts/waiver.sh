@@ -85,7 +85,7 @@ vh=$(printf '%s' "$sigline" | sed -n "s/.* vhash=\([^ ]*\).*/\1/p")
 { [ -n "$wgate" ] && [ -n "$wsig" ] && [ -n "$osize" ] && [ -n "$vh" ]; } || {
   echo "waiver.sh: could not parse the VERIFY_SIGNATURE line: $sigline" >&2; exit 2; }
 
-ffv=$(ffmpeg -nostdin -version 2>/dev/null | head -1 | awk '{print $1" "$2" "$3}') || ffv="ffmpeg unknown"
+ffv=$(ffmpeg -nostdin -version 2>/dev/null | awk 'NR<=1' | awk '{print $1" "$2" "$3}') || ffv="ffmpeg unknown"
 osv=""
 [ "$(uname -s)" = Darwin ] && osv="; macOS $(sw_vers -productVersion 2>/dev/null || echo '?')"
 today=$(date +%F)

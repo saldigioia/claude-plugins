@@ -389,5 +389,38 @@ done
   || no "builders that bless without reaching rtm_sibling_guard:$sib_uncalled"
 
 echo
+echo "== 13. no PIPESTATUS read sits in a bare 'set +e' region (1.17.0) =="
+# THE DEFECT (measured 2026-08-31, five sites, pre-existing). lib-exit.sh arms an
+# ERR trap, and an ERR trap fires on ANY failing command — not only where
+# `set -e` would kill, which is why rtm_err_guard has to test `$-` itself. So in
+# the tree's capture idiom
+#     set +e; child | sed 's/^/   /'; rc=${PIPESTATUS[0]}; set -e
+# the trap RUNS between the pipeline and the read, and running any command
+# rewrites PIPESTATUS. `rc` came back 0 for every non-zero child. On
+# poc-remux.sh that read a REFUSED (exit 3) as success and reported FAIL —
+# collapsing the two verdicts TIERS.md T3.12 exists to keep apart.
+#
+# The fix is rtm_hold/rtm_resume (lib-exit.sh), which disarm the trap along with
+# errexit. This pins it: a PIPESTATUS read must sit inside an rtm_hold region.
+# Comments are stripped first — lib-exit.sh documents the broken idiom in prose,
+# and prose must not trip a guard (V.3).
+ps_bad=""
+for f in "$SC"/*.sh; do
+  hit=$(rtm_strip_comments "$f" | awk '
+    { line=$0
+      while (match(line, /rtm_hold|rtm_resume|set \+e|set -e|\$\{PIPESTATUS\[/)) {
+        tok=substr(line, RSTART, RLENGTH); line=substr(line, RSTART+RLENGTH)
+        if (tok=="rtm_hold")        st=2
+        else if (tok=="set +e")     st=1
+        else if (tok=="rtm_resume" || tok=="set -e") st=0
+        else if (st!=2)             printf "PIPESTATUS-unheld@%d ", NR
+      }
+    }')
+  [ -n "$hit" ] && ps_bad="$ps_bad $(basename "$f"):[$hit]"
+done
+[ -z "$ps_bad" ] && ok "every PIPESTATUS read is inside an rtm_hold region (the ERR trap cannot clobber it)" \
+  || no "PIPESTATUS read while the ERR trap is armed:$ps_bad"
+
+echo
 echo "rot-sweep: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

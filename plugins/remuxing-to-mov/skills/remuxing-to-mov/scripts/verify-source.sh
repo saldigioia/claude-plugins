@@ -147,7 +147,7 @@ elif [ "$sh_src" = "$sh_out" ]; then
 else
   # diff exits 1 on a difference — that is the datum, not a failure; without
   # the guard the ERR trap kills the run before the verdict prints (measured)
-  echo "   MISMATCH:"; { diff <(printf '%s\n' "$sh_src") <(printf '%s\n' "$sh_out") || true; } | sed 's/^/     /' | head -12
+  echo "   MISMATCH:"; { diff <(printf '%s\n' "$sh_src") <(printf '%s\n' "$sh_out") || true; } | sed 's/^/     /' | awk 'NR<=12'
   downgrade FAIL "streamhash mismatch — the output is NOT the intended selection of the source"
   HASH=mismatch
 fi
@@ -264,7 +264,7 @@ printf '%s\n' "$S_TSH" | grep -q '^TSH_VERDICT=' || S_BASE=missing
 if [ "$S_BASE" = missing ]; then
   downgrade REVIEW "no source ts-health baseline (scan rc=$s_thrc${SRC_TSH:+; --src-tsh file invalid}) — inherited-vs-introduced attribution UNPROVEN for gaps/rot/wrap; the output's own counters print unattributed below"
 fi
-tsv () { printf '%s\n' "$2" | sed -n "s/^$1=//p" | head -1; }
+tsv () { printf '%s\n' "$2" | sed -n "s/^$1=//p" | awk 'NR<=1'; }
 o_scr=$(tsv TSH_SCRAMBLED "$O_TSH"); s_gaps=$(tsv TSH_GAPS "$S_TSH"); o_gaps=$(tsv TSH_GAPS "$O_TSH")
 s_back=$(tsv TSH_BACK "$S_TSH");    o_back=$(tsv TSH_BACK "$O_TSH")
 s_dup=$(tsv TSH_DUP "$S_TSH");      o_dup=$(tsv TSH_DUP "$O_TSH")

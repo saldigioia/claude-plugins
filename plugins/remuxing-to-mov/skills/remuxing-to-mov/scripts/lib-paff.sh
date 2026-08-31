@@ -227,8 +227,8 @@ pf_decl_depth () {
   local tmp d n
   if [ -n "${PF_DECL_DEPTH_IN:-}" ]; then printf '%s 0' "$PF_DECL_DEPTH_IN"; return 0; fi
   tmp=$(mktemp -t rtmdecl.XXXXXX 2>/dev/null) || { printf 'unknown 0'; return 0; }
-  d=$(ffp -v error -select_streams v:0 -show_entries stream=has_b_frames \
-        -of default=nw=1:nk=1 "$1" 2>"$tmp" | head -1)
+  d=$(ffp1 -v error -select_streams v:0 -show_entries stream=has_b_frames \
+        -of default=nw=1:nk=1 "$1" 2>"$tmp")
   n=$(grep -c . "$tmp" 2>/dev/null || true); rm -f "$tmp"
   case "$n" in ''|*[!0-9]*) n=0;; esac
   case "$d" in ''|*[!0-9]*) d=unknown;; esac
@@ -382,13 +382,19 @@ pf_reorder_scan () {
   printf '%s\n' "$raw" | \
   awk -F, 'NF{
       p=$1; d=$2; tot++
-      if(p!="N/A" && p!=""){ if(havep && p+0<pp) back++; pp=p+0; havep=1 }
+      # PF_DUP_PTS rides this pass because the pass is already paid for
+      # (Constitution IV.2 — never re-derive what is already being read). It is
+      # the head-window SAMPLE of "two pictures claiming one display slot";
+      # diagnose.sh takes the authoritative whole-file census (DGC_DUPPKTS) and
+      # pf_poc_contradicted prefers that one wherever it is in scope.
+      if(p!="N/A" && p!=""){ if(havep && p+0<pp) back++; pp=p+0; havep=1
+                             if(seen[p]++) dup++ }
       if(p=="N/A"||p==""||d=="N/A"||d=="") next
       both++; off=p-d; if(off!=0) ne++; if(off>mx) mx=off
     }
     END{
       r="no"; if(ne>0 || back>0) r="yes"
-      printf "PF_REORDER=%s\nPF_PTSNEDTS=%d\nPF_BACKPTS=%d\nPF_MAXOFF_TICKS=%d\nPF_TS_BOTH=%d\n", r, ne+0, back+0, mx+0, both+0
+      printf "PF_REORDER=%s\nPF_PTSNEDTS=%d\nPF_BACKPTS=%d\nPF_MAXOFF_TICKS=%d\nPF_TS_BOTH=%d\nPF_DUP_PTS=%d\n", r, ne+0, back+0, mx+0, both+0, dup+0
     }'
   # depth arm: number the timestamped pictures in CODED order, re-read them in
   # PRESENTATION order (the same `sort -n` discipline verify gate (e) uses), and
@@ -1320,21 +1326,57 @@ pf_poc_probe () {
   rm -f "$log"
 }
 
+# pf_poc_contradicted — do the container's own timestamps contradict the display
+# lattice the bitstream declares? Two pictures claiming one slot is the shape;
+# it is what makes a stream a REPAIR case rather than a clean one.
+#
+# THE WHOLE-FILE CENSUS DECIDES WHEREVER IT EXISTS. diagnose.sh walks every
+# packet and publishes DGC_N/DGC_DUPPKTS; that number is authoritative and a
+# zero from it means zero. Only when no census has been taken (auto.sh, which
+# routes off head-window evidence) does the PF_DUP_PTS sample get a vote — and
+# a sample can only ever UNDERSTATE, which is the safe direction for a
+# predicate that decides whether to ATTEMPT a repair.
+pf_poc_contradicted () {
+  if [ -n "${DGC_N:-}" ]; then
+    [ "${DGC_DUPPKTS:-0}" -gt 0 ] 2>/dev/null || return 1
+    return 0
+  fi
+  [ "${PF_DUP_PTS:-0}" -gt 0 ] 2>/dev/null || return 1
+  return 0
+}
+
 # pf_poc_routable — is Rung 3-POC the measured route for the profile in scope?
 # Requires the PF_* profile (pf_detect) and PP_*/PCAP_* (pf_poc_probe) to be
-# eval-ed already. THE CLASS: H.264, field-coded, reordered, NOT the
-# half-timestamped pair signature (pairfill owns that), the slice headers show
-# complementary field pairs, and pic_order_cnt is readable. That combination is
-# the 2024-VMA capture, and no rung before 1.16.0 fit it.
+# eval-ed already. THE CLASS: H.264, reordered, pic_order_cnt readable, NOT the
+# half-timestamped pair signature (pairfill owns that), and EITHER the slice
+# headers show complementary field pairs (the 2024-VMA capture, 1.16.0) OR the
+# container's own timestamps contradict the display lattice (the progressive
+# class, 1.17.0).
+#
+# THIS PREDICATE IS A MODEL, and Constitution IV.2 says to ask the authority
+# instead. The authority is `poc-remux.sh --dry-run`, which reads every packet
+# and answers 0/3 without writing a byte — use it when you want certainty. This
+# stays a model because routing is a question asked in seconds on a head window,
+# and a whole-file dry run on a 24 GB capture is not that. The cost of the model
+# being WRONG is bounded and known: over-routing wastes a build (Constitution
+# I.3's explicitly accepted cost — the bijection and the full verify suite still
+# judge the artifact), while under-routing loses the repair entirely. That
+# asymmetry is why the 1.17.0 arm was added at all.
+#
+# WHAT THE MODEL COST WHEN IT FELL BEHIND (measured 2026-08-30): `PP_PAIRS > 0`
+# meant a progressive stream could never route here, whatever its timestamps
+# said. A 3.15 GB capture with 24062 pictures stamped one frame late — the exact
+# defect this rung repairs — was sent to derive-dts instead and shipped as a
+# FAIL with the source named as the review item.
 pf_poc_routable () {
   # the codec fact reaches this predicate under two different names: pf_detect
   # sets PF_CODEC, probe.sh --kv gives a driver PR_VCODEC. Reading only one of
   # them made this silently unroutable in auto.sh (measured 2026-08-29).
   [ "${PF_CODEC:-${PR_VCODEC:-na}}" = h264 ] || return 1
   [ "${PCAP_OK:-no}" = yes ] || return 1
-  [ "${PP_PAIRS:-0}" -gt 0 ] 2>/dev/null || return 1
   [ "${PF_HALF_TS:-no}" != yes ] || return 1
   [ "${PF_REORDER:-no}" = yes ] || return 1
+  { [ "${PP_PAIRS:-0}" -gt 0 ] 2>/dev/null; } || pf_poc_contradicted || return 1
   return 0
 }
 

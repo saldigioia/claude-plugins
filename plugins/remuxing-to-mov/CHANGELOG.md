@@ -4,6 +4,103 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.17.0 — the rung could not read the containers it was pointed at (2026-08-31)
+
+A field job (`Reading Festival/2026-08-28 Geese/video.mkv`, 3.15 GB, H.264
+1080p50 in Matroska) carried the exact defect Rung 3-POC exists to repair:
+24062 of 138626 pictures (17.4 %) stamped one frame LATE, each colliding with
+its neighbour and leaving the slot behind it empty, while the bitstream states
+the truth outright (`pts = base + poc × 10`). The ladder routed it *away* from
+the rung, the rung would have refused it, and `mov.sh` shipped a FAIL naming the
+SOURCE as the review item. Three defects had to line up for that, and none of
+them was the POC math.
+
+**Carriage — the rung was blind to MKV and MOV.** `h264poc.iter_nals` scanned
+only for Annex-B start codes. avcC (ISO/IEC 14496-15) carries length-prefixed
+NALs and keeps SPS/PPS in the container's extradata, so the reader yielded zero
+NALs and `capability()` answered *"no SPS parsed"*. One encode, two containers,
+measured 2026-08-30:
+
+```
+reord.ts     pictures=120  parsed=120  sps_seen=[0]
+reord.mkv    pictures=120  parsed=  0  sps_seen=[]
+```
+
+Total blindness versus total success, decided by carriage alone. Both carriages
+are read now, with the container's declared `lengthSizeMinusOne` **threaded**
+from the caller (exact-tiling autodetect is the safety net, not the mechanism)
+and the parameter sets seeded from extradata. `derive-dts.py` held the same
+defect **silently**: every slice returned `None`, `len(structure) == len(column)`
+still held, so it degraded to a list of `None` and carried on with timestamp
+proxies while printing `0 of N picture(s) parsed` that nothing routed on.
+
+**Scale — POC counts fields, the lattice counts rungs.** A progressive stream
+codes one picture per frame, so POC advances 2 per rung while the container
+lattice advances 1, and `rung − poc` is a different key for every picture. Class
+unanimity read **0.01042** (2 of 192) on a file whose repair is exact.
+`h264poc.poc_advance` now MEASURES the advance per epoch and adopts it only when
+it agrees across every epoch *and* divides every POC value exactly — otherwise
+A = 1 and nothing is normalised, because an odd POC divided away is a display
+position invented rather than read.
+
+**Reach — the predicate could not describe the class.** `pf_poc_routable`
+required `PP_PAIRS > 0`, so a progressive stream could never route to the rung
+however contradicted its timestamps were. It now routes on H.264 + POC-capable +
+reordered + (field pairs **or** contradicted display slots), and `auto.sh` probes
+POC capability for reordered progressive H.264 too — widening a predicate into a
+branch nothing reaches is not a fix.
+
+**The unanimity bar became announced, not fatal (TIERS.md T3.4).** Unanimity is
+capped at 1 − f on a systematic mis-stamp: at f = 0.174 the ceiling is 0.826 and
+the bar was 0.999, so it refused precisely the class the rung was built for
+whenever that class was systematic rather than sparse. It is a prediction about
+output quality, which Constitution I.3 says may not block a build. When no class
+clears it and every class carries its ≥100 votes, the modal C proceeds as
+PROVISIONAL with a warning naming the shortfall, and the output gates judge —
+the bijection onto the display lattice (a wrong C cannot survive it), the DTS
+asserts, and the full `verify.sh` suite. **The sample floor still refuses and has
+no env override.** `RTM_POC_MIN_AGREE` sets the bar; its value is printed beside
+the per-class report either way.
+
+**Three defects the round found on its way through, all pre-existing:**
+
+- **`PIPESTATUS` was unreadable at five sites.** `lib-exit.sh` arms an ERR trap,
+  and an ERR trap fires on *any* failing command — not only where `set -e` would
+  kill. So in the tree's capture idiom `set +e; child | sed; rc=${PIPESTATUS[0]};
+  set -e` the trap ran between the pipeline and the read and rewrote PIPESTATUS,
+  and `rc` came back **0 for every non-zero child**. On `poc-remux.sh` that read
+  a REFUSED (exit 3) as success and reported FAIL — collapsing the two verdicts
+  TIERS.md T3.12 exists to keep apart. New `rtm_hold`/`rtm_resume` disarm the
+  trap alongside errexit; pinned by `94-rot-sweep.sh` §13 and mutation-audited.
+- **The SIGPIPE class was swept only for `ffp` writers.** Under `pipefail` any
+  writer outrun by an early-exiting `head` returns 141 — `diagnose.sh` held two
+  such pipelines over its own decode and transport logs, so on any capture whose
+  logs outgrew the pipe buffer it died before printing a verdict at all, four
+  rounds after the class was named. All 47 sites in `scripts/` now read the
+  writer to EOF (`| awk 'NR<=8'` for `| head -8`), which masks no error the way
+  `|| true` would; three `ffp` sites the old guard *claimed* to have converted
+  were also still live, hidden from a per-line regex by a backslash continuation
+  and by the `head -n1` spelling. `91-flags-parsers-docs.sh` §5 gains an arm for
+  any writer.
+- **Two suites were green over assertions that never ran.** `63-derive-dts.sh`
+  §5 and `78-poc-census-reuse.sh` gated their end-to-end work on the *system*
+  `python3` having PyAV, while the rungs run on `$CLAUDE_PLUGIN_DATA/venv/bin/
+  python` — the documented arrangement, and the only place PyAV lives on this
+  bench. Pointed at the real interpreter, §5 immediately showed both the avcC
+  blindness above and a `DERIVE_DTS` machine-line pattern that pinned an exact
+  field order while calling itself additive.
+
+**Prose corrected (TIERS.md T3.5).** *"The later holder never fits its local
+lattice, the earlier always does"* generalised from one capture. The code was
+always general — `adjudicate_duplicates` measures `fits` — and the field file
+splits roughly 550 second-lower / 509 first-lower. The true statement is that
+exactly one holder fits; which one is not fixed.
+
+New `118-poc-carriage-and-scale.sh` (51 assertions) pins all of it, including
+§5's no-weakening proof: the sample floor still refuses, `MIN_SAMPLES` has no
+override, the bijection and both DTS asserts are still in place, and
+`poc-remux.sh` still gates itself through `verify.sh`.
+
 ## 1.16.7 — one policy, and a claim that became a measurement (2026-08-30)
 
 Two items from `plugin-doctor/FOLLOWUP-1.16.6.md`, both of which had the plugin

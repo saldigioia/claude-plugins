@@ -240,11 +240,11 @@ attempt () {  # $1 = rung; sets RESULT to OK|REVIEW|FAIL (+ GATE_F_ONLY on the g
   # rather than inferred from prose: every gate is pass/n-a/superseded except
   # (f), which is flagged. The note match stays as the confirming half.
   local f_row others
-  f_row=$(printf '%s\n' "$o" | sed -n 's/^ *VERIFY_LEDGER gate=f verdict=\([a-z\/]*\) .*/\1/p' | head -1)
+  f_row=$(printf '%s\n' "$o" | sed -n 's/^ *VERIFY_LEDGER gate=f verdict=\([a-z\/]*\) .*/\1/p' | awk 'NR<=1')
   others=$(printf '%s\n' "$o" | sed -n 's/^ *VERIFY_LEDGER gate=\([a-z]*\) verdict=\([a-z\/]*\) .*/\1 \2/p' \
            | awk '$1!="f" && $2!="pass" && $2!="n/a" && $2!="superseded"{n++} END{print n+0}')
   if [ "${f_row:-}" = flagged ] && [ "${others:-1}" -eq 0 ]; then GATE_F_ONLY=1; fi
-  case "$(printf '%s\n' "$o" | sed -n 's/^>> REVIEW: //p' | head -1)" in
+  case "$(printf '%s\n' "$o" | sed -n 's/^>> REVIEW: //p' | awk 'NR<=1')" in
     "A/V duration mismatch up to "*"gap-collapse desync signature"*"resync.sh to fix.") GATE_F_ONLY=1;;
   esac
   settle_best "$1"
@@ -320,7 +320,14 @@ BASE_RUNG="$PR_REC_RUNG"; [ "$PF_PAFF" = yes ] && { BASE_RUNG=0; [ "$PR_AUDIO_AC
 # The Rung 3-POC routing measurement, from the SHARED writer (lib-paff.sh) —
 # diagnose.sh recommends this rung off the same predicate, and a driver that
 # re-derived it would drift from the tool it is driving (IV.2).
-if [ "$PF_PAFF" = yes ] && [ "${PF_CODEC:-${PR_VCODEC:-na}}" = h264 ]; then
+# 1.17.0: REORDERED PROGRESSIVE H.264 IS PROBED TOO. Gating this on PF_PAFF
+# left PCAP_OK unset on every progressive source, so pf_poc_routable's new
+# second arm could never fire in the ladder however contradicted the timestamps
+# were — the predicate would have been widened into a branch nothing reached.
+# The probe is a head-window trace_headers parse (seconds), and PF_REORDER
+# keeps it off streams with no timeline to repair in the first place.
+if [ "${PF_CODEC:-${PR_VCODEC:-na}}" = h264 ] \
+   && { [ "$PF_PAFF" = yes ] || [ "${PF_REORDER:-no}" = yes ]; }; then
   eval "$(pf_poc_probe "$IN")" || true
 fi
 
@@ -450,8 +457,17 @@ if [ "$PF_PAFF" = yes ]; then
         # their timestamps are not one field duration apart (so every delta
         # heuristic reads "no pairing here" and refuses). Rung 3-POC reads the
         # pairing and the display positions from the slice headers directly.
-        echo "-- verdict $RESULT; the slice headers show ${PP_PAIRS:-0} complementary field pair(s)"
-        echo "   with pic_order_cnt readable (poc_type=${PCAP_POC_TYPE:--1}) -> Rung 3-POC --"
+        # 1.17.0 adds the progressive arm: no field pairs at all, but the
+        # container's own timestamps contradict the lattice the bitstream
+        # declares. Same rung, same evidence, same gates.
+        if [ "${PP_PAIRS:-0}" -gt 0 ] 2>/dev/null; then
+          echo "-- verdict $RESULT; the slice headers show ${PP_PAIRS:-0} complementary field pair(s)"
+          echo "   with pic_order_cnt readable (poc_type=${PCAP_POC_TYPE:--1}) -> Rung 3-POC --"
+        else
+          echo "-- verdict $RESULT; no field pairs, but ${PF_DUP_PTS:-0} duplicate display slot(s) in the"
+          echo "   head window contradict a lattice pic_order_cnt states outright"
+          echo "   (poc_type=${PCAP_POC_TYPE:--1}) -> Rung 3-POC --"
+        fi
         attempt_pocmux
         if [ "$RESULT" != OK ] && [ "$POC_BOOT" -eq 0 ] && derive_sig_esc; then
           echo "-- verdict $RESULT -> Rung 3-DERIVE --"
@@ -498,8 +514,24 @@ if [ "$PF_PAFF" = yes ]; then
 elif [ "$PR_REC_RUNG" = 3-derive ]; then
   # WO 1.14 Phase 4: probe measured the auto-proceed derive profile (PTS-complete
   # + reorder + provably short DTS column) — Rung 3-DERIVE is the first rung.
-  attempt_derive
-  if [ "$RESULT" != OK ] && [ "$DERIVE_BOOT" -eq 0 ]; then
+  #
+  # 1.17.0: UNLESS THE DISPLAY SLOTS THEMSELVES ARE CONTRADICTED. The derive
+  # signature is about the DTS column; it says nothing about two pictures
+  # claiming one PTS. Where the container's timestamps contradict the lattice
+  # the bitstream declares, 3-DERIVE derives DTS from a PTS column that is
+  # itself wrong, and the artifact fails gate (j) with the source blamed — the
+  # 2026-08-30 field run, exactly. 3-POC re-derives the PTS column from
+  # pic_order_cnt first, so it goes first; 3-DERIVE remains the fallback below,
+  # unchanged, for everything it does fit.
+  if pf_poc_routable; then
+    echo "-- probe recommends 3-DERIVE, but ${PF_DUP_PTS:-0} doubled display slot(s) contradict the"
+    echo "   lattice pic_order_cnt declares (poc_type=${PCAP_POC_TYPE:--1}) -> Rung 3-POC first --"
+    attempt_pocmux
+  fi
+  if [ "$RESULT" != OK ] && [ "$POC_BOOT" -eq 0 ]; then
+    attempt_derive
+  fi
+  if [ "$RESULT" != OK ] && [ "$DERIVE_BOOT" -eq 0 ] && [ "$POC_BOOT" -eq 0 ]; then
     echo "-- verdict $RESULT -> copy ladder fallback (Rung 0; scrub-gated) --"
     attempt 0
     if [ "$RESULT" = REVIEW ] && [ "$GATE_F_ONLY" -eq 1 ]; then
@@ -589,7 +621,7 @@ if [ -f "$OUT" ] && { { [ "$PLAYCHECK_DUE" -eq 1 ] && [ "$RESULT" != FAIL ]; } |
       echo "      not a re-encode (D2, 1.13)."
       if [ "$MP4SWAP" -eq 1 ]; then
         echo "-- container swap (--mp4-swap) --"
-        set +e; bash "$SELF_DIR/mp4-swap.sh" "$IN" "${OUT%.*}.mp4" $FULL | sed 's/^/   /'; swrc=${PIPESTATUS[0]}; set -e
+        rtm_hold; bash "$SELF_DIR/mp4-swap.sh" "$IN" "${OUT%.*}.mp4" $FULL | sed 's/^/   /'; swrc=${PIPESTATUS[0]}; rtm_resume
         case "$swrc" in
           0) echo "   >> the CONTAINER SWAP WORKS: ${OUT%.*}.mp4 is verified lossless AND renders correctly.";;
           *) echo "   >> the container swap did not produce a proven artifact (above; rc=$swrc).";;

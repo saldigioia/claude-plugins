@@ -62,6 +62,34 @@ set -o errtrace   # the ERR trap reaches functions/substitutions/subshells
 trap rtm_err_guard ERR
 trap 'exit 1' INT TERM HUP
 
+# --- suspending the contract to read a code by hand -------------------------
+# THE DEFECT THESE EXIST TO RETIRE (measured 2026-08-31, pre-existing since the
+# guard landed). The ERR trap fires on ANY failing command, not only where
+# `set -e` would kill — that is why rtm_err_guard has to test `$-` itself. So
+# in the tree's standard capture idiom:
+#
+#     set +e; child | sed 's/^/   /'; rc=${PIPESTATUS[0]}; set -e
+#
+# the trap RUNS between the pipeline and the read, and running any command
+# rewrites PIPESTATUS. `rc` therefore came back 0 for every non-zero child, at
+# five sites. Measured on poc-remux.sh: a REFUSED (exit 3) child was read as
+# success, so the driver fell through to "the rung reported success and wrote
+# nothing" and reported FAIL — collapsing exactly the two verdicts TIERS.md
+# T3.12 exists to keep apart. No pipe, no bug: an unpiped `cmd; rc=$?` is
+# unaffected, which is why this hid for so long.
+#
+# PIPESTATUS cannot be saved and restored (bash 3.2 has no way to write it), so
+# the fix is to disarm rather than to repair. That costs nothing: inside a
+# `set +e` section the guard already returns 0 immediately, so it was doing no
+# work — only damage.
+#
+#     rtm_hold; child | sed 's/^/   /'; rc=${PIPESTATUS[0]}; rtm_resume
+#
+# Pinned by tests/regression.d/94-rot-sweep.sh (no PIPESTATUS read may sit in a
+# bare `set +e` section) and mutation-audited.
+rtm_hold ()   { set +e; trap - ERR; }               # I am reading codes myself
+rtm_resume () { trap rtm_err_guard ERR; set -e; }   # the contract is back on
+
 # --- build identity (WO-1.15.20 S4) -----------------------------------------
 # The installed plugin's version, READ AT RUNTIME from the manifest — never a
 # hardcoded copy in a script, which is how a stale string gets believed. A
@@ -76,7 +104,7 @@ rtm_plugin_version () {
   local mf v
   mf="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/../../../.claude-plugin/plugin.json"
   [ -r "$mf" ] || { echo unknown; return 0; }
-  v=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$mf" | head -1)
+  v=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$mf" | awk 'NR<=1')
   [ -n "$v" ] || v=unknown
   echo "$v"
 }

@@ -41,7 +41,7 @@ WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 # its header at byte 0 — probing cannot miss, so the window is irrelevant there.
 psnr () { # average PSNR(dB) between two PNG frames; "inf" (identical) -> 99
   local v; v=$( { ffmpeg -nostdin -hide_banner -i "$1" -i "$2" -lavfi psnr -f null - 2>&1 \
-        | sed -n 's/.*average:\([0-9a-z.]*\).*/\1/p' | head -1; } || true)
+        | sed -n 's/.*average:\([0-9a-z.]*\).*/\1/p' | awk 'NR<=1'; } || true)
   case "$v" in inf|"") echo 99;; *) echo "$v";; esac; }
 
 bad=0

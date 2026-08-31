@@ -58,7 +58,7 @@ ms_tb_scan () {
   [ "$tb" = 1/1000 ] || return 0
   MS_TB=yes
   MS_ALT=$(ffp -v error -select_streams v:0 -read_intervals '%+#120' -show_entries packet=duration -of csv=p=0 "$IN" 2>/dev/null | \
-    grep -v -e N/A -e '^$' | sort | uniq -c | sort -rn | head -2 | awk '{printf "%s%sx%sms", sep, $1, $2; sep=" "}')
+    grep -v -e N/A -e '^$' | sort | uniq -c | sort -rn | awk 'NR<=2' | awk '{printf "%s%sx%sms", sep, $1, $2; sep=" "}')
   fr=$(ffp1 -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$IN" 2>/dev/null)
   num=${fr%%/*}; den=${fr##*/}
   case "$den" in
@@ -252,8 +252,8 @@ probe_struct () {
       "$PF_CODED_RATE_SPAN" "$PF_RATE_METHOD" "$PF_RATIO" "$PF_RATIO_HYP" "$PF_PPF" "$PF_DEPTH_PICS" "$PF_DEPTH_TS" "$PF_DECL_DEPTH" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_CLASS" "${PF_DTS_SHORT:-unknown}" "$PF_DTS_SOURCE" "$nprog" "$tagadv_json"
   else
     # values are single tokens (eval-safe + greppable); PR_REC_CMD has spaces -> quote it
-    printf 'PR_PLUGIN_VERSION=%s\nPR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_VNATIVE=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
-      "$(rtm_plugin_version)" "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
+    printf 'PR_PLUGIN_VERSION=%s\nPR_CONTAINER=%s\nPR_VCODEC=%s\nPR_VTAG=%s\nPR_PIX_FMT=%s\nPR_VNATIVE=%s\nPR_IS_AVC=%s\nPR_ACODEC=%s\nPR_AUDIO_ACTION=%s\nPF_PAFF=%s\nPF_FIELD_RATE=%s\nPF_TIMESCALE=%s\nPF_CODED_RATE=%s\nPF_NOMINAL_FPS=%s\nPF_NOPTS_FRAC=%s\nPF_HALF_TS=%s\nPF_REORDER=%s\nPF_DUP_PTS=%s\nPR_COLOR_PRIMARIES=%s\nPR_COLOR_TRANSFER=%s\nPR_COLOR_SPACE=%s\nPR_COLOR_RANGE=%s\nPR_REC_RUNG=%s\nPR_REC_CMD='"'"'%s'"'"'\n' \
+      "$(rtm_plugin_version)" "$container" "$vcodec" "$vtag" "${pixfmt:-unknown}" "$vnat" "${isavc:-na}" "${acodec:-none}" "$aaction" "$PF_PAFF" "$PF_FIELD_RATE" "$PF_TIMESCALE" "$PF_CODED_RATE" "$PF_NOMINAL_FPS" "$PF_NOPTS_FRAC" "$PF_HALF_TS" "$PF_REORDER" "${PF_DUP_PTS:-0}" "${cp:-unknown}" "${ct:-unknown}" "${cs:-unknown}" "${cr:-unknown}" "$rung" "$cmd"
     # P1.1/P1.2/P1.5 — additive only: the unit-aware reorder depth, which ratio
     # hypothesis decided PAFF, the essence-measured pictures-per-frame, and the
     # legacy span-derived rate beside the modal one. Nothing above was renamed.
@@ -477,6 +477,12 @@ echo "coded pictures per frame (essence probe)=${PF_PPF}   DTS provenance=${PF_D
 # overread that pushed the file across a routing cutoff. Print the raw counts
 # and name the window; the whole-file count is settled at the rung, not here.
 echo "untimestamped packets: ${PF_NOPTS}/${PF_NOPTS_N} = fraction ${PF_NOPTS_FRAC} (head window; whole-file count decided at the rung) (half_ts=$PF_HALF_TS)   reorder pyramid: $PF_REORDER (max PTS-DTS ${PF_MAXOFF_TICKS} ticks${DTSQ})"
+# A number this driver ROUTES on is a number it prints (1.17.0): PF_DUP_PTS is
+# the head-window count of pictures claiming a display slot another already
+# holds, and it is one of the two arms of pf_poc_routable. Scoped at the point
+# of print — diagnose.sh takes the authoritative whole-file census.
+{ [ "${PF_DUP_PTS:-0}" -gt 0 ] 2>/dev/null; } && \
+  echo "duplicate display slots: ${PF_DUP_PTS} in the head window — the container's timestamps contradict a display order the bitstream may state outright; scripts/diagnose.sh takes the whole-file census and routes it"
 echo "reorder depth: ${PF_DEPTH_PICS} coded picture(s) vs declared ${PF_DECL_DEPTH} frame(s) x ${PF_PPF} = ${PF_DEPTH_EXPECTED}  -> ${PF_DEPTH_CLASS}  (dts-short=${PF_DTS_SHORT:-unknown})"
 pf_depth_note "$PF_DEPTH_CLASS" "$PF_DEPTH_PICS" "$PF_DECL_DEPTH" "$PF_PPF" "$PF_DEPTH_EXPECTED" "$PF_DEPTH_TS"
 pf_hyp_note "${PF_RATIO_HYP:-none}" "${PF_RATIO:-0}" "${PF_PPF:-unknown}" "${PF_NOMINAL_FPS:-0}" "${PF_FIELD_RATE:-unknown}"
@@ -579,7 +585,7 @@ echo "-- ffmpeg version & behavior deltas --"
 # prose: 115 §3 re-measures every tool whose -version is read through a pipe
 # and fails the bench if one outgrows the buffer, or if an unmeasured tool
 # joins the list.
-ver=$(ffmpeg -version 2>/dev/null | head -1 | grep -oE "[0-9]+\.[0-9]+" | head -1 || true)
+ver=$(ffmpeg -version 2>/dev/null | awk 'NR<=1' | grep -oE "[0-9]+\.[0-9]+" | awk 'NR<=1' || true)
 major=${ver%%.*}
 echo "ffmpeg $ver"
 if [ "${major:-0}" -lt 5 ]; then

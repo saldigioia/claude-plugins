@@ -176,9 +176,9 @@ else
   set +e; bash "$SELF_DIR/ts-health.sh" "$IN" --kv > "$TMP/src.tsh" 2>/dev/null; thrc=$?; set -e
 fi
 [ -s "$TMP/src.tsh" ] || { echo "ts-health could not scan the source (rc=$thrc)" >&2; exit 1; }
-S_BACK=$(sed -n 's/^TSH_BACK=//p' "$TMP/src.tsh" | head -1)
-S_DUP=$(sed -n 's/^TSH_DUP=//p' "$TMP/src.tsh" | head -1)
-S_SCR=$(sed -n 's/^TSH_SCRAMBLED=//p' "$TMP/src.tsh" | head -1)
+S_BACK=$(sed -n 's/^TSH_BACK=//p' "$TMP/src.tsh" | awk 'NR<=1')
+S_DUP=$(sed -n 's/^TSH_DUP=//p' "$TMP/src.tsh" | awk 'NR<=1')
+S_SCR=$(sed -n 's/^TSH_SCRAMBLED=//p' "$TMP/src.tsh" | awk 'NR<=1')
 if [ "${S_SCR:-0}" -gt 0 ]; then echo "source is scrambled — nothing here can recover it" >&2; exit 1; fi
 if [ "${S_BACK:-0}" -gt 0 ] || [ "${S_DUP:-0}" -gt 0 ]; then
   echo "timeline rot in the source (backward DTS=$S_BACK duplicate DTS=$S_DUP, whole-file):" >&2
@@ -187,7 +187,7 @@ if [ "${S_BACK:-0}" -gt 0 ] || [ "${S_DUP:-0}" -gt 0 ]; then
   echo "(it picks pairfill/derive-dts/rebuild by the measured profile)." >&2
   exit 2
 fi
-S_PREKEY=$(sed -n 's/^TSH_PREKEY=//p' "$TMP/src.tsh" | head -1)
+S_PREKEY=$(sed -n 's/^TSH_PREKEY=//p' "$TMP/src.tsh" | awk 'NR<=1')
 # mid-GOP start: a stream-copy re-wrap never emits the video packets that
 # precede the first keyframe, so verify-source's packet census reads
 # v_drop=<prekey> and FAILS — measured on the house late-sps fixture

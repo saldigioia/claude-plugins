@@ -176,7 +176,7 @@ apply_metadata () {  # $1 = finished .mov to tag in place via a temp
   # diagnostic move reported a decode failure that did not exist.
   local pre; pre="$(rtm_sidecar "$1" premeta)"
   mv -f "$1" "$pre"
-  local rc; set +e; bash "$SELF_DIR/metadata.sh" "$pre" "$1" "${MDARGS[@]}" | sed 's/^/   /'; rc=${PIPESTATUS[0]}; set -e
+  local rc; rtm_hold; bash "$SELF_DIR/metadata.sh" "$pre" "$1" "${MDARGS[@]}" | sed 's/^/   /'; rc=${PIPESTATUS[0]}; rtm_resume
   [ "$rc" -eq 0 ] || { echo ">> metadata step failed (rc=$rc); untagged build kept at $pre" >&2; return "$rc"; }
   rm -f "$pre"
 }
@@ -439,7 +439,7 @@ if [ "${PREKEY:-0}" -gt 0 ]; then
     echo "** mid-GOP start: trimming pre-roll to first IDR ($PREKEY pre-keyframe packets) — --no-idr-trim to skip"
     b="$(basename "$IN")"; ext="${b##*.}"; [ "$ext" = "$b" ] && ext=ts
     TRIMTMP="${OUT%.*}.idrtrim.tmp.$ext"
-    set +e; bash "$SELF_DIR/trim-to-idr.sh" "$IN" "$TRIMTMP" | sed 's/^/   /'; trc=${PIPESTATUS[0]}; set -e
+    rtm_hold; bash "$SELF_DIR/trim-to-idr.sh" "$IN" "$TRIMTMP" | sed 's/^/   /'; trc=${PIPESTATUS[0]}; rtm_resume
     if [ "$trc" -eq 0 ] && [ -s "$TRIMTMP" ]; then
       IN="$TRIMTMP"; IDRTRIM=$PREKEY
       # Declare it: this file matches the `idrtrim.tmp` derived-name shape the
@@ -478,11 +478,40 @@ trim_cleanup () {  # $1 = final rc
   fi
 }
 
-# --- field-coded: hand the timeline repair to the tested ladder driver ---
-if [ "$PF_PAFF" = yes ]; then
+# --- a stream that may need a TIMELINE REPAIR goes to the ladder driver ---
+# Until 1.17.0 the only ticket to auto.sh was PF_PAFF=yes, and that is a claim
+# about how the pictures are CODED, not about whether the timeline is broken.
+# Measured 2026-08-30: a PROGRESSIVE capture with 24062 of 138626 pictures
+# stamped one frame late took the direct remux.sh path, hard-stopped on the
+# muxer's 24062 timeline confessions, and exited 1 — while the rung built to
+# repair exactly that defect sat one branch away, unreached. The escalation
+# ladder never ran, so nothing ever measured whether the file was repairable.
+#
+# So the second ticket is the measured contradiction itself. pf_poc_routable is
+# the SHARED predicate (lib-paff.sh) that diagnose.sh recommends on and auto.sh
+# dispatches on — asking it here is what keeps the front door from drifting
+# from the ladder behind it (IV.1). The head-window PF_DUP_PTS gates the
+# trace_headers probe so the seconds are only spent on a stream that has
+# something to repair.
+LADDER=0; LADDER_WHY=paff
+[ "$PF_PAFF" = yes ] && LADDER=1
+if [ "$LADDER" -eq 0 ] && [ "${PR_VCODEC:-na}" = h264 ] \
+   && [ "${PF_REORDER:-no}" = yes ] && [ "${PF_DUP_PTS:-0}" -gt 0 ] 2>/dev/null; then
+  eval "$(pf_poc_probe "$IN")" || true
+  if pf_poc_routable; then LADDER=1; LADDER_WHY=poc; fi
+fi
+if [ "$LADDER" -eq 1 ]; then
+  if [ "$LADDER_WHY" = poc ]; then
+    echo "   progressive H.264 whose container timestamps CONTRADICT the display order the"
+    echo "   bitstream itself declares (${PF_DUP_PTS} doubled display slot(s) in the head window,"
+    echo "   pic_order_cnt readable: poc_type=${PCAP_POC_TYPE:--1}) -> timeline repair via auto.sh."
+    echo "   A plain copy would hand the muxer a timeline it has to invent around; Rung 3-POC"
+    echo "   re-derives every display position from pic_order_cnt and gates the result."
+  else
   echo "   field-coded (PAFF) -> timeline repair via auto.sh (routed by timestamp profile:"
   echo "   pair-fill keeps real PTS + original audio; the rebuild decodes audio to PCM)"
-  if [ "${PF_HALF_TS:-no}" = no ] && [ "${PF_REORDER:-no}" = yes ]; then
+  fi
+  if [ "$LADDER_WHY" = paff ] && [ "${PF_HALF_TS:-no}" = no ] && [ "${PF_REORDER:-no}" = yes ]; then
     # full-TS reordered PAFF goes through auto's COPY rung — remux.sh under it,
     # so every audio track survives (the WO 3.3 `all` default), but auto is the
     # ladder driver, not the deliverable builder: no dual-track pair on this
@@ -492,12 +521,13 @@ if [ "$PF_PAFF" = yes ]; then
     echo "   the dual-track deliverable, run scripts/dual-track.sh on the source after"
     echo "   this verifies OK (same copy mux + PCM access track)."
   fi
-  [ "$ALWAYS" -eq 1 ] && echo "   note: --always-dual does not apply on the PAFF path — audio policy comes from the repair rung (pairfill dual-tracks non-native codecs by itself)."
+  [ "$ALWAYS" -eq 1 ] && echo "   note: --always-dual does not apply on the ladder path — audio policy comes from the repair rung (pairfill dual-tracks non-native codecs by itself)."
   if [ "$AKEEP" != all ]; then
     # REJECT, never silently ignore (1.15.2 field UX trap): 1.15.1 accepted
     # the flag here, printed a mid-scroll note, and built a:0 regardless — the
-    # operator asked for one track and shipped another.
-    echo ">> REFUSED (--audio-keep $AKEEP): the flag is not honoured on the PAFF path —" >&2
+    # operator asked for one track and shipped another. auto.sh has no
+    # --audio-keep on EITHER ladder ticket, so the refusal covers both.
+    echo ">> REFUSED (--audio-keep $AKEEP): the flag is not honoured on the ladder path —" >&2
     echo "   audio policy comes from the rung (repair rungs build a:0 and pairfill warns" >&2
     echo "   on multi-track sources; the copy rung keeps every track). Re-run without" >&2
     echo "   --audio-keep, or curate tracks on the finished .mov afterwards (the remux" >&2
@@ -556,8 +586,8 @@ if [ "$plan_rc" -ne 0 ] || ! printf '%s\n' "$PLANOUT" | grep -q '^RMX_PLAN '; th
   echo "   keep-set from its absence (an empty plan is not 'no audio'). Nothing built."
   case "$plan_rc" in 11) exit 11;; 2) exit 2;; *) exit 1;; esac   # stray codes map to FAIL (contract)
 fi
-KEPT=$(printf '%s\n' "$PLANOUT" | sed -n 's/^RMX_PLAN .*kept=\([^ ]*\).*/\1/p' | head -1)
-DROPPED=$(printf '%s\n' "$PLANOUT" | sed -n 's/^RMX_PLAN .*dropped=\([^ ]*\).*/\1/p' | head -1)
+KEPT=$(printf '%s\n' "$PLANOUT" | sed -n 's/^RMX_PLAN .*kept=\([^ ]*\).*/\1/p' | awk 'NR<=1')
+DROPPED=$(printf '%s\n' "$PLANOUT" | sed -n 's/^RMX_PLAN .*dropped=\([^ ]*\).*/\1/p' | awk 'NR<=1')
 [ "$KEPT" = none ] && KEPT=""
 [ "$DROPPED" = none ] && DROPPED=""
 trkinfo () {  # $1 = 1 for kept rows, 0 for dropped -> "ord:codec:layout,..."
@@ -698,7 +728,7 @@ if [ "$PLAYCHECK_DUE" -eq 1 ] && [ "$rc" -ne 1 ] && [ -f "$OUT" ]; then
       # MP4 — SSIM 0.9175+ on the timestamps that failed as .mov.
       if [ "$MP4SWAP" -eq 1 ]; then
         echo "-- container swap (--mp4-swap) --"
-        set +e; bash "$SELF_DIR/mp4-swap.sh" "$IN" "${OUT%.*}.mp4" $FULL | sed 's/^/   /'; swrc=${PIPESTATUS[0]}; set -e
+        rtm_hold; bash "$SELF_DIR/mp4-swap.sh" "$IN" "${OUT%.*}.mp4" $FULL | sed 's/^/   /'; swrc=${PIPESTATUS[0]}; rtm_resume
         case "$swrc" in
           0)  echo "   >> the CONTAINER SWAP WORKS: ${OUT%.*}.mp4 is verified lossless AND renders"
               echo "      correctly. The .mov beside it is the same bitstream in the container"

@@ -48,7 +48,7 @@ esac; done
 [ "${#INPUTS[@]}" -gt 0 ] || { echo "usage: batch.sh INPUT... [--out DIR] [-- AUTO_OPTS...]" >&2; exit 2; }
 [ -z "$OUTDIR" ] || mkdir -p "$OUTDIR"
 
-ffver=$(ffmpeg -version 2>/dev/null | head -1 | grep -oE "[0-9]+\.[0-9]+(\.[0-9]+)?" | head -1 || echo "?")
+ffver=$(ffmpeg -version 2>/dev/null | awk 'NR<=1' | grep -oE "[0-9]+\.[0-9]+(\.[0-9]+)?" | awk 'NR<=1' || echo "?")
 EXTS="ts mpg mpeg vob mkv mov mp4 m2ts mts m4v"
 
 # expand inputs (dirs -> matching files); literal-glob safe (test -f filters non-matches)
@@ -65,7 +65,7 @@ src_id () { local f="$1" sz mt
   sz=$(stat -c %s "$f" 2>/dev/null || stat -f %z "$f" 2>/dev/null || echo 0)
   mt=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)
   printf '%s:%s' "$sz" "$mt"; }
-kvget () { grep -E "^$2=" "$1" 2>/dev/null | head -1 | cut -d= -f2- || true; }
+kvget () { grep -E "^$2=" "$1" 2>/dev/null | awk 'NR<=1' | cut -d= -f2- || true; }
 
 okc=0; revc=0; refc=0; failc=0; skipc=0; attention=()
 for src in "${files[@]}"; do
@@ -95,7 +95,7 @@ for src in "${files[@]}"; do
   # the two rungs whose provenance matters most. The greedy '.*rung=' correctly
   # targets the LAST rung= field (best_rung= sits before it by contract).
   rung=$(printf '%s' "$summ" | sed -n 's/.*rung=\([A-Za-z0-9]*\).*/\1/p'); rung=${rung:-none}
-  vhash=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$src" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | head -1 || true)
+  vhash=$(ffmpeg -nostdin -v error "${FF_INPUT_OPTS[@]}" -i "$src" -map 0:v:0 -c copy -f streamhash -hash md5 - 2>/dev/null | sed -n 's/.*MD5=//p' | awk 'NR<=1' || true)
   { echo "PROV_SOURCE=$src"; echo "PROV_OUTPUT=$out"; echo "PROV_SRC_ID=$id"
     echo "PROV_SRC_VHASH=${vhash:-na}"; echo "PROV_RUNG=$rung"; echo "PROV_VERDICT=$verd"
     echo "PROV_FFMPEG=$ffver"; echo "PROV_WHEN=$(date -u +%Y-%m-%dT%H:%M:%SZ)"

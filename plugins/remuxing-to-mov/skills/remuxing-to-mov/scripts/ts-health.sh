@@ -133,7 +133,7 @@ crp=$(grep -ci 'packet corrupt' "$TMP/t.log" || true)
 pes=$(grep -ci 'pes packet size mismatch' "$TMP/t.log" || true)
 scr=$(grep -ci 'scrambled' "$TMP/t.log" || true)
 say "   continuity errors=$cc  corrupt(TEI) packets=$crp  PES size mismatches=$pes  scrambled=$scr"
-[ "$MODE" != --kv ] && [ $((cc + crp + pes)) -gt 0 ] && sort "$TMP/t.log" | uniq -c | sort -rn | head -4 | sed 's/^/   /'
+[ "$MODE" != --kv ] && [ $((cc + crp + pes)) -gt 0 ] && sort "$TMP/t.log" | uniq -c | sort -rn | awk 'NR<=4' | sed 's/^/   /'
 
 # --- pass 2: whole-file packet scan, all streams, integer ticks -----------------
 say "-- timeline (whole-file packet scan, demux only) --"
