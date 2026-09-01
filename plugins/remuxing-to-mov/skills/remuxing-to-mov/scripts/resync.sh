@@ -62,7 +62,17 @@ esac; done
 rtm_sibling_guard "$IN" "$OUT" || exit 2   # TIER 1 T1.11 write beside the source, never onto it (one writer: lib-mux.sh)
 
 vcodec=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$IN" 2>/dev/null)
-VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
+VTAG=""; VBSF=()
+if [ "$vcodec" = hevc ]; then
+  VTAG="-tag:v hvc1"
+  # PS-less hvcC stub reroute (1.19.0; full rationale at remux.sh's twin site).
+  if rtm_hevc_ps_stub "$IN"; then
+    echo "** HEVC decoder config is a PS-less hvcC stub — rerouting via the inline"
+    echo "   hevc_mp4toannexb bsf (same mux, same timestamps; see remux.sh / known-limits.md)."
+    echo "RMX_HVCC route=annexb-bsf reason=ps-stub"   # machine-readable (additive, 1.19.0)
+    VBSF=(-bsf:v hevc_mp4toannexb)
+  fi
+fi
 cp=$(ffp1 -v error -select_streams v:0 -show_entries stream=color_primaries -of default=nw=1:nk=1 "$IN" 2>/dev/null)
 CFLAG=""; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && CFLAG="+write_colr"
 MOVFLAGS=$(rtm_movflags "$CFLAG")   # 1.16.7: faststart by default, knob announced
@@ -182,7 +192,7 @@ rtm_writer_preflight "$OUT" "$IN" || exit 2
 PART="$(rtm_part "$OUT")"   # extension-keeping (D6) + unique per process (A2)
 # shellcheck disable=SC2086
 ffmpeg -nostdin -v error -fflags +genpts "${FF_INPUT_OPTS[@]}" -i "$IN" \
-  -map 0:v:0 -c:v copy $VTAG \
+  -map 0:v:0 -c:v copy $VTAG ${VBSF[@]+"${VBSF[@]}"} \
   $AMAP -af "aresample=async=1:first_pts=0" -c:a "$PCM" \
   ${MOVF[@]+"${MOVF[@]}"} -f mov "$PART"
 # POST-MUX CENSUS (D5, 1.13): ASPECS above IS the audio plan this run mapped —

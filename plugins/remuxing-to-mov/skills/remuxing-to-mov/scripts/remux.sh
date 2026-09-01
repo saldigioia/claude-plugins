@@ -377,7 +377,30 @@ if [ "$DRCDEC" -eq 1 ]; then
 fi
 
 # --- video tag (HEVC needs hvc1 for QuickTime; vcodec probed at the gate above) ---
-VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
+VTAG=""; VBSF=()
+if [ "$vcodec" = hevc ]; then
+  VTAG="-tag:v hvc1"
+  # PS-less hvcC stub reroute (1.19.0, REMUX-PIPELINE retrace 2026-09-01).
+  # Some MKV muxers write CodecPrivate as an hvcC STUB with numOfArrays=0 —
+  # VPS/SPS/PPS live in-band, length-prefixed. hvc1 REQUIRES them in hvcC, and
+  # ffmpeg's movenc, handed the stub, silently writes an EMPTY 8-byte hvcC:
+  # mux exit 0, bits perfect, file undecodable (585,358 decode errors on the
+  # field capture). The fix is ONE inline bsf: hevc_mp4toannexb converts the
+  # packets to Annex-B with the in-band sets, and movenc then builds the full
+  # hvcC exactly as it does for any .ts source. Inline in the SAME mux, the
+  # bsf leaves the timestamp column untouched (measured 2026-09-01: max
+  # |delta| 0.000000 over the bench columns) — the restamping that condemned
+  # the raw-elementary route came from the intermediate FILE, not from the
+  # Annex-B conversion. mux_census's dcfg check judges the result either way.
+  if rtm_hevc_ps_stub "$IN"; then
+    echo "** HEVC decoder config is a PS-less hvcC stub (numOfArrays=0; parameter sets"
+    echo "   in-band). A plain hvc1 copy writes an EMPTY hvcC and the .mov cannot decode."
+    echo "   Rerouting through the inline hevc_mp4toannexb bsf — same mux, same"
+    echo "   timestamps; the muxer rebuilds the config from the in-band sets."
+    echo "RMX_HVCC route=annexb-bsf reason=ps-stub"   # machine-readable (additive, 1.19.0)
+    VBSF=(-bsf:v hevc_mp4toannexb)
+  fi
+fi
 # On the MP4 container-swap rung, MPEG-2 is written explicitly as 'mp4v' (D2).
 # ffmpeg's MP4 muxer already picks mp4v+esds by default for MPEG-2 (verified on
 # this bench, ffmpeg 9.0.1) — the explicit tag is self-documentation: THIS entry,
@@ -400,7 +423,7 @@ mux_once () {  # mux_once INPUT_OPT... — one attempt; only the probe window va
   # shellcheck disable=SC2086
   ffmpeg -nostdin -y -hide_banner -nostats $GENPTS $DRC "$@" -i "$IN" -map 0:v:0 \
     ${AARGS[@]+"${AARGS[@]}"} \
-    -c:v copy $VTAG \
+    -c:v copy $VTAG ${VBSF[@]+"${VBSF[@]}"} \
     ${TSCALE:+-video_track_timescale "$TSCALE"} \
     ${MOVF[@]+"${MOVF[@]}"} -f "$FMT" \
     "$PART" 2>"$MUXLOG"
@@ -461,6 +484,21 @@ if [ "${conf:-0}" -gt 0 ]; then
   echo "   half-timestamped PAFF -> scripts/pairfill-paff.sh; PTS-complete reordered"
   echo "   (any codec — DTS absent/reconstructed/rotten alike) -> scripts/derive-dts.sh;"
   echo "   timestamp-free H.264 -> scripts/rebuild-paff.sh (pairfill/rebuild are H.264-only)."
+  # Container-aware note (1.19.0, REMUX-PIPELINE retrace 2026-09-01): a
+  # Matroska DTS column is the DEMUXER'S RECONSTRUCTION — MKV stores no DTS —
+  # so a non-monotonic-DTS confession on an MKV source can describe ffmpeg's
+  # model rather than the stream. The field case: this stop fired, diagnose
+  # then cleared the timeline as sound (0 unstamped, 0 dups, depth matched),
+  # and the REAL fault was the decoder config — the message pointed a session
+  # at the wrong subsystem for most of an hour. The stop stays (the artifact's
+  # timeline is still unproven); the pointer stops lying about where to look.
+  case "$(ffp1 -v error -show_entries format=format_name -of default=nw=1:nk=1 "$IN" 2>/dev/null || true)" in *matroska*|*webm*)
+    echo "   NOTE (Matroska source): MKV stores NO DTS — the DTS column here is the"
+    echo "   demuxer's RECONSTRUCTION, so this confession can describe ffmpeg's model,"
+    echo "   not the stream (measured 2026-09-01: diagnose cleared a timeline this stop"
+    echo "   indicted; the real fault was an empty decoder config). Run verify.sh on the"
+    echo "   kept part FIRST; reach for a timeline repair only if a gate names one.";;
+  esac
   exit 1
 fi
 RMX_CONF_REVIEW=0

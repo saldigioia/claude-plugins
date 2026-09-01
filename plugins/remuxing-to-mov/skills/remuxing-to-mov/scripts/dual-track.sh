@@ -113,7 +113,19 @@ case "$acodec" in
             esac;;
 esac
 
-VTAG=""; [ "$vcodec" = hevc ] && VTAG="-tag:v hvc1"
+VTAG=""; VBSF=()
+if [ "$vcodec" = hevc ]; then
+  VTAG="-tag:v hvc1"
+  # PS-less hvcC stub reroute (1.19.0; full rationale at remux.sh's twin site):
+  # hvc1 + a numOfArrays=0 stub = silent EMPTY hvcC, undecodable output. The
+  # inline bsf rebuilds the config from the in-band sets; timestamps untouched.
+  if rtm_hevc_ps_stub "$IN"; then
+    echo "** HEVC decoder config is a PS-less hvcC stub — rerouting via the inline"
+    echo "   hevc_mp4toannexb bsf (same mux, same timestamps; see remux.sh / known-limits.md)."
+    echo "RMX_HVCC route=annexb-bsf reason=ps-stub"   # machine-readable (additive, 1.19.0)
+    VBSF=(-bsf:v hevc_mp4toannexb)
+  fi
+fi
 CFLAG=""; { [ -n "$cp" ] && [ "$cp" != unknown ]; } && CFLAG="+write_colr"
 MOVFLAGS=$(rtm_movflags "$CFLAG")   # 1.16.7: faststart by default, knob announced
 MOVF=(); [ -n "$MOVFLAGS" ] && MOVF=(-movflags "$MOVFLAGS")
@@ -137,7 +149,7 @@ build_from () {  # build_from SRC  -- decode a:0 to PCM (track1, default) + copy
     # shellcheck disable=SC2086
     ffmpeg -nostdin -y -hide_banner -nostats $DRC "$@" -i "$SRC" \
       -map 0:v:0 -map 0:a:0 -map 0:a:0 \
-      -c:v copy $VTAG -c:a:0 $PCMC -c:a:1 copy \
+      -c:v copy $VTAG ${VBSF[@]+"${VBSF[@]}"} -c:a:0 $PCMC -c:a:1 copy \
       -disposition:a:0 default -disposition:a:1 0 \
       -metadata:s:a:0 title="$T1" -metadata:s:a:0 language=eng \
       -metadata:s:a:1 title="$T2" -metadata:s:a:1 language=eng \

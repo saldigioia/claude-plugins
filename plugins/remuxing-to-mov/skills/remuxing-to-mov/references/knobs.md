@@ -72,6 +72,8 @@ Added in 1.15.0 (source clinic):
 | `PF_SCAN_WINDOW` | `lib-paff.sh` | The one named window constant for both windowed advisory scans (P1.1; default 5000). |
 | `PF_SPS_NOISE_MAX`, `PF_PPF_WINDOW` | `lib-paff.sh` | SPS-parse noise ceiling / PPF probe window bounds. |
 | `RTM_DISK_FREE_KB` | `rtm_free_bytes` (`lib-mux.sh`, WO-1.15.6) | Injected free-space reading in kilobytes (bypasses `df`); a non-numeric value simulates a broken meter (which must announce and proceed, never refuse). |
+| `RTM_TEST_EXTRADATA_HEX` | `rtm_extradata_hex` (`lib-mux.sh`, 1.19.0) | Injected v:0 extradata hex (bypasses ffprobe) — the stub-detector unit lane (test 121). Note it feeds EVERY rtm_extradata_hex call in the process, the census's dcfg read included. |
+| `RTM_TEST_DCFG_BYTES` | `mux_census` decoder-config check (`lib-mux.sh`, 1.19.0) | Injected extradata byte count for the built part — `0` forces the dcfg=empty census FAIL (test 121). |
 | `RTM_LOCK_HELD` | `rtm_lock` (`lib-mux.sh`, WO-1.15.6) | Set by the LOCK ITSELF when a driver acquires (exported lockdir path) so child builders on the same OUT re-enter instead of deadlocking. Driver-set, like `RTM_BACKHAUL_GATED` — never set by humans. |
 
 ## Cost models (measured, so nobody re-pays to rediscover them)

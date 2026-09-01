@@ -4,6 +4,57 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.19.0 — the empty-hvcC class: detect the stub, reroute inline, never bless a config-less part (2026-09-01)
+
+From the operator's REMUX-PIPELINE retrace (3.9 GB HEVC 1080p50 MKV, ~48 min
+for an 11-second build): the MKV's CodecPrivate was a **PS-less hvcC stub**
+(`numOfArrays=0`, parameter sets in-band) and the hardcoded `-tag:v hvc1`
+made movenc **silently write an empty 8-byte hvcC** — mux exit 0, bits
+perfect, file undecodable (585,358 decode errors). The failure surfaced as an
+unrelated DTS confession on a container that stores no DTS, misdirecting the
+session at the timestamp subsystem; and ~16 min (87% of measured machine
+time) went to a dim-scan full decode whose question a demux-only census
+answers.
+
+Four changes, each with the retrace's measurements attached:
+
+**The reroute (remux.sh / dual-track.sh / resync.sh).** `rtm_hevc_ps_stub`
+detects the stub pre-mux (extradata byte 22 == 0) and adds the **inline**
+`hevc_mp4toannexb` bsf to the same mux (`RMX_HVCC route=annexb-bsf`), so
+movenc rebuilds the full config from the in-band sets exactly as it does for
+any `.ts` source. Key measurement (2026-09-01, this bench): inline, the bsf
+leaves the PTS column bit-equal (max |Δ| 0.000000) — the restamping that
+condemned the retrace's Annex-B route came from its raw-elementary
+intermediate FILE, not from the conversion. The retrace's R5 surgery
+(hev1 copy → hvcC extraction → mp4edit → fourcc patch) is preserved in
+known-limits.md as the manual fallback; hev1 itself is recorded as
+diagnostic-only (writes the config, renders no frame in AVFoundation).
+
+**The census tooth (lib-mux.sh).** `mux_census` now refuses to bless ANY
+QTFF part whose h264/hevc extradata is missing/empty — additive
+`dcfg=ok|empty|na` on every `RMX_CENSUS` row, `dcfg=empty` = exit 1 with the
+part kept and the class named. The three-tools-later "output carries no
+video stream" becomes a first-tool verdict.
+
+**The misdirection (remux.sh hard stop).** On Matroska sources the DTS
+confession stop now states that MKV stores no DTS — the column is the
+demuxer's reconstruction — and routes to verify-the-kept-part before any
+timeline repair. The stop itself is unchanged.
+
+**dim-scan --headers.** Demux-only distinct-parameter-set census (H.264/HEVC
+SPS, MPEG-2 sequence header; `DIMSCAN_HDR` machine line): one distinct PS
+proves static coded dimensions (~20× cheaper than the decode sweep); more
+than one is a findings verdict routed to the decode mode, which remains the
+sign-off form. Doctrine additions (SKILL.md): the **cut bench** — prove
+candidate repairs on a ~30 s copy-cut before committing the full file (the
+retrace's R3 played perfectly and only verify-on-the-cut caught it) — and
+never route through a raw elementary intermediate. Verified non-issue
+recorded: the split head sample duration (1+1+318=320 ticks, deterministic
+movenc head behaviour, no time lost). Test:
+`tests/regression.d/121-hvcc-stub-and-headers.sh` (stub predicate on the
+field capture's exact bytes; reroute e2e with the PTS-equality proof; dcfg
+census both ways; the MKV note scoped to Matroska; both dim-scan modes).
+
 ## 1.18.0 — the copy-identity settle: a budget decline stops indicting clean copies (2026-08-31)
 
 The 25-minute clean remux (RESEARCH-EVERYDAY-COST-1.17.md): a 5.15 GB Rung-0

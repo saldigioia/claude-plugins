@@ -14,6 +14,34 @@ Bench for the measurements below: macOS 26.6.1, ffmpeg 9.0.1, 2026-08-14
 
 ## Named limitations
 
+### PS-less hvcC stub (HEVC MKV) → silent empty hvcC under hvc1 — auto-rerouted since 1.19.0
+
+Some MKV muxers write the HEVC `CodecPrivate` as an **hvcC stub with
+`numOfArrays = 0`** — no VPS/SPS/PPS; the parameter sets ride in-band,
+length-prefixed. `hvc1` requires them in `hvcC`, and ffmpeg's movenc, handed
+the stub under `-tag:v hvc1`, **silently writes an empty 8-byte `hvcC`**: the
+mux exits 0, the bits are perfect, and the `.mov` is undecodable (measured
+2026-09-01, REMUX-PIPELINE retrace: 3.9 GB HEVC 1080p50 MKV, 585,358 decode
+errors; `ffprobe` rejects the file outright, which is why the failure
+surfaced downstream as "output carries no video stream"). Two extra measured
+facts from the same retrace: **`hev1` writes the config correctly but
+AVFoundation renders no frame under it** (Apple requires `hvc1`), and the
+Annex-B → raw-elementary round-trip repair **restamps** (gate (b) caught it;
+`min PTS = -1024` vs declared 0) — the timestamp loss comes from the raw
+intermediate FILE, not from Annex-B conversion.
+
+Since 1.19.0 the builders (`remux.sh`/`dual-track.sh`/`resync.sh`) detect the
+stub pre-mux (`rtm_hevc_ps_stub`) and reroute through the **inline**
+`hevc_mp4toannexb` bsf in the same mux — movenc rebuilds the full `hvcC` from
+the in-band sets exactly as it does for any `.ts` source, and the PTS column
+is untouched (measured max |Δ| 0.000000). `mux_census` independently refuses
+to bless any QTFF part whose h264/hevc extradata is missing (`dcfg=empty`,
+part kept). **Manual fallback** if a source defeats the bsf route: the R5
+surgery from the retrace — `hev1` exact copy → derive a real `hvcC` from a
+30 s cut (`hevc_mp4toannexb` → `MP4Box` → extract the box) → `mp4edit
+--replace …/hvcC` → 4-byte fourcc patch `hev1`→`hvc1` → full verify. Tested
+recipe in REMUX-PIPELINE.md §4 (plugin root, if kept) / CHANGELOG 1.19.0.
+
 ### 33-bit PTS wraparound (~26.5 h)
 
 MPEG-TS carries PES PTS/DTS as **33-bit** counters at 90 kHz, so the clock
@@ -437,6 +465,18 @@ Only an **explicit template** obeys the variable. The tree has 14 bare
   sites for a knob nobody has asked for, so it is written down instead.
 
 ## Verified non-issues (do not "fix" these)
+
+### A split head sample duration in the MOV output (e.g. histogram `N×320, 2×1, 1×318`)
+
+Measured 2026-09-01 (REMUX-PIPELINE retrace, caveat 4): a source with
+uniform 20 ms packet durations produced a MOV whose first frame's ticks were
+split across three samples — `1 + 1 + 318 = 320`, exactly one frame's worth.
+**No time is lost or invented**; it reproduces deterministically on an
+independent cut of the same source. This is movenc head behaviour, not
+damage. Verify gate (d)'s near-zero-duration counter may report 1–2 tiny
+durations on such a file and still pass — that is the counter working as
+designed (a spray of near-zero durations is the invented-timeline signature;
+a bounded head split summing to one frame is not a spray).
 
 ### ADTS AAC → MOV copy: the bitstream filter is automatic
 

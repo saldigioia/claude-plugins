@@ -475,6 +475,40 @@ rtm_census_review () {
   [ "$rc" -eq 10 ]
 }
 
+# --- decoder-config helpers (1.19.0, REMUX-PIPELINE retrace 2026-09-01) ------
+# The measured class: an MKV whose CodecPrivate is a PS-less hvcC STUB
+# (numOfArrays=0; VPS/SPS/PPS live in-band, length-prefixed). ffmpeg's movenc,
+# handed that stub under -tag:v hvc1, silently writes an EMPTY 8-byte hvcC —
+# the .mov carries no decoder configuration and is undecodable, while the mux
+# exits 0 and every essence gate passes (the bits are perfect). Two teeth:
+# the builders detect the stub pre-mux and reroute (remux.sh/dual-track.sh/
+# resync.sh), and mux_census below refuses to bless ANY QTFF part whose
+# h264/hevc extradata is missing/empty — the after-the-fact catch that turns
+# a three-tools-later "output carries no video stream" into a named verdict.
+
+rtm_extradata_hex () {  # FILE -> v:0 extradata as one hex string ("" when none)
+  # RTM_TEST_EXTRADATA_HEX injects the reading (unit lane; knobs.md).
+  if [ -n "${RTM_TEST_EXTRADATA_HEX:-}" ]; then printf '%s' "$RTM_TEST_EXTRADATA_HEX"; return 0; fi
+  # -show_data hex dump: 'OFFSET: ' at col 1-10, 39 cols of hex groups, then
+  # the ascii gutter. Slice by COLUMN, not by field — the ascii column can
+  # contain hex-looking runs that a field split would swallow.
+  ffprobe -v error -select_streams v:0 -show_streams -show_data "$1" 2>/dev/null | \
+  awk 'BEGIN{f=0}
+       /^extradata=/{f=1;next}
+       f && /^[0-9a-f]{8}:/ { h=substr($0,11,39); gsub(/[^0-9a-fA-F]/,"",h); s=s h; next }
+       f {f=0}
+       END{ printf "%s", s }'
+}
+
+rtm_hevc_ps_stub () {  # FILE -> rc 0 when v:0 extradata is an hvcC with numOfArrays==0
+  local hx; hx=$(rtm_extradata_hex "$1")
+  [ -n "$hx" ] || return 1                 # no extradata at all: the annexb class, handled by movenc itself
+  [ "${#hx}" -ge 46 ] || return 1          # a full hvcC header is 23 bytes
+  [ "${hx:0:2}" = "01" ] || return 1       # hvcC configurationVersion
+  [ "${hx:44:2}" = "00" ] || return 1      # byte 22 = numOfArrays; 0 = the PS-less stub
+  return 0
+}
+
 # mux_census FILE PLANNED_N PLANNED_CODECS_CSV [STAGE] [SOURCE]
 #   PLANNED_N            how many streams the builder mapped (its own plan)
 #   PLANNED_CODECS_CSV   expected codec_name per output stream; "?" for a slot
@@ -515,6 +549,34 @@ rtm_census_review () {
 mux_census () {
   local f="${1:?mux_census needs FILE}" wantn="${2:-}" wantc="${3:-}" stage="${4:-mux}" src="${5:-}"
   local gotc gotn cverd=na chapn=0 surptag=none
+  # decoder-config census (1.19.0): a QTFF part whose h264/hevc video carries
+  # no/empty extradata (avcC/hvcC) is undecodable however perfect its bits —
+  # the empty-hvcC class (REMUX-PIPELINE retrace 2026-09-01: a 145-byte config
+  # was owed, an 8-byte empty box was written, and the failure surfaced three
+  # tools later as "output carries no video stream"). Checked FIRST: nothing
+  # else this census says matters if the video has no decoder config.
+  local dcfg=na dc_fmt dc_vc dc_bytes
+  dc_fmt=$(ffp -v error -show_entries format=format_name -of default=nw=1:nk=1 "$f" 2>/dev/null || true)
+  case "$dc_fmt" in *mov*|*mp4*|*m4a*)
+    dc_vc=$(ffp1 -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$f" 2>/dev/null || true)
+    case "$dc_vc" in h264|hevc)
+      if [ -n "${RTM_TEST_DCFG_BYTES:-}" ]; then dc_bytes="$RTM_TEST_DCFG_BYTES"   # unit lane (knobs.md)
+      else dc_bytes=$(( $(rtm_extradata_hex "$f" | wc -c | tr -d ' ') / 2 )); fi
+      # a real avcC/hvcC is 25+ bytes; the empty box reads as 0 (no extradata)
+      if [ "${dc_bytes:-0}" -ge 20 ]; then dcfg=ok; else dcfg=empty; fi;;
+    esac;;
+  esac
+  if [ "$dcfg" = empty ]; then
+    echo ">> CENSUS FAIL: the output's $dc_vc video carries NO decoder configuration"
+    echo "   (avcC/hvcC extradata ${dc_bytes:-0} bytes — an empty config box). The mux"
+    echo "   exited 0 and the bits may be perfect, but no player can decode this file."
+    echo "   Known cause (measured 2026-09-01): an HEVC source whose hvcC is a PS-less"
+    echo "   stub (numOfArrays=0, parameter sets in-band) muxed under -tag:v hvc1 —"
+    echo "   remux.sh now reroutes that class through the inline hevc_mp4toannexb bsf;"
+    echo "   references/known-limits.md has the class and the manual (surgery) route."
+    echo "RMX_CENSUS stage=$stage planned=$wantn written=NA codecs=na match=MISMATCH surplus=none dcfg=empty"   # machine-readable (dcfg= appended 1.19.0)
+    return 1
+  fi
   local MX_MISS=0 MX_SURP=0 MX_UNEXP=0 MX_NEXP=0 MX_ULIST="" MX_ELIST=""
   # index-deduped: an mpegts output (trim-to-idr) lists every stream twice —
   # a bare top-level view then the in-program one (the same quirk verify.sh and
@@ -573,7 +635,7 @@ mux_census () {
     echo "   Measured 2026-08-15: 'ffmpeg -c copy -f mov' dropped 1 of 3 streams with"
     echo "   nothing but a -v warning line — silently, and every essence gate downstream"
     echo "   passed because it only ever examined the streams that survived."
-    echo "RMX_CENSUS stage=$stage planned=$wantn written=$gotn codecs=$cverd match=MISMATCH surplus=$surptag"   # machine-readable (additive, D5 1.13; surplus= 1.14)
+    echo "RMX_CENSUS stage=$stage planned=$wantn written=$gotn codecs=$cverd match=MISMATCH surplus=$surptag dcfg=$dcfg"   # machine-readable (additive, D5 1.13; surplus= 1.14; dcfg= 1.19.0)
     return 1
   fi
   if [ "${MX_UNEXP:-0}" -gt 0 ]; then
@@ -584,7 +646,7 @@ mux_census () {
     echo "   Only data-class tracks movenc synthesizes from carried metadata (chapter"
     echo "   text/bin_data, tmcd) can pass as expected; a surplus MEDIA stream is a"
     echo "   mapping question a human answers — review before shipping."
-    echo "RMX_CENSUS stage=$stage planned=$wantn written=$gotn codecs=$cverd match=ok surplus=$surptag"   # machine-readable (additive, D5 1.13; surplus= 1.14)
+    echo "RMX_CENSUS stage=$stage planned=$wantn written=$gotn codecs=$cverd match=ok surplus=$surptag dcfg=$dcfg"   # machine-readable (additive, D5 1.13; surplus= 1.14; dcfg= 1.19.0)
     return 10
   fi
   echo "   census: $gotn stream(s) written, plan matched (${gotc:-none})"
@@ -594,6 +656,6 @@ mux_census () {
     case "$MX_ELIST" in *tmcd*)
       echo "   census: +1 tmcd timecode track (movenc-synthesized, expected)";; esac
   fi
-  echo "RMX_CENSUS stage=$stage planned=$wantn written=$gotn codecs=$cverd match=ok surplus=$surptag"   # machine-readable (additive, D5 1.13; surplus= 1.14)
+  echo "RMX_CENSUS stage=$stage planned=$wantn written=$gotn codecs=$cverd match=ok surplus=$surptag dcfg=$dcfg"   # machine-readable (additive, D5 1.13; surplus= 1.14; dcfg= 1.19.0)
   return 0
 }
