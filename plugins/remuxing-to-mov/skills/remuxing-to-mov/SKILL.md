@@ -20,6 +20,77 @@ assumption.
 **Governing rule:** stay in stream copy (`-c copy`) as long as the source and
 MOV allow. Step off it only when a *named* constraint forces you to.
 
+## FAST PATH — read this before anything below
+
+**Base rate: most files are Rung 0.** The bulk of this document describes
+pathology because pathology is where the traps are — not because it is common.
+A source whose probe shows MOV-compatible codecs, frame-coded (non-PAFF)
+video, and no probe advisory needs exactly one command — `scripts/mov.sh IN` —
+which already probes, builds, and runs the cheap verify. That IS the whole
+job. Done means done: report the verify verdict and stop.
+
+**Analysis is gated the same way refusals are** (TIERS.md: *gate the
+assertion, not the attempt* — and an unrequested diagnostic battery on a
+symptomless file is the same category error as an unmeasured refusal). The
+heavy tools — `clean.sh`, `ts-health.sh`, `diagnose.sh`, `attempt-battery.sh`,
+`verify.sh --full` — run only on a **named trigger**:
+
+1. the operator reports a symptom (glitch, drift, silence, "starts at X"), or
+2. a measurement names a finding — a probe advisory, a mux confession, a
+   verify REVIEW/FAIL, a child script's refusal — or
+3. the operator asks for the scan by name.
+
+No trigger → no battery. The attempt is the cheapest diagnostic: ffmpeg's own
+documentation frames streamcopy as the simple path whose failures surface at
+mux time, the mux-confession hard stop catches invented timing, and the
+post-build verify gates (Tier 2, where the anti-hallucination effort lives)
+judge the artifact. "This file might hide something" is a prediction, not a
+finding.
+
+**A REVIEW is a trigger only for the finding it names** (1.18.0, from the
+25-minute clean-remux incident). A REVIEW whose only cause is a gate
+declining on its own cost budget — e.g. (h)/(k) over `RTM_STRUCT_MAX_BYTES`
+when the identity settle did not apply — is a statement about the verifier's
+spending limit, not about the file. Deliver it as done, report the declined
+gates in one line with the settle command and its approximate cost, and run
+the settle only on the operator's ask. Auto-settling a budget REVIEW turns a
+cost budget into an anti-budget: the gate exists to save the parse and
+instead buys the parse plus a full decode.
+
+## What ffmpeg already does on a plain `-c copy` (trusted baseline)
+
+Do not re-derive or pre-verify any of this per file; it is documented and/or
+bench-measured behavior of the tool itself (ffmpeg.org: `ffmpeg.html` §3.1
+Streamcopy, `ffmpeg-formats.html` mov/mp4 muxer). The scripts and gates
+already assume it.
+
+- **Streamcopy is demux → mux, byte-preserving and fast** ("no quality
+  loss"); the documented failure mode is *loud* — "it might not work in some
+  cases because … certain information required by the target container is not
+  available in the source" — i.e. the muxer errors or confesses; you do not
+  pre-predict it (that is TIERS.md Tier 3).
+- **Timestamps carry through**; `-avoid_negative_ts` defaults to `auto`
+  (shifts only when the target format requires it), and the mov muxer's
+  `use_editlist` defaults to `auto` — B-frame reorder/CTS offsets are
+  represented by edit lists without any manual flag.
+- **`video_track_timescale` defaults to 0** = derived from the native stream
+  timebase; only the overflow classes in `references/timeline-repair.md` need
+  it set by hand.
+- **ADTS AAC → ASC is automatic** — no manual `-bsf:a aac_adtstoasc` on any
+  route (measured, `references/known-limits.md` "Verified non-issues").
+- **Annex-B → AVCC/hvcC framing is the mov muxer's own job** on copy-in.
+  `probe.sh`'s Annex-B vs AVCC line is **informational** — it matters for
+  elementary-stream surgery (the PAFF/POC rungs) and for reading extradata,
+  never for deciding whether a plain remux may be attempted.
+- **`colr` is written automatically** by modern ffmpeg (house default:
+  never fabricate tags for `unknown` sources).
+
+The corollary: pre-flight effort belongs to the classes ffmpeg is *documented
+or measured* to get wrong silently (the pair-timestamped PAFF trap, PCM
+gap-collapse, HDMV LPCM, the mid-GOP pre-roll drop — each named below with
+its measurement). Everything else is the muxer's jurisdiction and the verify
+suite's judgment.
+
 ## Workflow
 
 **Shortcut — the everyday path** (`/remuxing-to-mov:mov FILE`, or "convert FILE to
@@ -44,28 +115,11 @@ the retained `result=`/`rung=`). Exit 0 = verified, 10 = REVIEW, 1 = FAIL; an
 layout guard). Use the manual ladder below when you want control or hit a
 REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
 
--1. **The SOURCE CLINIC** (1.15 — when the deliverable should STAY a `.ts`,
-   or before any remux of a suspect capture): `scripts/clean.sh INPUT
-   [--deep]` runs the integrity battery in the source's own container and
-   routes every finding to a same-container fix — `zero-base.sh` (timeline
-   rebase, Tier 1), `trim-to-idr.sh` (pre-roll, Tier 1), `surgical-cut.sh`
-   (black-lead cut, Tier 2 — refuses without the operator's
-   `--discard-content`), with `verify-source.sh` as the identity prover for
-   every same-container output and `clock.sh` translating "starts at X"
-   player-clock reports into container addresses first. Report-only; doctrine
-   in `references/source-clinic.md`.
-0. **Health-scan a fresh capture** (optional but cheap — two demux-only passes,
-   no decode): `scripts/ts-health.sh INPUT` sweeps the whole file for every
-   hidden-damage class at once — transport loss (continuity/TEI/PES, permanent,
-   counted honestly), missing PTS/DTS, backward/duplicate DTS rot, forward
-   gaps, 33-bit PTS wraparound, mid-GOP capture start (fix implemented:
-   `scripts/trim-to-idr.sh`), single-GOP
-   unseekability, audio duration drift — and names the **lossless** route for
-   each finding (exit 0 CLEAN / 10 FINDINGS / 1 DAMAGED / 2 usage or
-   pre-flight — an input ffprobe cannot read says so and exits 2, never a
-   silent 1: "could not read" is not "proven damaged", WO-1.15.4 C4; `--kv`
-   for machine output).
-1. **Probe** the source first — never guess:
+**The spine — every job, and for a clean file the WHOLE job** (mov.sh/auto.sh
+run all three steps themselves):
+
+1. **Probe** the source first — never guess, and one probe is the fast path's
+   entire pre-flight:
    `scripts/probe.sh INPUT`
    It prints codecs+tags, field structure, Annex-B vs AVCC, color, and
    ffmpeg-version warnings (DV/colr/MP2 behavior differs by version). It also
@@ -74,8 +128,18 @@ REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
    go down the genpts path.
 2. **Pick the lowest rung that produces a clean, verified file** (ladder below).
 3. **Verify** every output before trusting it: `scripts/verify.sh SOURCE OUTPUT`.
-   The default tier is cheap (demux-only packet hash + sampled decode — seconds,
-   not runtime); add `--full` for whole-file decoded-pixel identity only for
+   The default tier is demux-only + a sampled decode. **Honest cost model
+   (1.18.0 — the old "seconds, not runtime" claim was false at size):** the
+   tier is several whole-file demux passes (packet hashes both sides, packet
+   lists), so it runs at disk speed — minutes on multi-GB files, never a
+   decode of the runtime. The (h)/(k) structural parse is CPU-bound
+   (~1 min/GB class; measured ~20 min on a 24 GB artifact) and is budgeted at
+   `RTM_STRUCT_MAX_BYTES` (4 GiB): above it, a copy-class artifact settles by
+   **identity** (payload bit-identical + equal packet counts + equal PTS
+   column vs the source — demux-only, near-free) and passes; only an artifact
+   whose timing was *authored* (the repair rungs, genpts) stays UNPROVEN →
+   REVIEW there, because authored timing owes the absolute proof. Add
+   `--full` for whole-file decoded-pixel identity only for
    archival sign-off, to settle a REVIEW verdict, or once per new
    pipeline/source type. Never default to a full double decode. Add `--signaling`
    (color/HDR tags + captions) or `--audio` (dual-track fidelity) when the source
@@ -99,6 +163,34 @@ REVIEW/FAIL. Run `scripts/doctor.sh` once on a new machine first.
    should have been — advisory, because .mp2 playability is per-OS empirical
    (measured playing here 2026-08-29, silent on the D3 bench 2026-08-15), and
    because the gate passed this configuration while failing ones that work.
+
+**Symptom-gated pre-flights — a FAST-PATH trigger required, never run by
+default:**
+
+- **The SOURCE CLINIC** (1.15). Triggers: the deliverable should STAY a `.ts`;
+  the operator reports a symptom in the source itself; or a probe/ts-health
+  finding names a same-container fix. `scripts/clean.sh INPUT [--deep]` runs
+  the integrity battery in the source's own container and routes every finding
+  to a same-container fix — `zero-base.sh` (timeline rebase, Tier 1),
+  `trim-to-idr.sh` (pre-roll, Tier 1), `surgical-cut.sh` (black-lead cut,
+  Tier 2 — refuses without the operator's `--discard-content`), with
+  `verify-source.sh` as the identity prover for every same-container output
+  and `clock.sh` translating "starts at X" player-clock reports into container
+  addresses first. Report-only; doctrine in `references/source-clinic.md`.
+- **Whole-file health scan** (two demux-only passes, no decode). Triggers: the
+  operator asks "is this capture healthy?"; a symptom or verify verdict points
+  at hidden source damage; or a probe advisory warrants the sweep.
+  `scripts/ts-health.sh INPUT` sweeps for every hidden-damage class at once —
+  transport loss (continuity/TEI/PES, permanent, counted honestly), missing
+  PTS/DTS, backward/duplicate DTS rot, forward gaps, 33-bit PTS wraparound,
+  mid-GOP capture start (fix implemented: `scripts/trim-to-idr.sh`),
+  single-GOP unseekability, audio duration drift — and names the **lossless**
+  route for each finding (exit 0 CLEAN / 10 FINDINGS / 1 DAMAGED / 2 usage or
+  pre-flight — an input ffprobe cannot read says so and exits 2, never a
+  silent 1: "could not read" is not "proven damaged", WO-1.15.4 C4; `--kv`
+  for machine output). Note the drivers already cover the common cases without
+  it: `mov.sh` pre-flights the mid-GOP class itself and the backhaul rot scan
+  runs where measured history warrants it (mpegts/mpeg2video).
 
 ## The escalation ladder — stop at the first rung that works
 
@@ -488,7 +580,7 @@ renamed — Ground Rule 4):
 | `MOV_REFUSED` | shared unroutable pre-flight (`lib-paff.sh`; emitted by `mov.sh`/`auto.sh`/`remux.sh` — WO 5.2, parity closed in the 1.11 fix round) | `profile=unroutable-vcodec vcodec=` / `profile=dolby-e-audio track=a:<N>`. The 1.8.0–1.10.0 backhaul values (`qt-undecodable-*`, rot) are **retired — no longer emitted, reserved, never reused** |
 | `RMX_CENSUS` | every builder, post-mux, pre-bless (`lib-mux.sh`) | `stage=remux\|dual-track\|resync\|rebuild-paff\|pairfill-paff\|derive-dts\|trim-to-idr\|metadata\|rung4\|zero-base\|surgical-cut planned=<N> written=<M> codecs=ok\|mismatch\|na match=ok\|MISMATCH` (D5, 1.13 — the plan-vs-file reconciliation; MISMATCH is exit 1 with the artifact kept as `.part`; the two clinic stage values appended 1.15; `derive-dts` emitted since 1.14, missing from this enum until CHECKUP-2026-08-27 F4) |
 | `RTM_LOCK` | every writer's pre-flight (`rtm_lock`, `lib-mux.sh` — WO-1.15.6 / CHECKUP A2) | `verdict=refused holder=<pid> dir=<lockdir>` — a second concurrent writer on the same OUT refuses pre-flight exit 2, nothing written (one writer per OUT; the measured A2 corruption: the census and the mv are not atomic against another `-y`). A dead same-host holder is stolen with an announced line, never a machine row |
-| `RTM_DISK` | every builder's pre-flight (`rtm_disk_preflight`, `lib-mux.sh` — WO-1.15.6 / CHECKUP F11) | `verdict=refused free=<bytes> need=<bytes> vol=<dir>` — free space below the SOURCE size refuses pre-flight exit 2 before a build can burn an hour to ENOSPC; `RTM_DISK_CHECK=0` (operator knob) skips announced for the genuinely-smaller-output classes |
+| `RTM_DISK` | every builder's pre-flight (`rtm_disk_preflight`, `lib-mux.sh` — WO-1.15.6 / CHECKUP F11; converted 1.17.2) | `verdict=warn\|refused free=<bytes> need=<bytes> vol=<dir>` — free space below the SOURCE size **warns + builds** by default (`verdict=warn`; ENOSPC is loud and the census judges — and macOS/APFS `df` under-reads by excluding purgeable space, so the old refusal was a hard size ceiling at whatever df showed). `RTM_DISK_CHECK=strict` restores the refusal (`verdict=refused`, exit 2, nothing written — unattended batches); `=0` skips announced for the genuinely-smaller-output classes |
 | `PP_CENSUS` | `pairfill-paff.sh` (junction model, 2026-08-18) | `pics= fields= frames= pic_struct_bad= [attested=]` — the whole-file trace_headers census the widened fill requires (tabled here 1.15.5; emitted since 1.15.0-era 2026-08-18, previously documented only in code) |
 | `PP_POC_CAPABILITY` | `pairfill-paff.sh` (junction pre-flight, WO-1.15.3 / 1.15.5) | `ok=yes\|no why=poc_type\|t2_derived\|no_pictures\|no_sps\|- poc_type= maxlsb= lsb_rows= pics=` — the head-probe capability verdict, and it answers what `h264poc.Parser.capability()` would (test 114). `ok=no why=poc_type` is the exit-3 pre-flight refusal, and since 1.16.4 it means `pic_order_cnt_type 1` alone — the one type neither reader can state a display position for. Type 2 reads `ok=yes why=t2_derived` (display order equals decode order by spec) and is built |
 | `PP_POC_LATTICE` | `pairfill-paff.sh` (junction gate) + `poc-gate.sh` (standalone, WO-1.15.3 / 1.15.5) | evaluated: `on_slot= total= off=` (since 2026-08-18); UNPROVEN (appended 1.15.5 — the branch previously printed no machine row): `unproven=1 why=poc_type\|count\|probe_failed rows= packets=` |

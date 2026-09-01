@@ -50,6 +50,20 @@ attempt and never blocks a build.
 
 Answer (d) is the acceptable cost of never being wrong about (a)–(c).
 
+### The rule scopes diagnosis too (1.17.1)
+
+Front-loading a diagnostic battery on a file no measurement has accused is the
+attempt-gating error in a lab coat: it spends the effort Tier 2 owns on a
+prediction Tier 3 forbids. The trigger rule lives in SKILL.md's FAST PATH —
+`clean.sh` / `ts-health.sh` / `diagnose.sh` / `attempt-battery.sh` /
+`verify.sh --full` run only on an operator-reported symptom, a measurement's
+own finding (probe advisory, mux confession, verify verdict, a child's
+refusal), or an explicit request. On a clean probe the attempt IS the
+diagnostic: streamcopy's documented failure mode is loud (ffmpeg.html §3.1),
+the mux-confession stop catches invented timing, and the verify gates judge
+the artifact. Test: `tests/regression.d/119-fast-path-doctrine.sh` pins this
+paragraph and the FAST PATH preamble.
+
 ---
 
 ## Tier 1 — absolute
@@ -141,7 +155,7 @@ These refuse, and are **not** attempt gates. Each carries its `# TIER` comment.
 | `pairfill-paff.sh:119,:161,:168,:200,:201` — not H.264, unusable timebase, no packets, unanchorable first packet | Tier 3, cached deterministic | The tool cannot express the operation at all; attempting reproduces the same refusal with a worse message. |
 | `playable-check.sh:234–239,:362` — no `avconvert`/`ffmpeg`/`ffprobe`, unreadable geometry | Tier 2 (UNPROVEN) | Reports REVIEW/SKIP, never damage. Constitution II.1. |
 | `rung4.sh:58` — no valid attestation | Tier 1 | The re-encode consent gate. |
-| `lib-mux.sh:165` — disk pre-flight | Tier 1 | A resource check, not a content prediction. |
+| `lib-mux.sh` — disk pre-flight | Tier 3 — **CONVERTED (1.17.2)** | Run the classification test honestly and the damage-if-deleted is row (d): ENOSPC is loud, the `.part` is kept, the census FAILs, the source is untouched. The old Tier-1 filing ("a resource check") let a refusal ride on a meter that under-reads — macOS/APFS `df` excludes purgeable space, so the gate became a hard size ceiling at whatever df happened to show (field report 2026-08-31). Default now WARNS + builds (`RTM_DISK verdict=warn`, meter caveat named); `RTM_DISK_CHECK=strict` restores the refusal for unattended batches; `=0` skips announced. Test 87. |
 | `zero-base.sh` source-rot refusals (scrambled; backward/duplicate DTS) | Tier 3, routing | Zero-base is not a timeline repair; the named routes are the repair. Not a quality prediction about zero-base's own output. |
 
 ---

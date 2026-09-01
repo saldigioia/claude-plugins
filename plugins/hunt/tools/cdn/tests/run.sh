@@ -228,6 +228,39 @@ check "hdnux non-photos path skipped" "" \
 check "hdnux non-hdnux host skipped" "" \
   "$(cdn_resolve_hdnux 'https://example.com/photos/01/66/60/54/31132466/5/ratio3x4_960.webp' 2>/dev/null || true)"
 
+# ── TNCMS / TownNews BLOX (pure helpers; the hi_res lookup itself is network-bound
+#    — it needs the site's BLOX search API — and is verified e2e)
+check "tncms uuid from publication-host asset URL" \
+  "9771396b-b943-56b3-baf7-1880e9377ccc" \
+  "$(tncms_asset_uuid 'https://www.nola.com/content/tncms/assets/v3/editorial/9/77/9771396b-b943-56b3-baf7-1880e9377ccc/6a93209591e06.image.jpg')"
+check "tncms uuid from bloximages URL with params" \
+  "9771396b-b943-56b3-baf7-1880e9377ccc" \
+  "$(tncms_asset_uuid 'https://bloximages.newyork1.vip.townnews.com/nola.com/content/tncms/assets/v3/editorial/9/77/9771396b-b943-56b3-baf7-1880e9377ccc/6a93209591e06.image.jpg?resize=1200%2C685')"
+check "tncms uuid rejects non-tncms URL" \
+  "" \
+  "$(tncms_asset_uuid 'https://example.com/img/photo.jpg' 2>/dev/null)"
+check "tncms site host — bloximages fronts the publication" \
+  "nola.com" \
+  "$(tncms_site_host 'https://bloximages.newyork1.vip.townnews.com/nola.com/content/tncms/assets/v3/editorial/9/77/9771396b-b943-56b3-baf7-1880e9377ccc/6a93209591e06.image.jpg?resize=800%2C500')"
+check "tncms site host — direct publication URL" \
+  "www.nola.com" \
+  "$(tncms_site_host 'https://www.nola.com/content/tncms/assets/v3/editorial/9/77/9771396b-b943-56b3-baf7-1880e9377ccc/6a93209591e06.image.jpg')"
+check "tncms site host — other BLOX tenant behind the same CDN" \
+  "stltoday.com" \
+  "$(tncms_site_host 'https://bloximages.chicago2.vip.townnews.com/stltoday.com/content/tncms/assets/v3/editorial/1/2a/12ab34cd-5678-59ef-a012-3456789abcde/6a1234567890a.image.jpg')"
+check "tncms predicate matches asset path" \
+  "yes" \
+  "$(is_tncms_image_url 'https://www.nola.com/content/tncms/assets/v3/editorial/9/77/9771396b-b943-56b3-baf7-1880e9377ccc/6a93209591e06.image.jpg' && echo yes || echo no)"
+check "tncms predicate rejects non-asset townnews URL" \
+  "no" \
+  "$(is_tncms_image_url 'https://www.nola.com/shared-content/art/tncms/api/csrf.js' && echo yes || echo no)"
+check "tncms hires master declines an already-hires URL (no network)" \
+  "" \
+  "$(tncms_hires_master 'https://bloximages.newyork1.vip.townnews.com/nola.com/content/tncms/assets/v3/editorial/9/77/9771396b-b943-56b3-baf7-1880e9377ccc/6a9320959330b.hires.jpg' 2>/dev/null)"
+check "tncms hires master declines a non-tncms URL (no network)" \
+  "" \
+  "$(tncms_hires_master 'https://example.com/img/photo.jpg' 2>/dev/null)"
+
 # ── futurecdn (Future PLC "kodiak" rendition/crop grammars → bare stored master)
 check "futurecdn -W-Q.png.webp → bare master" \
   "https://cdn.mos.cms.futurecdn.net/gWvRYCQwqDrbLJmL6kLwRc.png" \

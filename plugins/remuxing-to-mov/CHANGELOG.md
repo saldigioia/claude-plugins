@@ -4,6 +4,103 @@ History moved here from the `plugin.json` description in 1.15.0 (the orphaned
 1.14 Phase-6 packaging item). Detailed doctrine lives in `skills/remuxing-to-mov/
 SKILL.md` and `references/`; every empirical claim below is dated in the docs.
 
+## 1.18.0 — the copy-identity settle: a budget decline stops indicting clean copies (2026-08-31)
+
+The 25-minute clean remux (RESEARCH-EVERYDAY-COST-1.17.md): a 5.15 GB Rung-0
+copy — probe clean, mux clean, bit-identity proven — exited 10 because gates
+(h)/(k) decline their whole-file `trace_headers` parse above the 4 GiB
+`RTM_STRUCT_MAX_BYTES` budget, a decline forces REVIEW, and the decline text
+named `--full` as the remedy. The session obeyed: whole-file parse + whole-file
+double decode on a file with zero findings. Every clean H.264 `.mov` over
+4 GiB drew that verdict; bigger file ⇒ more suspicion ⇒ more work.
+
+**The settle (verify.sh).** Over budget, verify now first attempts the proof
+that is *sufficient for a copy*: payload bit-identical (gates (a)/(b)) +
+equal video packet counts + PTS column equal to the source's (anchor-aligned,
+2 ms tolerance — an order of magnitude under one field duration). All three
+hold ⇒ (h)/(k) PASS as **identity-proven** (demux-only, no parse, no decode):
+the output declares what the source declared, so any structural defect is
+inherited — diagnosis territory (`diagnose.sh` on the SOURCE), not remux
+verification. The settle is a measurement, not a caller claim (no
+rung-class env var — never trust a claim you can measure): artifacts whose
+timing was *authored* (pairfill/rebuild/poc/derive, genpts, PTS=DTS flattens)
+fail the column compare by construction and stay UNPROVEN → REVIEW, because
+authored timing owes the absolute proof — which their own gates already run.
+
+**Verdict + remedy semantics.** When the settle does not apply, the remedies
+are named cheapest-first (`poc-gate.sh` for (k) alone; `--full` last, as the
+sign-off tier) and the decline states: a REVIEW whose only cause is this
+budget is **reportable as done** — settle on the operator's ask, never by
+default. FAST PATH gained the general rule ("a REVIEW is a trigger only for
+the finding it names"); /mov's report-back section now says a budget-only
+REVIEW is done-not-a-to-do and forbids auto-running the settle or
+sleep-polling the driver. SKILL.md's "seconds, not runtime" claim about the
+default tier — false at size — replaced with the honest cost model (demux
+passes at disk speed; the structural parse ~1 min/GB CPU-bound, measured
+~20 min/24 GB).
+
+Options considered and not taken are recorded in
+RESEARCH-EVERYDAY-COST-1.17.md §3 (sampled windows, budget scaling, deferred
+deep tier, a `--settle` ledger-resume flag — the last descoped because the
+verify monolith makes partial re-runs risky; `poc-gate.sh` already settles
+(k) standalone, and with this settle the budget-REVIEW mostly disappears).
+Test: `tests/regression.d/120-struct-budget-identity.sh` — forced-tiny
+budget ⇒ identity settle OK on a clean copy; the PTS=DTS flatten (the (k)
+defect class itself) ⇒ REVIEW with the measured divergence named; under
+budget and under `--full` the real gates run unchanged.
+
+## 1.17.2 — the disk gate was a size ceiling wearing a resource costume (2026-08-31)
+
+Field report: "the gate does not allow any video over 5 or so GB to pass."
+There is no size cap anywhere in the tree — the culprit is the F11 disk
+pre-flight (`RTM_DISK`), which REFUSED any build whose source exceeded the
+free bytes `df` reports on the output volume. Two things were wrong at once.
+The meter: on macOS/APFS, `df`'s Avail excludes purgeable space (local
+snapshots, caches) that the OS reclaims on demand when a real write needs it,
+so a volume Finder shows as hundreds-of-GB free can read ~5 GB to df — and
+every source larger than that reading refused, presenting exactly as a size
+ceiling. The classification: TIERS.md filed the refusal as Tier 1 ("a
+resource check"), but its own classification test answers row (d) — delete
+the gate: an ENOSPC is loud, the `.part` is kept, `RMX_CENSUS` FAILs
+honestly, the source is untouched; nothing is irreversible.
+
+Converted (`rtm_disk_preflight`, `lib-mux.sh`): low free space now **warns +
+builds** by default — the warning states the arithmetic, the ENOSPC cost, the
+`.part` recovery step, and the APFS purgeable-space meter caveat, and emits
+`RTM_DISK verdict=warn` (additive enum value; fields unchanged).
+`RTM_DISK_CHECK=strict` restores the old refusal for unattended batches where
+filling the volume is worse than skipping the file; `=0` still skips
+announced. TIERS.md row rewritten, knobs.md and the SKILL.md machine-line
+table updated, test 87 rewritten to pin warn-default/strict-refusal/skip and
+that a broken meter neither refuses nor warns.
+
+## 1.17.1 — the fast path stated, and diagnosis gated like a refusal (2026-08-31)
+
+Doctrine/docs only; no script behavior changed. The operator observed sessions
+running deep analysis on files a bare `-c copy` handles. Root causes, found in
+the teaching docs, not the scripts (`mov.sh` on a clean file was already one
+probe → build → cheap verify): SKILL.md's mass is ~95% pathology with no
+base-rate statement; the workflow led with the source clinic (step -1) and
+ts-health (step 0) before probe (step 1), with triggers vague enough to match
+every input; three unbounded imperatives ("probe first — never guess", the
+diagnostic obligation, "never predict — run the battery") had no counterweight
+saying when analysis must NOT run; and nothing recorded what ffmpeg is
+*documented* to handle by itself on `-c copy`, so sessions re-derived muxer
+behavior per file. TIERS.md's own 1.16.0 rule — gate the assertion, not the
+attempt — was applied to refusals only.
+
+Changes: (1) SKILL.md **FAST PATH** preamble — base rate + the trigger rule
+(clean.sh/ts-health.sh/diagnose.sh/attempt-battery.sh/--full run only on an
+operator symptom, a measurement's finding, or an explicit ask; no trigger →
+no battery); (2) SKILL.md **trusted-baseline** section citing ffmpeg.html §3.1
+(streamcopy's failure mode is loud) and the mov muxer docs (`use_editlist`
+auto, `video_track_timescale` auto, `-avoid_negative_ts` auto, automatic
+ADTS→ASC, muxer-side Annex-B→AVCC — probe's Annex-B line marked informational
+for a plain remux); (3) the workflow renumbered to a probe→build→verify spine
+with the clinic and health scan moved behind an explicit symptom gate;
+(4) TIERS.md "The rule scopes diagnosis too". Pinned by
+`tests/regression.d/119-fast-path-doctrine.sh`.
+
 ## 1.17.0 — the rung could not read the containers it was pointed at (2026-08-31)
 
 A field job (`Reading Festival/2026-08-28 Geese/video.mkv`, 3.15 GB, H.264

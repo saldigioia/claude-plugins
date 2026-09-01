@@ -136,20 +136,37 @@ rtm_free_bytes () {
   printf '%s' $((kb * 1024))
 }
 
-# rtm_disk_preflight OUT SRC [STAGE_DIR] — F11: free bytes on OUT's volume
-# (and the staging volume, when the builder has one — rebuild-paff's WORK)
-# must be >= the source's size, else refuse (return 1; callers exit 2,
-# nothing written). Deliberately ONE rule (the TSH_LOSS_FAIL precedent):
-# a lossless remux writes roughly the source's size. The genuinely-smaller
-# classes (cuts/trims) skip with RTM_DISK_CHECK=0 — an OPERATOR knob, which
-# is legitimate here where 1.15.2 Defect-B forbade one: this is a resource
-# heuristic, not an evidence gate, and every output gate still judges the
-# build. A failed df announces "could not measure" and NEVER refuses —
+# rtm_disk_preflight OUT SRC [STAGE_DIR] — F11, CONVERTED 1.17.2: free bytes
+# on OUT's volume (and the staging volume, when the builder has one —
+# rebuild-paff's WORK) are compared against the source's size. Deliberately
+# ONE rule (the TSH_LOSS_FAIL precedent): a lossless remux writes roughly the
+# source's size.
+#
+# DEFAULT IS WARN + PROCEED, not a refusal (TIERS.md classification test,
+# row (d): delete the gate — an ENOSPC is loud, the .part is kept, the census
+# FAILs honestly, the source is untouched; nothing here is irreversible).
+# The refusal was also being fed by a CONSERVATIVE METER: on macOS/APFS,
+# `df`'s Avail EXCLUDES purgeable space (local snapshots, caches) that the
+# system reclaims on demand when a real write needs it — Finder can show
+# hundreds of GB "available" while df reads a few, and the old refusal turned
+# that meter artifact into a hard size ceiling on legitimate builds (field
+# report 2026-08-31: "nothing over ~5 GB passes"). A prediction from a meter
+# known to under-read is not a measurement of a full disk.
+#
+# RTM_DISK_CHECK values (operator knob; references/knobs.md):
+#   1 (default)  low space → loud warning + `RTM_DISK verdict=warn`, build
+#                proceeds, the mux/census/verify gates judge the artifact
+#   strict       the pre-1.17.2 behavior: low space → refuse (return 1;
+#                callers exit 2, nothing written). For unattended batches
+#                where filling the volume is worse than skipping the file.
+#   0            skip the check entirely, announced (the genuinely-smaller
+#                output classes — cuts/trims — on a nearly-full disk).
+# A failed df announces "could not measure" and NEVER refuses or warns —
 # EMPTY != ABSENT applies to refusals too: a broken meter is not a full disk.
 rtm_disk_preflight () {
   local out="${1:?rtm_disk_preflight needs OUT}" src="${2:?rtm_disk_preflight needs SRC}" stage="${3:-}"
-  local need free d
-  if [ "${RTM_DISK_CHECK:-1}" != 1 ]; then
+  local need free d mode="${RTM_DISK_CHECK:-1}"
+  if [ "$mode" != 1 ] && [ "$mode" != strict ]; then
     echo "   (disk pre-flight skipped: RTM_DISK_CHECK=0 — the build's own gates still judge)"
     return 0
   fi
@@ -162,14 +179,24 @@ rtm_disk_preflight () {
       continue
     fi
     if [ "$free" -lt "$need" ]; then
-      echo ">> REFUSED (pre-flight): not enough free space on $d — free $free bytes <" >&2
-      echo "   source $need bytes. A lossless remux writes roughly the source's size, and" >&2
-      echo "   an ENOSPC an hour in leaves a truncated .part whose short size reads like a" >&2
-      echo "   different defect (CHECKUP-2026-08-27 F11). Nothing was written. Free space" >&2
-      echo "   and retry — or, when the intended output is genuinely smaller (a cut/trim)," >&2
-      echo "   skip this check with RTM_DISK_CHECK=0 (operator knob; references/knobs.md)." >&2
-      echo "RTM_DISK verdict=refused free=$free need=$need vol=$d"
-      return 1
+      if [ "$mode" = strict ]; then
+        echo ">> REFUSED (pre-flight): not enough free space on $d — free $free bytes <" >&2
+        echo "   source $need bytes (RTM_DISK_CHECK=strict). A lossless remux writes roughly" >&2
+        echo "   the source's size, and an ENOSPC an hour in leaves a truncated .part whose" >&2
+        echo "   short size reads like a different defect (CHECKUP-2026-08-27 F11). Nothing" >&2
+        echo "   was written. Free space and retry — or drop strict mode to warn+build." >&2
+        echo "RTM_DISK verdict=refused free=$free need=$need vol=$d"
+        return 1
+      fi
+      echo "** WARNING: free space on $d reads LOW — $free bytes free vs the source's" >&2
+      echo "   $need bytes, and a lossless remux writes roughly the source's size. If the" >&2
+      echo "   reading is real, this build will die at ENOSPC (loud: FAIL, .part kept," >&2
+      echo "   source untouched — delete the .part to recover the space). NOTE the meter" >&2
+      echo "   is conservative on macOS/APFS: df's Avail excludes purgeable space the OS" >&2
+      echo "   reclaims on demand, so Finder's 'available' is the truer ceiling. Refuse" >&2
+      echo "   instead with RTM_DISK_CHECK=strict (unattended batches); skip the check" >&2
+      echo "   with RTM_DISK_CHECK=0 (references/knobs.md). Proceeding." >&2
+      echo "RTM_DISK verdict=warn free=$free need=$need vol=$d"
     fi
   done
   return 0

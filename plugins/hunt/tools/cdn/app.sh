@@ -2112,6 +2112,93 @@ cdn_resolve_hdnux() {
 # whole Accept/param/path ladder is therefore suppressed via
 # is_futurecdn_image_url in stage_probe_formats: it could only ever yield dead
 # or duplicate candidates.
+# ── TownNews / BLOX Digital (TNCMS) ──────────────────────────────────────────
+# The CMS behind ~2000 US local-news sites (nola.com, theadvocate.com,
+# stltoday.com, tucson.com, richmond.com, tulsaworld.com, omaha.com, …), served
+# via bloximages.<region>.vip.townnews.com in front of <publication>/content/tncms/.
+#
+# BLOX downscales EVERY editorial upload to a fixed AREA of 2,073,600 px
+# (= 1920x1080) preserving aspect ratio — verified across a 16-photo gallery
+# whose landscape (1915x1082) and portrait (1246x1664) frames all land on the
+# same 2.07 MP area, spread 0.15%. That capped `.image.jpg` is the ONLY
+# rendition the page, the srcset, the JSON-LD and the og:image ever reference.
+#
+# But the CMS also stores the photographer's full-resolution delivery as a
+# SECOND resource, `<hash>.hires.jpg` — up to 20.6x the pixels (7994x5332 off a
+# Canon R5 II), Q91 vs Q80, with EXIF/IPTC intact. The string "hires" appears
+# nowhere in the article HTML or the image permalink page, and its resource
+# hash is NOT derivable from the .image.jpg hash (…91e06 → …9330b share only
+# the leading timestamp), so no pure string rewrite can reach it. It is only
+# discoverable through the site's public, auth-free BLOX search API:
+#   https://<publication>/search/?f=json&t=image&l=1&q=uuid:<asset-uuid>
+# whose row carries hi_res.{resource_url,width,height,file_size}.
+#
+# TRAPS this replaces: the bloximages resizer UPSCALES without clamping
+# (?resize=4000 on an 1905px source returns real 4000x2282 interpolated pixels,
+# 1.8x the bytes — PSNR 33.2 dB vs true 4000px detail), and ?quality=100 is
+# silently ignored (md5-identical to bare). Bare on bloximages is itself a Q63
+# EXIF-stripped re-encode; the publication host serves Q80 with EXIF.
+is_tncms_image_url() {
+  [[ "$1" == *"/content/tncms/assets/"* ]]
+}
+
+# Pure: asset uuid out of a TNCMS asset path.
+tncms_asset_uuid() {
+  local url="${1%%\?*}"
+  [[ "$url" =~ /content/tncms/assets/v3/[^/]+/[^/]+/[^/]+/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/ ]] || return 1
+  printf '%s\n' "${BASH_REMATCH[1]}"
+}
+
+# Pure: the publication host that owns the asset. bloximages fronts the real
+# site as the FIRST path segment (bloximages.newyork1.vip.townnews.com/nola.com/
+# content/tncms/…), so the CDN host is never the API host.
+tncms_site_host() {
+  local rest="${1#*://}"; rest="${rest%%\?*}"
+  local host="${rest%%/*}"
+  if [[ "$host" == bloximages.*.vip.townnews.com ]]; then
+    local tail="${rest#*/}"
+    host="${tail%%/content/tncms/*}"
+  fi
+  [[ "$host" == *.* && "$host" != */* ]] || return 1
+  printf '%s\n' "$host"
+}
+
+# Runtime helper (network): .image.jpg → the hi_res master via the BLOX search
+# API. Echoes the master URL; sets TNCMS_ASSET_TITLE to the CMS's own filename
+# so the download keeps the photo-desk name rather than an opaque hash stem.
+tncms_hires_master() {
+  local url="$1" uuid host json hires title
+  is_tncms_image_url "$url" || return 1
+  [[ "$url" == *".hires."* ]] && return 1   # already the master
+  uuid="$(tncms_asset_uuid "$url")" || return 1
+  host="$(tncms_site_host "$url")" || return 1
+
+  # -L is required: several BLOX sites 301 the bare host to www.
+  json="$(curl -s "${CURL_TIMEOUT_OPTS[@]}" -L -A "$UA" \
+    "https://${host}/search/?f=json&t=image&l=1&q=uuid:${uuid}" 2>/dev/null)" || return 1
+  [[ -n "$json" ]] || return 1
+
+  # Isolate the hi_res object (flat — no nested braces) and read its resource_url.
+  hires="$(printf '%s' "$json" \
+    | sed -n 's/.*"hi_res"[[:space:]]*:[[:space:]]*{\([^}]*\)}.*/\1/p' \
+    | grep -oE '"resource_url"[[:space:]]*:[[:space:]]*"[^"]+"' \
+    | sed -E 's/.*"([^"]*)"[[:space:]]*$/\1/' | head -1)"
+  # The BLOX API escapes every forward slash (https:\/\/…); unescape via sed —
+  # a ${//} substitution can't express the pattern without the `/` delimiter
+  # swallowing the escape.
+  hires="$(printf '%s' "$hires" | sed 's#\\/#/#g')"
+  [[ "$hires" == http*://*"/content/tncms/assets/"*".hires."* ]] || return 1
+
+  title="$(printf '%s' "$json" \
+    | grep -oE '"title"[[:space:]]*:[[:space:]]*"[^"]+"' \
+    | sed -E 's/.*"([^"]*)"[[:space:]]*$/\1/' | head -1)"
+
+  # Two lines — line 1 the master URL, line 2 the CMS filename. A global can't be
+  # used: the caller invokes this inside $(…), so any assignment dies with the
+  # subshell (same reason head_info returns its fields as lines).
+  printf '%s\n%s\n' "$hires" "${title:-}"
+}
+
 is_futurecdn_image_url() {
   [[ "$1" == *"//cdn.mos.cms.futurecdn.net/"* ]]
 }
@@ -4592,13 +4679,37 @@ stage_cdn_resolve_baseline() {
     fi
   fi
 
+  # TownNews/BLOX (TNCMS): the page-referenced `.image.jpg` is capped at a fixed
+  # 2,073,600 px area on ingest. The photographer's full-res delivery is stored
+  # as a separate `.hires.jpg` resource that appears nowhere in the markup and
+  # whose hash isn't derivable — only the site's public BLOX search API names it.
+  TNCMS_HIRES=false
+  if is_tncms_image_url "$resolved_url"; then
+    tnh_out="$(tncms_hires_master "$resolved_url" 2>/dev/null || true)"
+    tnh_url="$(sed -n '1p' <<< "$tnh_out")"
+    TNCMS_ASSET_TITLE="$(sed -n '2p' <<< "$tnh_out")"
+    if [[ -n "$tnh_url" ]]; then
+      echo "   TNCMS hi_res master found via BLOX search API (page rendition is capped at 2.07 MP)"
+      resolved_url="$tnh_url"
+      TNCMS_HIRES=true
+      # Keep the CMS's own photo-desk filename instead of the opaque hash stem.
+      if [[ -z "$CUSTOM_FILENAME" && -n "${TNCMS_ASSET_TITLE:-}" ]]; then
+        stem="${TNCMS_ASSET_TITLE%.*}"
+        stem="${stem//\//_}"
+      fi
+    fi
+  fi
+
   if [[ "$resolved_url" != "$url" ]]; then
     echo "   CDN resolved → $resolved_url"
     # The original URL's basename is often a transform-proxy artefact
     # (e.g. URL-encoded origin path on image-cdn.hypb.st). Re-derive the
     # stem from the resolved URL so the on-disk filename reflects the
     # actual asset. --filename always wins.
-    if [[ -z "$CUSTOM_FILENAME" ]]; then
+    # TNCMS already set the stem from the CMS's own photo-desk filename, which
+    # beats the opaque `<hash>.hires` basename (and every hires file in a gallery
+    # would otherwise differ only by hash).
+    if [[ -z "$CUSTOM_FILENAME" ]] && ! ${TNCMS_HIRES:-false}; then
       resolved_stem="$(basename_from_url "$resolved_url")"
       [[ -n "$resolved_stem" && "$resolved_stem" != "$stem" ]] && stem="$resolved_stem"
     fi
@@ -4672,6 +4783,11 @@ stage_probe_formats() {
     # a pixel-identical lossless wrapper that only bloats bytes and wrongly wins the
     # format ladder — the exact trap this fix removes. Skip the ladder entirely.
     ${CLOUDINARY_BARE_ORIGIN:-false} && skip_probes=true
+    # TNCMS hi_res: the bloximages resizer UPSCALES without clamping (?resize=N
+    # above source returns interpolated pixels that win on size), ?quality= is
+    # silently ignored, and .tif/.png/.original siblings all 404. Every rung of
+    # the ladder is therefore dead or a fake-pixel trap.
+    ${TNCMS_HIRES:-false} && skip_probes=true
     # Discogs (i.discogs.com): signed imgproxy — the signature covers the whole
     # path, so every extension swap 403s and query params are silently ignored
     # (byte-identical response → the ladder can only produce dead or duplicate

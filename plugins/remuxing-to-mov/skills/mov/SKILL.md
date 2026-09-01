@@ -156,7 +156,14 @@ child's own refusal, e.g. `resync.sh`'s mid-stream
 layout guard). On REVIEW/FAIL, relay the
 script's stated reason (for a playability-check REVIEW, relay the
 `MOV_PLAYABILITY` verdict and that the file is still a verified lossless
-master). When the timeline-rot warning fired (`MOV_ROT_WARN`), relay the
+master). **A budget-only REVIEW is done, not a to-do** (1.18.0): when the
+verify note says gates (h)/(k) declined on `RTM_STRUCT_MAX_BYTES` and every
+substantive gate passed, report the file as delivered, state which gates
+were declined and the settle command with its approximate cost, and STOP —
+run the settle only if the operator asks. Do not run `--full`,
+`poc-gate.sh`, or `RTM_STRUCT_MAX_BYTES=0` on your own to "clean up" the
+exit code; foreground the driver and wait on it rather than sleep-polling
+its output file. When the timeline-rot warning fired (`MOV_ROT_WARN`), relay the
 warning **and its three routes verbatim** alongside the build's verdict; on
 any `11`, relay the child's refusal reason verbatim. Never ship past a FAIL,
 never hand-roll an ffmpeg workaround, and never

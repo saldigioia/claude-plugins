@@ -1356,16 +1356,82 @@ elif [ "${TL_N:-0}" -eq 0 ]; then
   led h unproven "the output's packet list could not be read, so there is no declared sample count to compare"
   led k unproven "the output's packet list could not be read"
 elif [ "$FULL" -ne 1 ] && [ "$H_MAXB" -gt 0 ] && [ "$o_bytes" -gt "$H_MAXB" ]; then
-  echo "-- (h)/(k) structure + presentation order: DECLINED ON BUDGET --"
-  echo "   the output is $o_bytes bytes, above RTM_STRUCT_MAX_BYTES=$H_MAXB. These two"
-  echo "   gates cost one whole-file header parse. They were NOT run, so nothing below"
-  echo "   claims the sample structure or the display order is correct."
-  echo "   Settle either one: scripts/verify.sh SRC OUT --full   (or RTM_STRUCT_MAX_BYTES=0)"
-  echo "   Presentation order alone: scripts/poc-gate.sh \"$OUT\""
-  [ "$verdict" = FAIL ] || verdict=REVIEW
-  note="${note:+$note }Gates (h)/(k) declined on budget (output $o_bytes bytes > RTM_STRUCT_MAX_BYTES=$H_MAXB) — the declared sample structure and the presentation order are UNPROVEN; re-run with --full."
-  led h unproven "declined on budget: output $o_bytes bytes > RTM_STRUCT_MAX_BYTES=$H_MAXB"
-  led k unproven "declined on budget: output $o_bytes bytes > RTM_STRUCT_MAX_BYTES=$H_MAXB"
+  # --- THE COPY-IDENTITY SETTLE (1.18.0) ------------------------------------
+  # The whole-file trace_headers parse is over budget. Before declaring these
+  # gates unproven, try the cheap proof that is SUFFICIENT for a copy-class
+  # artifact: the remux's whole obligation there is FAITHFULNESS, so if
+  #   (1) the payload is bit-identical      (gate (a)/(b): bitproven=1),
+  #   (2) the video packet counts are equal (one sample per source packet),
+  #   (3) the PTS column equals the source's (anchor-aligned, <=2 ms tolerance
+  #       for timebase-conversion rounding),
+  # then the output DECLARES what the source declared: any (h)/(k)-class
+  # defect is inherited from the source — diagnosis territory, never remux
+  # verification. That is a measurement, not a waiver (II.1): both rows state
+  # exactly what was proven and that the parse was not run. Artifacts that
+  # AUTHOR timing (pairfill/rebuild/poc/derive, genpts) fail check (3) by
+  # construction and land in the UNPROVEN arm below unchanged — those writers
+  # owe the absolute proof, and their own gates run it.
+  # Cost: two demux-only PTS dumps (disk speed), no bitstream parse, no decode.
+  # Why not trust a caller-declared rung class instead: never trust a claim
+  # you can measure (the 2026-08-30 field lesson, inverted).
+  echo "-- (h)/(k) structure + presentation order: whole-file parse over budget --"
+  echo "   output is $o_bytes bytes > RTM_STRUCT_MAX_BYTES=$H_MAXB; attempting the"
+  echo "   copy-identity settle: payload identity + packet count + PTS-column"
+  echo "   equality vs the source (demux-only, no header parse, no decode)."
+  id_ok=0; id_why=""; id_sn=0; id_on=0; id_max=""
+  if [ "${bitproven:-0}" -ne 1 ]; then
+    id_why="payload identity not proven by (a)/(b) on this artifact"
+  else
+    id_sd="$(mktemp)"; id_od="$(mktemp)"
+    set +e
+    ffp -v error -select_streams v:0 -show_entries packet=pts_time -of csv=p=0 "$SRC" 2>/dev/null > "$id_sd"; id_src_rc=$?
+    ffp -v error -select_streams v:0 -show_entries packet=pts_time -of csv=p=0 "$OUT" 2>/dev/null > "$id_od"; id_out_rc=$?
+    set -e
+    id_sn=$(grep -c . "$id_sd" || true); id_on=$(grep -c . "$id_od" || true)
+    if [ "$id_src_rc" -ne 0 ] || [ "$id_out_rc" -ne 0 ] || [ "${id_sn:-0}" -eq 0 ] || [ "${id_on:-0}" -eq 0 ]; then
+      id_why="could not read a packet PTS column (src rc=$id_src_rc n=$id_sn, out rc=$id_out_rc n=$id_on)"
+    elif [ "$id_sn" -ne "$id_on" ]; then
+      id_why="video packet counts differ: src=$id_sn out=$id_on — not a 1:1 copy of the sample structure"
+    elif grep -q "N/A" "$id_sd" "$id_od" 2>/dev/null; then
+      id_why="a side carries N/A PTS — the column cannot anchor"
+    else
+      # max |(out - out_first) - (src - src_first)| over the paired columns.
+      # Anchor subtraction tolerates a uniform muxer shift (-avoid_negative_ts);
+      # 2 ms tolerance covers timebase-conversion rounding and sits an order of
+      # magnitude below one field duration at 60 fields/s (~16.7 ms) — the
+      # smallest displacement the (k) defect class produces.
+      id_max=$(paste "$id_sd" "$id_od" | awk '
+        NR==1 { s0=$1; o0=$2 }
+        { d=($2-o0)-($1-s0); if (d<0) d=-d; if (d>m) m=d }
+        END { printf "%.6f", m+0 }')
+      if awk -v m="$id_max" 'BEGIN{ exit !((m+0) <= 0.002) }'; then id_ok=1
+      else id_why="PTS columns diverge: max |delta| ${id_max}s > 0.002s after anchor alignment — this artifact's timing was authored, not copied; the authored classes owe the whole-file proof"
+      fi
+    fi
+    rm -f "$id_sd" "$id_od"
+  fi
+  if [ "$id_ok" -eq 1 ]; then
+    echo "   PASS (identity-proven): $id_on samples == $id_sn source packets, payload"
+    echo "   bit-identical, PTS column equal (max |delta| ${id_max}s over $id_on packets)."
+    echo "   The output declares what the source declared; the whole-file parse was NOT"
+    echo "   run — an inherited source-side defect would be inherited faithfully, which"
+    echo "   is diagnosis territory (diagnose.sh on the SOURCE), not remux verification."
+    led h pass "identity-proven under budget: $id_on samples == $id_sn source packets, payload bit-identical (whole-file parse not run)"
+    led k pass "identity-proven under budget: PTS column equals the source's (max |delta| ${id_max}s over $id_on packets; whole-file parse not run)"
+  else
+    echo "   the identity settle did not apply: $id_why"
+    echo "   These two gates cost one whole-file header parse. They were NOT run, so"
+    echo "   nothing below claims the sample structure or the display order is correct."
+    echo "   Settle (k) alone:  scripts/poc-gate.sh \"$OUT\"        (header parse only)"
+    echo "   Settle both:       scripts/verify.sh SRC OUT --full    (parse + whole-file"
+    echo "                      decode — the sign-off tier; or RTM_STRUCT_MAX_BYTES=0)"
+    echo "   A REVIEW whose ONLY cause is this budget decline is reportable as done —"
+    echo "   settle it on the operator's ask, not by default (FAST PATH, SKILL.md)."
+    [ "$verdict" = FAIL ] || verdict=REVIEW
+    note="${note:+$note }Gates (h)/(k) declined on budget (output $o_bytes bytes > RTM_STRUCT_MAX_BYTES=$H_MAXB) and the copy-identity settle did not apply ($id_why) — the declared sample structure and the presentation order are UNPROVEN. Settle on the operator's ask: poc-gate.sh for (k) alone, or --full."
+    led h unproven "declined on budget ($o_bytes > $H_MAXB bytes) and identity settle inapplicable: $id_why"
+    led k unproven "declined on budget ($o_bytes > $H_MAXB bytes) and identity settle inapplicable: $id_why"
+  fi
 else
   H_RUN=1
 fi
